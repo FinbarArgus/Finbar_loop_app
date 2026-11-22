@@ -282,9 +282,28 @@ def run(loop_bin, graph, shots):
                     page.wait_for_selector('.question .qtitle')
                     page.screenshot(path=f'{shots}/{label}-batch.png', full_page=True)
 
-                page.goto(base + '#/list/answered')
-                page.wait_for_selector('.card')
-                check(page, page.locator('.card').count() == 3, 'answered items move to Answered', failures)
+                # LOOP takes the answers: fully answered items move to History; it opens on demand and
+                # sends a revisit request about one item.
+                loop(loop_bin, repo, 'pull')
+                page.goto(base + '#/list')
+                page.wait_for_selector('details.history')
+                check(page, 'History (3)' in page.locator('details.history > summary').inner_text(),
+                      'answered items move to History', failures)
+                check(page, page.locator('.tabs a').count() == 3, 'three tabs, history below', failures)
+                page.locator('details.history > summary').click()
+                page.locator('details.hentry', has_text='Q-003').locator('summary').click()
+                page.wait_for_selector('details.hentry[open] .hq')
+                h = page.locator('details.hentry[open]').inner_text()
+                check(page, 'Which solver?' in h and 'explicit' in h and 'coarse is fine' in h,
+                      'history entry shows each question and its answer', failures)
+                rv = page.locator('details.hentry[open] details.revisit')
+                rv.locator('summary').click()
+                rv.locator('textarea').fill('Was explicit right after all?')
+                rv.locator('textarea').press('Enter')
+                page.wait_for_selector('details.hentry[open] details.revisit .status >> text=Sent')
+                rq = [json.loads(f.read_text()) for f in (repo / 'requests/Q-003').glob('*.json')]
+                check(page, any(r.get('kind') == 'revisit' and r['text'] == 'Was explicit right after all?' for r in rq),
+                      'revisit request written for that item', failures)
                 check(page, not errors, f'no console errors {errors}', failures)
                 ctx.close()
 

@@ -180,3 +180,19 @@ a.next { text-decoration: none; font-weight: 600; padding: 6px 12px; border-radi
 .qthread:empty { display: none; }
 .after { margin-top: 8px; }
 .after a { font-weight: 600; }
+
+/* history */
+details.history { margin: 18px 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+details.history > summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+.hday { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 4px; }
+details.hentry { border-top: 1px solid var(--line); padding: 6px 0; }
+details.hentry > summary { cursor: pointer; display: flex; gap: 6px; align-items: baseline; list-style: none; }
+details.hentry > summary::-webkit-details-marker { display: none; }
+.htitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hstatus { font-size: 12px; color: var(--muted); }
+.hbody { display: grid; gap: 6px; padding: 6px 0 4px 8px; }
+.hq { border-left: 3px solid var(--line); padding-left: 8px; }
+.hqt { font-weight: 600; font-size: 14px; }
+.ha { font-size: 14px; }
+.ha.none { color: var(--muted); font-style: italic; }
+details.revisit { margin: 4px 0 0; }

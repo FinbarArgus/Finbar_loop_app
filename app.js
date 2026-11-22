@@ -165,18 +165,19 @@
   let poller = null;
   let refreshItem = null;            // redraws the open item's thread and answers in place
   let justSent = null;               // id of the item whose answer was just sent (shows Next)
-  const SECTIONS = [['blocking', 'Blocking'], ['question', 'Questions'], ['review', 'To review'], ['answered', 'Answered']];
+  const SECTIONS = [['blocking', 'Blocking'], ['question', 'Questions'], ['review', 'To review']];
 
   function age(iso) {
     const h = (Date.now() - Date.parse(iso)) / 3.6e6;
     return h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} d`;
   }
 
-  // An item answered in the app but not yet taken by LOOP still counts as answered on the board.
+  // Where an item sits: LOOP's index decides (a batch answered in part stays on the board).
   function sectionOf(it) {
-    if (it.section !== 'answered' && it.section !== 'closed' && filesIn(`answers/${it.id}`).length) return 'answered';
     return it.section;
   }
+  const isHistory = (it) => (it.section === 'answered' || it.section === 'closed')
+    && !String(it.closed_reason || '').startsWith('grouped into');
 
   async function refreshIndex() {
     [index] = await Promise.all([getJSON('index.json'), loadTree()]);
@@ -187,36 +188,101 @@
     poller = setInterval(() => { if (!document.hidden) fn().catch(() => {}); }, ms);
   }
 
+  function card(it) {
+    const sent = filesIn(`answers/${it.id}`).length;
+    const partial = it.n_questions > 1 && it.n_answered > 0 && it.n_answered < it.n_questions;
+    return el('a', { class: `card imp-${it.importance}`, href: `#/item/${it.id}` },
+      el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
+        it.blocking ? el('span', { class: 'badge block' }, 'blocking') : null,
+        it.n_questions > 1 ? el('span', { class: 'badge' }, `${it.n_questions} questions`) : null,
+        partial ? el('span', { class: 'badge wait' }, `${it.n_answered} of ${it.n_questions} answered`) : null,
+        it.requests_open ? el('span', { class: 'badge wait' }, 'detail requested') : null,
+        it.n_details ? el('span', { class: 'badge' }, `${it.n_details} detail`) : null,
+        sent && !partial ? el('span', { class: 'badge ok' }, 'sent to LOOP') : null,
+        el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
+      el('div', { class: 'title', html: inline(it.title) }),
+      el('div', { class: 'from' }, it.from.name, it.holds_up ? ` · holds up: ${it.holds_up}` : ''));
+  }
+
   async function showList(tab) {
     await refreshIndex();
     const groups = Object.fromEntries(SECTIONS.map(([k]) => [k, []]));
     index.items.forEach((it) => { const s = sectionOf(it); if (groups[s]) groups[s].push(it); });
-    tab = tab || SECTIONS.map(([k]) => k).find((k) => groups[k].length) || 'blocking';
+    tab = SECTIONS.some(([k]) => k === tab) ? tab : SECTIONS.map(([k]) => k).find((k) => groups[k].length) || 'blocking';
     const tabs = el('nav', { class: 'tabs' }, SECTIONS.map(([k, label]) => el('a', {
       href: `#/list/${k}`, class: k === tab ? 'on' : '',
     }, label, el('span', { class: 'n' }, String(groups[k].length)))));
     const list = el('div', { class: 'cards' });
     if (!groups[tab].length) list.append(el('p', { class: 'empty' }, 'Nothing here.'));
-    groups[tab].forEach((it) => {
-      const answered = filesIn(`answers/${it.id}`).length;
-      list.append(el('a', { class: `card imp-${it.importance}`, href: `#/item/${it.id}` },
-        el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
-          it.blocking ? el('span', { class: 'badge block' }, 'blocking') : null,
-          it.requests_open ? el('span', { class: 'badge wait' }, 'detail requested') : null,
-          it.n_details ? el('span', { class: 'badge' }, `${it.n_details} detail`) : null,
-          it.n_questions > 1 ? el('span', { class: 'badge' }, `${it.n_questions} questions`) : null,
-          answered && it.section !== 'answered' ? el('span', { class: 'badge ok' }, 'sent to LOOP') : null,
-          el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
-        el('div', { class: 'title', html: inline(it.title) }),
-        el('div', { class: 'from' }, it.from.name, it.holds_up ? ` · holds up: ${it.holds_up}` : '')));
-    });
-    main().replaceChildren(tabs, list,
+    groups[tab].forEach((it) => list.append(card(it)));
+    main().replaceChildren(tabs, list, historyBox(),
       el('p', { class: 'foot' }, `Updated ${new Date(index.generated).toLocaleString()}`));
     setPoll(async () => {
       const before = index.generated + tree.paths.size;
       await refreshIndex();
       if (index.generated + tree.paths.size !== before) showList(tab);
     }, 60_000);
+  }
+
+  // History: answered and closed items, newest first, grouped by day. Each entry loads its questions and
+  // answers only when opened; "Revisit" sends a request about that one item, which LOOP passes to the
+  // session that asked it (agents read only that item, never the history).
+  function historyBox() {
+    const past = index.items.filter(isHistory)
+      .sort((a, b) => (b.updated || b.created).localeCompare(a.updated || a.created));
+    const box = el('details', { class: 'history' }, el('summary', {}, `History (${past.length})`));
+    let day = null;
+    for (const it of past) {
+      const d = new Date(it.updated || it.created).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+      if (d !== day) { box.append(el('div', { class: 'hday' }, d)); day = d; }
+      const body = el('div', { class: 'hbody' });
+      const entry = el('details', { class: 'hentry' },
+        el('summary', {}, el('span', { class: 'id' }, it.id), ' ',
+          el('span', { class: 'htitle', html: inline(it.title) }),
+          el('span', { class: 'hstatus' }, it.section === 'closed' ? 'closed' : 'answered')),
+        body);
+      entry.addEventListener('toggle', () => { if (entry.open && !body.childElementCount) fillHistory(body, it); }, { once: false });
+      box.append(entry);
+    }
+    if (!past.length) box.append(el('p', { class: 'empty' }, 'Nothing answered yet.'));
+    return box;
+  }
+
+  async function fillHistory(body, row) {
+    body.append(el('p', { class: 'empty' }, 'Loading…'));
+    const it = await getJSON(`items/${row.id}/item.json`);
+    const qs = questionsOf(it);
+    const answers = [];
+    for (const name of filesIn(`answers/${it.id}`)) {
+      const a = await getJSON(`answers/${it.id}/${name}`).catch(() => null);
+      if (a) answers.push(a);
+    }
+    const out = [el('div', { class: 'from' }, `From ${it.from.name}`, it.closed_reason ? ` · ${it.closed_reason}` : '')];
+    qs.forEach((q, i) => {
+      const given = answers.flatMap((a) => (a.answers || (i === 0 ? [{ question: 0, choice: a.choice, text: a.text }] : []))
+        .filter((x) => x.question === i && (x.choice || x.text)));
+      out.push(el('div', { class: 'hq' },
+        qs.length > 1 || q.text !== it.title ? el('div', { class: 'hqt', html: `${qs.length > 1 ? `${i + 1}. ` : ''}${inline(q.text)}` }) : null,
+        given.length ? given.map((x) => el('div', { class: 'ha' }, x.choice || '', x.choice && x.text ? ' — ' : '', x.text || ''))
+          : el('div', { class: 'ha none' }, 'no answer')));
+    });
+    answers.filter((a) => (a.answers && a.text) || a.kind === 'answer' && !qs.length && (a.choice || a.text)).forEach((a) => {
+      out.push(el('div', { class: 'ha' }, a.choice ? `${a.choice}${a.text ? ' — ' : ''}` : '', a.text || ''));
+    });
+    out.push(el('div', { class: 'row' }, el('a', { href: `#/item/${it.id}` }, 'Open the full item')));
+    out.push(revisitBox(it.id));
+    body.replaceChildren(...out);
+  }
+
+  function revisitBox(id) {
+    return el('details', { class: 'detail revisit' },
+      el('summary', {}, 'Revisit with the agent'),
+      composer({
+        placeholder: 'What should the agent look at again? Only this item is sent to it. Enter sends.',
+        enterSends: true,
+        sendLabel: 'Send',
+        onSend: async (text, imgs) => { await send('requests', id, { kind: 'revisit', text }, imgs); },
+      }));
   }
 
   function store(id) {
@@ -309,7 +375,8 @@
       await drawAnswers(answerPanel, it, qs, picks, notes, st);
     };
     await redraw();
-    const generalBox = qs.length ? null : detailBox(id, {}, 'More detail before you review?');
+    const generalBox = !['open'].includes(it.status) ? revisitBox(id)
+      : qs.length ? null : detailBox(id, {}, 'More detail before you review?');
     main().replaceChildren(head, body, ...cards, thread, generalBox || '', answerPanel);
     let sig = JSON.stringify([it.details, it.forwarded]) + [...tree.paths].filter((p) => p.includes(`/${id}/`)).join();
     const check = async (force) => {
