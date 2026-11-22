@@ -1,0 +1,399 @@
+// The loop app: reads items from the private loop repo through the GitHub API and writes answers and
+// detail requests back as new files. No server: the token and repo name stay in this browser.
+(function () {
+  'use strict';
+  const { el, inline } = window.LoopRender;
+  const API = 'https://api.github.com';
+  const $ = (s) => document.querySelector(s);
+  const main = () => $('#main');
+
+  const cfg = {
+    get token() { return safeGet('loop.token'); },
+    get repo() { return safeGet('loop.repo'); },
+    get branch() { return safeGet('loop.branch') || 'main'; },
+  };
+  function safeGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+  function safeSet(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
+
+  // ------------------------------------------------------------ GitHub
+
+  async function gh(path, opts = {}) {
+    const r = await fetch(API + path, {
+      cache: 'no-cache',               // revalidate with the ETag: unchanged files cost no rate limit
+      ...opts,
+      headers: {
+        Authorization: `Bearer ${cfg.token}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+        Accept: opts.raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json',
+        ...(opts.headers || {}),
+      },
+    });
+    if (!r.ok) {
+      const err = new Error(`${r.status} ${r.statusText} for ${path}`);
+      err.status = r.status;
+      throw err;
+    }
+    return r;
+  }
+  const repoPath = (p) => `/repos/${cfg.repo}/contents/${p.split('/').map(encodeURIComponent).join('/')}?ref=${cfg.branch}`;
+  const getJSON = async (p) => (await gh(repoPath(p), { raw: true })).json();
+
+  const blobCache = new Map();
+  async function fileUrl(p) {
+    if (!blobCache.has(p)) {
+      blobCache.set(p, gh(repoPath(p), { raw: true }).then((r) => r.blob()).then((b) => URL.createObjectURL(b)));
+    }
+    return blobCache.get(p);
+  }
+
+  let tree = { paths: new Set(), at: 0 };
+  async function loadTree() {
+    const t = await (await gh(`/repos/${cfg.repo}/git/trees/${cfg.branch}?recursive=1`)).json();
+    tree = { paths: new Set(t.tree.filter((x) => x.type === 'blob').map((x) => x.path)), at: Date.now() };
+    return tree;
+  }
+  const filesIn = (dir) => [...tree.paths].filter((p) => p.startsWith(dir + '/') && p.endsWith('.json')
+    && p.split('/').length === dir.split('/').length + 1).map((p) => p.split('/').pop()).sort();
+
+  function b64(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  async function put(path, bytes, message) {
+    await gh(`/repos/${cfg.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, content: b64(bytes), branch: cfg.branch }),
+    });
+    tree.paths.add(path);
+  }
+  const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
+    + '-' + Math.random().toString(36).slice(2, 5);
+
+  // Save images first, then the JSON that names them, so LOOP never sees a JSON before its images.
+  async function send(dir, id, body, images) {
+    const ts = stamp();
+    const names = [];
+    for (let k = 0; k < images.length; k++) {
+      const name = `${ts}-${k}.${images[k].ext}`;
+      await put(`${dir}/${id}/${name}`, images[k].bytes, `${id}: image for ${dir}`);
+      names.push(name);
+    }
+    const doc = { id, ...body, images: names, at: new Date().toISOString(), device: matchMedia('(max-width: 700px)').matches ? 'phone' : 'computer' };
+    await put(`${dir}/${id}/${ts}.json`, new TextEncoder().encode(JSON.stringify(doc, null, 1)), `${id}: ${dir === 'answers' ? 'answer' : 'detail request'}`);
+    return `${ts}.json`;
+  }
+
+  // ------------------------------------------------------------ images from the reader
+
+  async function toImage(file) {
+    const MAX = 1600;
+    let bmp;
+    try { bmp = await createImageBitmap(file); } catch (e) { bmp = null; }
+    if (!bmp || (file.size < 700_000 && Math.max(bmp.width, bmp.height) <= MAX && /png|jpe?g|gif|webp/.test(file.type))) {
+      return { ext: (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg'), bytes: new Uint8Array(await file.arrayBuffer()), file };
+    }
+    const s = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * s);
+    c.height = Math.round(bmp.height * s);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.85));
+    return { ext: 'jpg', bytes: new Uint8Array(await blob.arrayBuffer()), file: blob };
+  }
+
+  // A text box that takes images (attach, paste, drop). onSend(text, images) -> Promise.
+  function composer({ placeholder, onSend, enterSends, sendLabel, extra }) {
+    const imgs = [];
+    const ta = el('textarea', { rows: 2, placeholder });
+    const thumbs = el('div', { class: 'thumbs' });
+    const status = el('div', { class: 'status' });
+    const pick = el('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+    const add = async (files) => {
+      for (const f of files) {
+        if (!f.type.startsWith('image/')) continue;
+        const im = await toImage(f);
+        imgs.push(im);
+        const t = el('span', { class: 'thumb' }, el('img', { src: URL.createObjectURL(im.file), alt: '' }),
+          el('button', { class: 'x', title: 'remove', onclick: () => { imgs.splice(imgs.indexOf(im), 1); t.remove(); } }, '×'));
+        thumbs.append(t);
+      }
+    };
+    pick.addEventListener('change', () => add(pick.files));
+    ta.addEventListener('paste', (e) => {
+      const files = [...(e.clipboardData || {}).files || []];
+      if (files.length) { e.preventDefault(); add(files); }
+    });
+    const box = el('div', { class: 'composer' });
+    box.addEventListener('dragover', (e) => { e.preventDefault(); box.classList.add('drag'); });
+    box.addEventListener('dragleave', () => box.classList.remove('drag'));
+    box.addEventListener('drop', (e) => { e.preventDefault(); box.classList.remove('drag'); add(e.dataTransfer.files); });
+    let busy = false;
+    const go = async () => {
+      const text = ta.value.trim();
+      const ready = extra ? extra.ready() : true;
+      if (busy || (!text && !imgs.length && !(extra && extra.value()))) return;
+      if (!ready) return;
+      busy = true;
+      status.textContent = 'Sending…';
+      try {
+        await onSend(text, imgs.slice());
+        ta.value = '';
+        imgs.length = 0;
+        thumbs.replaceChildren();
+        status.textContent = 'Sent. LOOP picks it up within about a minute.';
+      } catch (e) {
+        status.textContent = `Not sent: ${e.message}`;
+      }
+      busy = false;
+    };
+    ta.addEventListener('keydown', (e) => {
+      if (enterSends && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); go(); }
+    });
+    box.append(extra ? extra.el : '', ta, thumbs,
+      el('div', { class: 'row' },
+        el('button', { class: 'ghost', title: 'Attach images (or paste / drop them)', onclick: () => pick.click() }, '+ image'),
+        pick, el('span', { class: 'grow' }), el('button', { class: 'primary', onclick: go }, sendLabel || 'Send')),
+      status);
+    return box;
+  }
+
+  // ------------------------------------------------------------ views
+
+  let index = { items: [] };
+  let poller = null;
+  let refreshItem = null;            // redraws the open item's thread and answers in place
+  const SECTIONS = [['blocking', 'Blocking'], ['question', 'Questions'], ['review', 'To review'], ['answered', 'Answered']];
+
+  function age(iso) {
+    const h = (Date.now() - Date.parse(iso)) / 3.6e6;
+    return h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} d`;
+  }
+
+  // An item answered in the app but not yet taken by LOOP still counts as answered on the board.
+  function sectionOf(it) {
+    if (it.section !== 'answered' && it.section !== 'closed' && filesIn(`answers/${it.id}`).length) return 'answered';
+    return it.section;
+  }
+
+  async function refreshIndex() {
+    [index] = await Promise.all([getJSON('index.json'), loadTree()]);
+  }
+
+  function setPoll(fn, ms) {
+    clearInterval(poller);
+    poller = setInterval(() => { if (!document.hidden) fn().catch(() => {}); }, ms);
+  }
+
+  async function showList(tab) {
+    await refreshIndex();
+    const groups = Object.fromEntries(SECTIONS.map(([k]) => [k, []]));
+    index.items.forEach((it) => { const s = sectionOf(it); if (groups[s]) groups[s].push(it); });
+    tab = tab || SECTIONS.map(([k]) => k).find((k) => groups[k].length) || 'blocking';
+    const tabs = el('nav', { class: 'tabs' }, SECTIONS.map(([k, label]) => el('a', {
+      href: `#/list/${k}`, class: k === tab ? 'on' : '',
+    }, label, el('span', { class: 'n' }, String(groups[k].length)))));
+    const list = el('div', { class: 'cards' });
+    if (!groups[tab].length) list.append(el('p', { class: 'empty' }, 'Nothing here.'));
+    groups[tab].forEach((it) => {
+      const answered = filesIn(`answers/${it.id}`).length;
+      list.append(el('a', { class: `card imp-${it.importance}`, href: `#/item/${it.id}` },
+        el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
+          it.blocking ? el('span', { class: 'badge block' }, 'blocking') : null,
+          it.requests_open ? el('span', { class: 'badge wait' }, 'detail requested') : null,
+          it.n_details ? el('span', { class: 'badge' }, `${it.n_details} detail`) : null,
+          answered && it.section !== 'answered' ? el('span', { class: 'badge ok' }, 'sent to LOOP') : null,
+          el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
+        el('div', { class: 'title', html: inline(it.title) }),
+        el('div', { class: 'from' }, it.from.name, it.holds_up ? ` · holds up: ${it.holds_up}` : '')));
+    });
+    main().replaceChildren(tabs, list,
+      el('p', { class: 'foot' }, `Updated ${new Date(index.generated).toLocaleString()}`));
+    setPoll(async () => {
+      const before = index.generated + tree.paths.size;
+      await refreshIndex();
+      if (index.generated + tree.paths.size !== before) showList(tab);
+    }, 60_000);
+  }
+
+  function store(id) {
+    const k = `loop.item.${id}`;
+    let data = {};
+    try { data = JSON.parse(localStorage.getItem(k) || '{}'); } catch (e) { data = {}; }
+    return { get: (n) => data[n], set: (n, v) => { data[n] = v; safeSet(k, JSON.stringify(data)); } };
+  }
+
+  async function showItem(id) {
+    await loadTree();
+    const it = await getJSON(`items/${id}/item.json`);
+    const st = store(id);
+    const ctx = {
+      store: st,
+      fileUrl: (name) => fileUrl(`items/${id}/${name}`),
+      detailBox: ({ quiz, label }) => detailBox(id, quiz, label),
+    };
+    const head = el('header', { class: 'item-head' },
+      el('a', { href: '#/list', class: 'back' }, '← Board'),
+      el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
+        it.blocking ? el('span', { class: 'badge block' }, 'blocking') : null,
+        el('span', { class: 'badge' }, it.status), el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
+      el('h2', { html: inline(it.title) }),
+      el('div', { class: 'from' }, `From ${it.from.name}`, it.source === 'harvested' ? ' (found by the sweep)' : ''),
+      it.holds_up ? el('div', { class: 'holds' }, `Holds up: ${it.holds_up}`) : null,
+      it.links && it.links.length ? el('div', { class: 'links' }, it.links.map((u) => el('a', { href: u, target: '_blank', rel: 'noopener' }, u.replace(/^https?:\/\//, '')))) : null);
+    const body = el('div', { class: 'blocks' });
+    window.LoopRender.blocks(body, it.blocks, ctx);
+    const thread = el('section', { class: 'thread' });
+    await drawThread(thread, it, ctx);
+    const answerPanel = el('section', { class: 'answer' });
+    await drawAnswers(answerPanel, it);
+    main().replaceChildren(head, body, thread, detailBox(id, null, 'More detail before you answer?'), answerPanel);
+    let sig = JSON.stringify(it.details || []) + [...tree.paths].filter((p) => p.includes(`/${id}/`)).join();
+    const check = async (force) => {
+      if (!force) await loadTree();
+      const fresh = await getJSON(`items/${id}/item.json`);
+      const s = JSON.stringify(fresh.details || []) + [...tree.paths].filter((p) => p.includes(`/${id}/`)).join();
+      if (force || s !== sig) {
+        sig = s;
+        Object.assign(it, fresh);
+        await drawThread(thread, it, ctx);
+        await drawAnswers(answerPanel, it);
+      }
+    };
+    refreshItem = () => check(true);
+    setPoll(() => check(false), 20_000);
+  }
+
+  // Detail requests (from the reader) and the detail added for each, in time order.
+  async function drawThread(box, it, ctx) {
+    const reqs = filesIn(`requests/${it.id}`);
+    const byReq = new Map((it.details || []).map((d) => [d.request, d]));
+    const parts = [];
+    for (const name of reqs) {
+      const r = await getJSON(`requests/${it.id}/${name}`).catch(() => null);
+      if (!r) continue;
+      const d = byReq.get(name);
+      byReq.delete(name);
+      const ask = el('div', { class: 'ask' },
+        el('div', { class: 'who' }, 'You asked', r.quiz != null ? ` (quiz question ${r.quiz + 1})` : '', ` · ${age(r.at)} ago`),
+        r.text ? el('div', { html: inline(r.text) }) : null,
+        el('div', { class: 'thumbs' }, (r.images || []).map((n) => {
+          const img = el('img', { alt: '' });
+          fileUrl(`requests/${it.id}/${n}`).then((u) => { img.src = u; });
+          return img;
+        })));
+      const reply = el('div', { class: 'reply' });
+      if (d) {
+        reply.append(el('div', { class: 'who' }, `Detail added · ${age(d.at)} ago`));
+        window.LoopRender.blocks(reply, d.blocks, ctx);
+      } else {
+        reply.append(el('div', { class: 'who pending' }, 'Waiting for the detail… (this page checks every 20 s)'));
+      }
+      parts.push(el('div', { class: 'exchange' }, ask, reply));
+    }
+    for (const d of byReq.values()) {          // detail added without a request
+      const reply = el('div', { class: 'reply' }, el('div', { class: 'who' }, `Detail added · ${age(d.at)} ago`));
+      window.LoopRender.blocks(reply, d.blocks, ctx);
+      parts.push(el('div', { class: 'exchange' }, reply));
+    }
+    box.replaceChildren(...(parts.length ? [el('h3', {}, 'More detail'), ...parts] : []));
+  }
+
+  function detailBox(id, quiz, label) {
+    return el('details', { class: 'detail', open: quiz == null ? true : null },
+      el('summary', {}, label),
+      composer({
+        placeholder: 'What do you want to know before answering? Enter sends; Shift+Enter for a new line. Paste or attach images.',
+        enterSends: true,
+        sendLabel: 'Ask',
+        onSend: async (text, imgs) => {
+          await send('requests', id, { kind: 'detail', quiz, text }, imgs);
+          if (refreshItem) await refreshItem();
+        },
+      }));
+  }
+
+  async function drawAnswers(box, it) {
+    const prev = filesIn(`answers/${it.id}`);
+    const shown = [];
+    for (const name of prev) {
+      const a = await getJSON(`answers/${it.id}/${name}`).catch(() => null);
+      if (!a) continue;
+      shown.push(el('div', { class: 'given' }, el('div', { class: 'who' }, `Your answer · ${age(a.at)} ago`),
+        a.choice ? el('div', { class: 'choice' }, a.choice) : null,
+        a.text ? el('div', { html: inline(a.text) }) : null,
+        el('div', { class: 'thumbs' }, (a.images || []).map((n) => {
+          const img = el('img', { alt: '' });
+          fileUrl(`answers/${it.id}/${n}`).then((u) => { img.src = u; });
+          return img;
+        }))));
+    }
+    const options = it.kind === 'review'
+      ? [{ label: 'Reviewed: fine' }, { label: 'Needs changes' }, { label: 'Not now' }]
+      : it.options || [];
+    let choice = null;
+    const opts = el('div', { class: 'choices' }, options.map((o) => {
+      const b = el('button', { class: 'choice-btn', onclick: () => {
+        choice = choice === o.label ? null : o.label;
+        [...opts.children].forEach((c) => c.classList.toggle('on', c === b && choice));
+      } }, el('b', {}, o.label), o.detail ? el('span', {}, o.detail) : null);
+      return b;
+    }));
+    const comp = composer({
+      placeholder: it.kind === 'review' ? 'Comments for the agent (optional). Images welcome.'
+        : options.length ? 'Add to your choice, or answer in your own words. Images welcome.' : 'Your answer. Images welcome.',
+      enterSends: false,
+      sendLabel: prev.length ? 'Send follow-up' : 'Send answer',
+      extra: { el: opts, value: () => choice, ready: () => true },
+      onSend: async (text, imgs) => {
+        await send('answers', it.id, { kind: 'answer', choice, text }, imgs);
+        if (refreshItem) await refreshItem();
+      },
+    });
+    box.replaceChildren(el('h3', {}, it.kind === 'review' ? 'Your review' : 'Your answer'), ...shown, comp);
+  }
+
+  function showSettings(msg) {
+    clearInterval(poller);
+    const token = el('input', { type: 'password', autocomplete: 'off', placeholder: 'github_pat_…', value: cfg.token });
+    const repo = el('input', { type: 'text', placeholder: 'owner/name', value: cfg.repo });
+    const branch = el('input', { type: 'text', value: cfg.branch });
+    main().replaceChildren(el('section', { class: 'settings' },
+      el('h2', {}, 'Sign in'),
+      msg ? el('p', { class: 'warn' }, msg) : null,
+      el('p', {}, 'A fine-grained GitHub token with access to the loop repo only (Contents: read and write). ',
+        'It stays in this browser.'),
+      el('label', {}, 'Token', token), el('label', {}, 'Repository', repo), el('label', {}, 'Branch', branch),
+      el('div', { class: 'row' },
+        el('button', { class: 'primary', onclick: () => {
+          safeSet('loop.token', token.value.trim());
+          safeSet('loop.repo', repo.value.trim());
+          safeSet('loop.branch', branch.value.trim() || 'main');
+          location.hash = '#/list';
+          route();
+        } }, 'Save'),
+        el('button', { class: 'ghost', onclick: () => { ['loop.token', 'loop.repo', 'loop.branch'].forEach((k) => safeSet(k, null)); showSettings('Signed out.'); } }, 'Sign out'))));
+  }
+
+  async function route() {
+    if (!cfg.token || !cfg.repo) return showSettings();
+    const h = location.hash.replace(/^#\/?/, '').split('/');
+    refreshItem = null;
+    try {
+      if (h[0] === 'item' && h[1]) await showItem(h[1]);
+      else if (h[0] === 'settings') showSettings();
+      else await showList(h[0] === 'list' ? h[1] : null);
+      window.scrollTo(0, 0);
+    } catch (e) {
+      if (e.status === 401 || e.status === 403 || e.status === 404) showSettings(`GitHub said ${e.message}. Check the token and repository.`);
+      else main().replaceChildren(el('p', { class: 'warn' }, `Could not load: ${e.message}`), el('button', { class: 'ghost', onclick: route }, 'Try again'));
+    }
+  }
+
+  window.addEventListener('hashchange', route);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && tree.at && Date.now() - tree.at > 20_000) route(); });
+  $('#refresh').addEventListener('click', route);
+  route();
+  window.LoopApp = { route, refresh: () => refreshItem && refreshItem() };
+})();
