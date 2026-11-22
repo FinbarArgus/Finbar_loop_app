@@ -49,7 +49,7 @@ def make_fixture(loop_bin, tmp, graph):
         {'type': 'file', 'ref': 'src/solver/step.py:120', 'code': 'def fit(x):\n    return solve(x)\n', 'highlight': [121]}]}
     (tmp / 'q.json').write_text(json.dumps(q))
     loop(loop_bin, repo, 'post', 'question', '--from', 'HIGH-session-a', '--blocking',
-         '--holds-up', 'the run', '--option', 'Small step', '--option', 'Large step', '--spec', str(tmp / 'q.json'))
+         '--holds-up', 'the run', 'Which step size for the run?', '--option', 'Small step', '--option', 'Large step', '--spec', str(tmp / 'q.json'))
     show = [{'type': 'file', 'ref': 'a.py:3', 'code': 'x = 1\n'}]
     quiz = {'type': 'quiz', 'questions': [
         {'q': f'Question {k}?', 'show': show, 'options': [f'opt {c}{k}' for c in 'abcd'], 'correct': k,
@@ -63,12 +63,24 @@ def make_fixture(loop_bin, tmp, graph):
             {'name': 'Model source', 'mark': 'inherited', 'does': 'BG model'},
             {'name': 'Fit k', 'mark': 'calibrated', 'does': 'fits k to obs A'},
             {'name': 'Set g', 'mark': 'set_by_hand', 'detail': 'g = 2, because the data lack it'}]})
-    blocks += [{'type': 'text', 'md': 'What the PR does.'}, quiz,
+    blocks += [{'type': 'text', 'md': 'What the PR does.'},
+               {'type': 'diagram', 'title': 'What changed', 'nodes': [
+                   {'id': 'a', 'title': 'workflow.json', 'mark': 'changed', 'lines': ['steps own their ids']},
+                   {'id': 'b', 'title': 'run()', 'mark': 'added'},
+                   {'id': 'c', 'title': 'old loader', 'mark': 'removed'}],
+                'edges': [{'from': 'a', 'to': 'b', 'label': 'read by'}, {'from': 'a', 'to': 'c'}]},
+               quiz,
                {'type': 'checklist', 'items': ['merge #1 first', 'CI green']}]
     (tmp / 'r.json').write_text(json.dumps({'title': 'PR 12 review guide', 'page': 'result', 'blocks': blocks}))
     loop(loop_bin, repo, 'post', 'review', '--from', 'HIGH-session-b', '--spec', str(tmp / 'r.json'),
          '--link', 'https://github.com/org/repo/pull/12')
     loop(loop_bin, repo, 'post', 'question', 'A low one', '--from', 'LOW-x')
+    batch = {'title': 'Two set-up choices', 'questions': [
+        {'text': 'Which mesh?', 'options': ['coarse', {'label': 'fine', 'detail': 'slower'}]},
+        {'text': 'Which solver?', 'options': ['implicit', 'explicit'],
+         'blocks': [{'type': 'figure', 'src': 'fig.png', 'caption': 'cost'}]}]}
+    (tmp / 'batch.json').write_text(json.dumps(batch))
+    loop(loop_bin, repo, 'post', 'question', '--from', 'MED-y', '--spec', str(tmp / 'batch.json'))
     return repo
 
 
@@ -191,11 +203,11 @@ def run(loop_bin, graph, shots):
                 page.wait_for_selector('.pbox')
                 if graph:
                     n = len(json.loads(Path(graph).read_text())['nodes'])
-                    page.wait_for_function(f"document.querySelectorAll('.pbox').length === {n}")
+                    page.wait_for_function(f"document.querySelectorAll('.prov:not(.diagram) .pbox').length === {n}")
                     check(page, True, f'provenance graph: {n} boxes', failures)
                 else:
-                    check(page, page.locator('.pbox').count() == 3, 'provenance steps', failures)
-                    check(page, page.locator('.pbox.set_by_hand').count() == 1, 'set-by-hand box marked', failures)
+                    check(page, page.locator('.prov:not(.diagram) .pbox').count() == 3, 'provenance steps', failures)
+                    check(page, page.locator('.prov:not(.diagram) .pbox.set_by_hand').count() == 1, 'set-by-hand box marked', failures)
                 check(page, page.locator('.pmeta code').count() >= 1, 'provenance names output/commit', failures)
                 q0 = page.locator('.qcard').first
                 q0.locator('.opt').nth(1).click()
@@ -223,9 +235,56 @@ def run(loop_bin, graph, shots):
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-review.png', full_page=True)
 
+                # The review's diagram: three boxes with change marks, the removed one struck.
+                page.goto(base + '#/item/R-001')
+                page.wait_for_selector('.diagram .pbox')
+                check(page, page.locator('.diagram .pbox').count() == 3, 'diagram boxes', failures)
+                check(page, page.locator('.diagram .pbox.removed.struck').count() == 1
+                      and page.locator('.diagram .legend .mark').count() == 3, 'diagram change marks and legend', failures)
+                check(page, 'old loader' in page.locator('.diagram .pbox').first.inner_text(), 'diagram lists edges to non-neighbours', failures)
+
+                # A batch: one card per question, picks per question, a detail asked on question 2
+                # answered inside its card, one send, then Next.
+                page.goto(base + '#/item/Q-003')
+                page.wait_for_selector('.question .qtitle')
+                cards = page.locator('.question')
+                check(page, cards.count() == 2, 'batch: a card per question', failures)
+                check(page, page.locator('.navrow a.next').count() == 1, 'Next in the header', failures)
+                cards.nth(0).locator('.qnote').fill('coarse is fine for the test')
+                cards.nth(1).locator('.choice-btn', has_text='explicit').click()
+                check(page, page.locator('.question details.detail[open]').count() == 0, 'batch: detail boxes start closed', failures)
+                cards.nth(1).locator('details.detail summary').click()
+                cards.nth(1).locator('details.detail textarea').fill('Why is explicit cheaper here?')
+                cards.nth(1).locator('details.detail textarea').press('Enter')
+                page.wait_for_selector('.question >> nth=1 >> .exchange .who.pending')
+                rq = [(f, json.loads(f.read_text())) for f in sorted((repo / 'requests/Q-003').glob('*.json'))]
+                check(page, rq and rq[-1][1].get('question') == 1, 'batch: detail request names its question', failures)
+                loop(loop_bin, repo, 'add-detail', 'Q-003', '--request', rq[-1][0].name, '--question', '1',
+                     '--text', 'Explicit needs no Jacobian.')
+                page.evaluate('window.LoopApp.refresh()')
+                page.wait_for_selector('.question >> nth=1 >> .exchange .reply >> text=no Jacobian')
+                check(page, cards.nth(0).locator('.exchange').count() == 0, 'batch: the reply sits under its own question', failures)
+                check(page, cards.nth(1).locator('.choice-btn.on').count() == 1, 'batch: pick kept across the refresh', failures)
+                page.locator('.answer button.primary').click()
+                page.wait_for_selector('.after a')
+                ans = [json.loads(f.read_text()) for f in sorted((repo / 'answers/Q-003').glob('*.json'))]
+                got = ans[-1]['answers'] if ans else []
+                check(page, len(got) == 2 and got[0]['text'] == 'coarse is fine for the test' and got[0]['choice'] is None
+                      and got[1]['choice'] == 'explicit', f'batch: one answer file with both answers {got}', failures)
+                nxt = page.locator('.after a').get_attribute('href')
+                page.locator('.after a').click()
+                page.wait_for_function(f"location.hash === '{nxt}'")
+                page.wait_for_selector('.item-head h2')
+                check(page, nxt.startswith('#/item/') and nxt != '#/item/Q-003', f'Next after sending goes to {nxt}', failures)
+                check(page, narrow(), 'batch: no sideways scroll', failures)
+                if shots:
+                    page.goto(base + '#/item/Q-003')
+                    page.wait_for_selector('.question .qtitle')
+                    page.screenshot(path=f'{shots}/{label}-batch.png', full_page=True)
+
                 page.goto(base + '#/list/answered')
                 page.wait_for_selector('.card')
-                check(page, page.locator('.card').count() == 2, 'answered items move to Answered', failures)
+                check(page, page.locator('.card').count() == 3, 'answered items move to Answered', failures)
                 check(page, not errors, f'no console errors {errors}', failures)
                 ctx.close()
 

@@ -164,6 +164,7 @@
   let index = { items: [] };
   let poller = null;
   let refreshItem = null;            // redraws the open item's thread and answers in place
+  let justSent = null;               // id of the item whose answer was just sent (shows Next)
   const SECTIONS = [['blocking', 'Blocking'], ['question', 'Questions'], ['review', 'To review'], ['answered', 'Answered']];
 
   function age(iso) {
@@ -203,6 +204,7 @@
           it.blocking ? el('span', { class: 'badge block' }, 'blocking') : null,
           it.requests_open ? el('span', { class: 'badge wait' }, 'detail requested') : null,
           it.n_details ? el('span', { class: 'badge' }, `${it.n_details} detail`) : null,
+          it.n_questions > 1 ? el('span', { class: 'badge' }, `${it.n_questions} questions`) : null,
           answered && it.section !== 'answered' ? el('span', { class: 'badge ok' }, 'sent to LOOP') : null,
           el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
         el('div', { class: 'title', html: inline(it.title) }),
@@ -224,19 +226,48 @@
     return { get: (n) => data[n], set: (n, v) => { data[n] = v; safeSet(k, JSON.stringify(data)); } };
   }
 
+  // The questions of an item: a batch, or one question (older items keep it in title + options).
+  function questionsOf(it) {
+    if (it.questions && it.questions.length) return it.questions;
+    if (it.kind === 'question') return [{ text: it.title, options: it.options || [], blocks: [] }];
+    return [];
+  }
+
+  // Open items in board order, for Next.
+  function boardOrder() {
+    const order = ['blocking', 'question', 'review'];
+    return index.items.filter((x) => order.includes(sectionOf(x)))
+      .sort((a, b) => order.indexOf(sectionOf(a)) - order.indexOf(sectionOf(b)));
+  }
+  function nextAfter(id) {
+    const list = boardOrder();
+    const k = list.findIndex((x) => x.id === id);
+    const rest = list.slice(k + 1).concat(list.slice(0, Math.max(k, 0))).filter((x) => x.id !== id);
+    return { next: rest[0] || null, pos: k >= 0 ? k + 1 : null, total: list.length };
+  }
+  function nextLink(id, label) {
+    const { next } = nextAfter(id);
+    return next ? el('a', { class: 'next', href: `#/item/${next.id}` }, `${label} → ${next.id}`) : null;
+  }
+
   async function showItem(id) {
-    await loadTree();
-    const it = await getJSON(`items/${id}/item.json`);
+    const [it] = await Promise.all([getJSON(`items/${id}/item.json`), refreshIndex()]);
     const st = store(id);
+    const qs = questionsOf(it);
+    const single = qs.length === 1 && qs[0].text === it.title;
     const ctx = {
       store: st,
       fileUrl: (name) => fileUrl(`items/${id}/${name}`),
-      detailBox: ({ quiz, label }) => detailBox(id, quiz, label),
+      detailBox: ({ quiz, label }) => detailBox(id, { quiz }, label),
     };
+    const { pos, total } = nextAfter(id);
     const head = el('header', { class: 'item-head' },
-      el('a', { href: '#/list', class: 'back' }, '← Board'),
+      el('div', { class: 'navrow' }, el('a', { href: '#/list', class: 'back' }, '← Board'),
+        el('span', { class: 'grow' }), pos ? el('span', { class: 'pos' }, `${pos} of ${total}`) : null,
+        nextLink(id, 'Next')),
       el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
         it.blocking ? el('span', { class: 'badge block' }, 'blocking') : null,
+        qs.length > 1 ? el('span', { class: 'badge' }, `${qs.length} questions`) : null,
         el('span', { class: 'badge' }, it.status), el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
       el('h2', { html: inline(it.title) }),
       el('div', { class: 'from' }, `From ${it.from.name}`, it.source === 'harvested' ? ' (found by the sweep)' : ''),
@@ -244,35 +275,73 @@
       it.links && it.links.length ? el('div', { class: 'links' }, it.links.map((u) => el('a', { href: u, target: '_blank', rel: 'noopener' }, u.replace(/^https?:\/\//, '')))) : null);
     const body = el('div', { class: 'blocks' });
     window.LoopRender.blocks(body, it.blocks, ctx);
+
+    // One card per question: its content, options, answer box, detail box and detail thread.
+    const picks = st.get('picks') || {};
+    const notes = st.get('notes') || {};
+    const threads = [];
+    const cards = qs.map((q, i) => {
+      const thread = el('div', { class: 'qthread' });
+      threads.push(thread);
+      const opts = el('div', { class: 'choices' }, (q.options || []).map((o) => {
+        const b = el('button', { class: 'choice-btn' + (picks[i] === o.label ? ' on' : ''), onclick: () => {
+          picks[i] = picks[i] === o.label ? null : o.label;
+          st.set('picks', picks);
+          [...opts.children].forEach((c) => c.classList.toggle('on', c === b && !!picks[i]));
+        } }, el('b', {}, o.label), o.detail ? el('span', {}, o.detail) : null);
+        return b;
+      }));
+      const note = el('textarea', { rows: 2, class: 'qnote', placeholder: (q.options || []).length ? 'Add to your choice, or answer in your own words' : 'Your answer' });
+      note.value = notes[i] || '';
+      note.addEventListener('input', () => { notes[i] = note.value; st.set('notes', notes); });
+      const qb = el('div', { class: 'qblocks' });
+      window.LoopRender.blocks(qb, q.blocks || [], ctx);
+      return el('section', { class: 'question' },
+        single ? null : el('h3', { class: 'qtitle', html: `<span class="qn">${i + 1}</span> ` + inline(q.text) }),
+        qb, opts, note, thread,
+        detailBox(id, { question: i, open: qs.length === 1 }, qs.length === 1 ? 'More detail before you answer?' : 'More detail on this question'));
+    });
     const thread = el('section', { class: 'thread' });
-    await drawThread(thread, it, ctx);
     const answerPanel = el('section', { class: 'answer' });
-    await drawAnswers(answerPanel, it);
-    main().replaceChildren(head, body, thread, detailBox(id, null, 'More detail before you answer?'), answerPanel);
-    let sig = JSON.stringify(it.details || []) + [...tree.paths].filter((p) => p.includes(`/${id}/`)).join();
+    const redraw = async () => {
+      await drawThread(thread, it, ctx, (x) => x.question == null);
+      for (let i = 0; i < threads.length; i++) await drawThread(threads[i], it, ctx, (x) => x.question === i);
+      await drawAnswers(answerPanel, it, qs, picks, notes, st);
+    };
+    await redraw();
+    const generalBox = qs.length ? null : detailBox(id, {}, 'More detail before you review?');
+    main().replaceChildren(head, body, ...cards, thread, generalBox || '', answerPanel);
+    let sig = JSON.stringify([it.details, it.forwarded]) + [...tree.paths].filter((p) => p.includes(`/${id}/`)).join();
     const check = async (force) => {
       if (!force) await loadTree();
       const fresh = await getJSON(`items/${id}/item.json`);
-      const s = JSON.stringify(fresh.details || []) + [...tree.paths].filter((p) => p.includes(`/${id}/`)).join();
+      const s = JSON.stringify([fresh.details, fresh.forwarded]) + [...tree.paths].filter((p) => p.includes(`/${id}/`)).join();
       if (force || s !== sig) {
         sig = s;
         Object.assign(it, fresh);
-        await drawThread(thread, it, ctx);
-        await drawAnswers(answerPanel, it);
+        await redraw();
       }
+      schedule();
+    };
+    // Every 5 s while a detail request waits for its reply, otherwise every 20 s.
+    const schedule = () => {
+      const waiting = filesIn(`requests/${id}`).some((r) => !(it.details || []).some((d) => d.request === r));
+      setPoll(() => check(false), waiting ? 5_000 : 20_000);
     };
     refreshItem = () => check(true);
-    setPoll(() => check(false), 20_000);
+    schedule();
   }
 
-  // Detail requests (from the reader) and the detail added for each, in time order.
-  async function drawThread(box, it, ctx) {
+  // Detail requests (from the reader) and the detail added for each, in time order. keep(x) picks which
+  // requests and details belong in this box (by question).
+  async function drawThread(box, it, ctx, keep) {
     const reqs = filesIn(`requests/${it.id}`);
-    const byReq = new Map((it.details || []).map((d) => [d.request, d]));
+    const details = (it.details || []).filter((d) => keep({ question: d.question ?? (d.asked || {}).question ?? null }));
+    const byReq = new Map(details.map((d) => [d.request, d]));
     const parts = [];
     for (const name of reqs) {
       const r = await getJSON(`requests/${it.id}/${name}`).catch(() => null);
-      if (!r) continue;
+      if (!r || !keep({ question: r.question ?? null })) continue;
       const d = byReq.get(name);
       byReq.delete(name);
       const ask = el('div', { class: 'ask' },
@@ -288,7 +357,10 @@
         reply.append(el('div', { class: 'who' }, `Detail added · ${age(d.at)} ago`));
         window.LoopRender.blocks(reply, d.blocks, ctx);
       } else {
-        reply.append(el('div', { class: 'who pending' }, 'Waiting for the detail… (this page checks every 20 s)'));
+        const fwd = (it.forwarded || []).includes(name);
+        reply.append(el('div', { class: 'who pending' }, fwd
+          ? `LOOP passed this to ${it.from.name}; waiting for the reply… (checking every 5 s)`
+          : 'Sent; waiting for LOOP to pick it up… (checking every 5 s)'));
       }
       parts.push(el('div', { class: 'exchange' }, ask, reply));
     }
@@ -297,31 +369,33 @@
       window.LoopRender.blocks(reply, d.blocks, ctx);
       parts.push(el('div', { class: 'exchange' }, reply));
     }
-    box.replaceChildren(...(parts.length ? [el('h3', {}, 'More detail'), ...parts] : []));
+    box.replaceChildren(...parts);
   }
 
-  function detailBox(id, quiz, label) {
-    return el('details', { class: 'detail', open: quiz == null ? true : null },
+  function detailBox(id, where, label) {
+    return el('details', { class: 'detail', open: (where.open ?? where.quiz == null) ? true : null },
       el('summary', {}, label),
       composer({
         placeholder: 'What do you want to know before answering? Enter sends; Shift+Enter for a new line. Paste or attach images.',
         enterSends: true,
         sendLabel: 'Ask',
         onSend: async (text, imgs) => {
-          await send('requests', id, { kind: 'detail', quiz, text }, imgs);
+          await send('requests', id, { kind: 'detail', quiz: where.quiz ?? null, question: where.question ?? null, text }, imgs);
           if (refreshItem) await refreshItem();
         },
       }));
   }
 
-  async function drawAnswers(box, it) {
+  async function drawAnswers(box, it, qs, picks, notes, st) {
     const prev = filesIn(`answers/${it.id}`);
     const shown = [];
     for (const name of prev) {
       const a = await getJSON(`answers/${it.id}/${name}`).catch(() => null);
       if (!a) continue;
+      const rows = (a.answers || []).filter((x) => x.choice || x.text).map((x) => el('div', { class: 'choice' },
+        qs.length > 1 ? `${x.question + 1}. ` : '', x.choice || '', x.choice && x.text ? ' — ' : '', x.text || ''));
       shown.push(el('div', { class: 'given' }, el('div', { class: 'who' }, `Your answer · ${age(a.at)} ago`),
-        a.choice ? el('div', { class: 'choice' }, a.choice) : null,
+        ...rows, a.choice ? el('div', { class: 'choice' }, a.choice) : null,
         a.text ? el('div', { html: inline(a.text) }) : null,
         el('div', { class: 'thumbs' }, (a.images || []).map((n) => {
           const img = el('img', { alt: '' });
@@ -329,29 +403,46 @@
           return img;
         }))));
     }
-    const options = it.kind === 'review'
-      ? [{ label: 'Reviewed: fine' }, { label: 'Needs changes' }, { label: 'Not now' }]
-      : it.options || [];
-    let choice = null;
-    const opts = el('div', { class: 'choices' }, options.map((o) => {
-      const b = el('button', { class: 'choice-btn', onclick: () => {
-        choice = choice === o.label ? null : o.label;
-        [...opts.children].forEach((c) => c.classList.toggle('on', c === b && choice));
-      } }, el('b', {}, o.label), o.detail ? el('span', {}, o.detail) : null);
-      return b;
-    }));
+    const done = el('div', { class: 'status' });
+    let reviewChoice = null;
+    let extra = null;
+    if (it.kind === 'review') {
+      const opts = el('div', { class: 'choices' }, ['Reviewed: fine', 'Needs changes', 'Not now'].map((label) => {
+        const b = el('button', { class: 'choice-btn', onclick: () => {
+          reviewChoice = reviewChoice === label ? null : label;
+          [...opts.children].forEach((c) => c.classList.toggle('on', c === b && !!reviewChoice));
+        } }, el('b', {}, label));
+        return b;
+      }));
+      extra = { el: opts, value: () => reviewChoice, ready: () => true };
+    } else {
+      const count = () => qs.filter((q, i) => picks[i] || (notes[i] || '').trim()).length;
+      extra = { el: done, value: () => count() > 0, ready: () => true };
+      done.textContent = qs.length > 1 ? 'Answer each question above, then send them together.' : '';
+    }
+    const sent = el('div', { class: 'after' });
+    if (justSent === it.id) {
+      sent.append(el('span', {}, 'Sent. '), nextLink(it.id, 'Next item') || el('a', { href: '#/list' }, 'Back to the board'));
+    }
     const comp = composer({
       placeholder: it.kind === 'review' ? 'Comments for the agent (optional). Images welcome.'
-        : options.length ? 'Add to your choice, or answer in your own words. Images welcome.' : 'Your answer. Images welcome.',
+        : qs.length > 1 ? 'Anything for all the questions (optional). Images welcome.' : 'Anything else (optional). Images welcome.',
       enterSends: false,
-      sendLabel: prev.length ? 'Send follow-up' : 'Send answer',
-      extra: { el: opts, value: () => choice, ready: () => true },
+      sendLabel: it.kind === 'review' ? 'Send review' : prev.length ? 'Send follow-up' : qs.length > 1 ? 'Send answers' : 'Send answer',
+      extra,
       onSend: async (text, imgs) => {
-        await send('answers', it.id, { kind: 'answer', choice, text }, imgs);
+        const body = { kind: 'answer', text };
+        if (it.kind === 'review') body.choice = reviewChoice;
+        else {
+          body.answers = qs.map((q, i) => ({ question: i, asked: q.text, choice: picks[i] || null, text: (notes[i] || '').trim() }));
+          if (qs.length === 1) body.choice = picks[0] || null;
+        }
+        await send('answers', it.id, body, imgs);
+        justSent = it.id;
         if (refreshItem) await refreshItem();
       },
     });
-    box.replaceChildren(el('h3', {}, it.kind === 'review' ? 'Your review' : 'Your answer'), ...shown, comp);
+    box.replaceChildren(el('h3', {}, it.kind === 'review' ? 'Your review' : qs.length > 1 ? 'Send your answers' : 'Your answer'), ...shown, comp, sent);
   }
 
   function showSettings(msg) {
@@ -380,6 +471,7 @@
     if (!cfg.token || !cfg.repo) return showSettings();
     const h = location.hash.replace(/^#\/?/, '').split('/');
     refreshItem = null;
+    justSent = null;
     try {
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'settings') showSettings();

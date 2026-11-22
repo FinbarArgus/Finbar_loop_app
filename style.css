@@ -154,3 +154,29 @@ details.detail summary { cursor: pointer; font-weight: 600; color: var(--accent)
 .settings label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
 .settings input { font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
 .warn { color: var(--bad); }
+
+/* change marks (PR review diagrams) */
+:root { --added: #1f7a4d; --changed: #b7791f; --removed: #b3261e; --unchanged: #a0a6b1; }
+@media (prefers-color-scheme: dark) { :root { --added: #5fd39a; --changed: #e8b04d; --removed: #ff8a80; --unchanged: #6b7280; } }
+.pbox.added { border-color: var(--added); } .pbox.changed { border-color: var(--changed); }
+.pbox.removed { border-color: var(--removed); border-style: dashed; } .pbox.unchanged { border-color: var(--unchanged); }
+.pbox.struck .ptitle span:first-child { text-decoration: line-through; }
+.mark.added { background: var(--added); } .mark.changed { background: var(--changed); }
+.mark.removed { background: var(--removed); } .mark.unchanged { background: var(--unchanged); }
+.arrow.gap { background: none; border-left: 2px dotted var(--line); width: 0; }
+.arrow.gap::after { display: none; }
+
+/* batches of questions, next */
+.navrow { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.navrow .back { margin: 0; }
+.pos { font-size: 13px; color: var(--muted); }
+a.next { text-decoration: none; font-weight: 600; padding: 6px 12px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); }
+.question { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 14px 0; display: grid; gap: 8px; }
+.question .qtitle { margin: 0; font-size: 17px; line-height: 1.35; }
+.qn { display: inline-block; min-width: 1.6em; height: 1.6em; line-height: 1.6em; text-align: center; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 14px; margin-right: 4px; }
+.qblocks > * { margin: 6px 0; }
+.qnote { width: 100%; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical; }
+.question details.detail { margin: 0; }
+.qthread:empty { display: none; }
+.after { margin-top: 8px; }
+.after a { font-weight: 600; }

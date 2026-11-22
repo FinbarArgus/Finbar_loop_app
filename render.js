@@ -112,7 +112,33 @@
   const MARK_LABEL = {
     calibrated: 'calibrated', measured: 'measured', derived: 'derived', inherited: 'inherited',
     set_by_hand: 'set by hand', unclassified: 'unclassified',
+    added: 'added', changed: 'changed', removed: 'removed', unchanged: 'unchanged',
   };
+
+  // A schematic of what changed: boxes (files, functions, data, steps) in dependency order, marked
+  // added / changed / removed / unchanged. Edges between neighbours are drawn as labelled arrows;
+  // other edges are listed in the box they leave from.
+  function diagram(b) {
+    const nodes = b.nodes || [];
+    const edges = b.edges || [];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const order = topo(nodes, edges);
+    const wrap = el('section', { class: 'prov diagram' }, b.title ? el('h3', {}, b.title) : null);
+    const flow = el('div', { class: 'flow' });
+    order.forEach((n, k) => {
+      const prev = order[k - 1];
+      const link = prev && edges.find((e) => e.from === prev.id && e.to === n.id);
+      if (k) flow.append(el('div', { class: 'arrow' + (link ? '' : ' gap'), 'aria-hidden': 'true' }, link && link.label ? el('span', {}, link.label) : null));
+      const others = edges.filter((e) => e.from === n.id && !(order[k + 1] && e.to === order[k + 1].id))
+        .map((e) => `→ ${(byId.get(e.to) || {}).title || e.to}${e.label ? ` (${e.label})` : ''}`);
+      flow.append(provBox(n.title || n.id, n.mark, (n.lines || []).concat(others), n.mark === 'removed' ? 'struck' : ''));
+    });
+    wrap.append(flow);
+    const used = [...new Set(nodes.map((n) => n.mark).filter(Boolean))];
+    if (used.length) wrap.append(el('div', { class: 'legend' }, used.map((m) => el('span', { class: `mark ${m}` }, MARK_LABEL[m] || m))));
+    if (b.caption) wrap.append(el('div', { class: 'pmeta', html: inline(b.caption) }));
+    return wrap;
+  }
 
   function figure(b, ctx) {
     const img = el('img', { alt: b.alt || b.caption || '', loading: 'lazy' });
@@ -278,6 +304,7 @@
         case 'figure': case 'image': return figure(b, ctx);
         case 'file': return fileBlock(b);
         case 'provenance': return provenance(b, ctx);
+        case 'diagram': return diagram(b);
         case 'quiz': return quiz(b, ctx);
         case 'checklist': return checklist(b, ctx);
         default: return el('p', { class: 'warn' }, `Unknown block ${b.type}`);
