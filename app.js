@@ -353,6 +353,23 @@
       it.links && it.links.length ? el('div', { class: 'links' }, it.links.map((u) => el('a', { href: u, target: '_blank', rel: 'noopener' }, u.replace(/^https?:\/\//, '')))) : null);
     const body = el('div', { class: 'blocks' });
     window.LoopRender.blocks(body, it.blocks, ctx);
+    // Long content: a contents list of its sections, with open all / close all.
+    const secs = [...body.querySelectorAll(':scope > details.section')];
+    if (secs.length >= 3) {
+      secs.forEach((d, k) => { if (!d.id) d.id = `s${k + 1}`; });
+      const toggle = el('button', { class: 'link', onclick: () => {
+        const open = !secs.every((d) => d.open);
+        secs.forEach((d) => { d.open = open; });
+        toggle.textContent = open ? 'Close all' : 'Open all';
+      } }, secs.every((d) => d.open) ? 'Close all' : 'Open all');
+      body.prepend(el('nav', { class: 'toc' },
+        el('div', { class: 'row' }, el('b', {}, `Contents · ${secs.length} sections`), toggle),
+        el('ol', {}, secs.map((d) => el('li', {}, el('a', { href: '#', onclick: (e) => {
+          e.preventDefault();
+          d.open = true;
+          d.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, html: d.querySelector('.stitle').innerHTML }))))));
+    }
 
     // One card per question: its content, options, answer box, detail box and detail thread.
     const picks = st.get('picks') || {};
