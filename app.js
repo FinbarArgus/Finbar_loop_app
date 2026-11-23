@@ -36,7 +36,17 @@
     return r;
   }
   const repoPath = (p) => `/repos/${cfg.repo}/contents/${p.split('/').map(encodeURIComponent).join('/')}?ref=${cfg.branch}`;
-  const getJSON = async (p) => (await gh(repoPath(p), { raw: true })).json();
+  // JSON files are cached by their blob sha in the last loaded tree: an unchanged file costs no request.
+  const jsonCache = new Map();
+  // fresh: skip the cache, for code that polls a file without reloading the tree.
+  async function getJSON(p, { fresh } = {}) {
+    const sha = tree.sha.get(p);
+    const c = jsonCache.get(p);
+    if (!fresh && sha && c && c.sha === sha) return JSON.parse(c.text);
+    const text = await (await gh(repoPath(p), { raw: true })).text();
+    if (sha) jsonCache.set(p, { sha, text });
+    return JSON.parse(text);
+  }
 
   const blobCache = new Map();
   async function fileUrl(p) {
@@ -46,12 +56,19 @@
     return blobCache.get(p);
   }
 
-  let tree = { paths: new Set(), sha: new Map(), at: 0 };
+  let tree = { paths: new Set(), sha: new Map(), at: 0, root: null };
   async function loadTree() {
     const t = await (await gh(`/repos/${cfg.repo}/git/trees/${cfg.branch}?recursive=1`)).json();
     const blobs = t.tree.filter((x) => x.type === 'blob');
-    tree = { paths: new Set(blobs.map((x) => x.path)), sha: new Map(blobs.map((x) => [x.path, x.sha])), at: Date.now() };
+    tree = { paths: new Set(blobs.map((x) => x.path)), sha: new Map(blobs.map((x) => [x.path, x.sha])), at: Date.now(), root: t.sha };
     return tree;
+  }
+  // Views draw from a tree loaded in the last 5 min; route() then reloads it in the background and redraws if
+  // the repo changed. Polls call loadTree() themselves.
+  let treeWasCached = false;
+  async function useTree() {
+    if (tree.at && !tree.stale && Date.now() - tree.at < 300_000) { treeWasCached = true; return tree; }
+    return loadTree();
   }
   const filesIn = (dir) => [...tree.paths].filter((p) => p.startsWith(dir + '/') && p.endsWith('.json')
     && p.split('/').length === dir.split('/').length + 1).map((p) => p.split('/').pop()).sort();
@@ -66,8 +83,13 @@
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, content: b64(bytes), branch: cfg.branch, sha: tree.sha.get(path) }),
-    }).then((r) => r.json()).then((j) => { if (j && j.content && j.content.sha) tree.sha.set(path, j.content.sha); }).catch(() => {});
+    }).then((r) => r.json()).then((j) => {
+      if (!j || !j.content || !j.content.sha) { tree.sha.delete(path); return; }
+      tree.sha.set(path, j.content.sha);
+      if (path.endsWith('.json')) jsonCache.set(path, { sha: j.content.sha, text: new TextDecoder().decode(bytes) });
+    }).catch(() => {});
     tree.paths.add(path);
+    tree.stale = true;                   // the redraw after a write reloads the tree
   }
   const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
     + '-' + Math.random().toString(36).slice(2, 5);
@@ -182,7 +204,8 @@
     && !String(it.closed_reason || '').startsWith('grouped into');
 
   async function refreshIndex() {
-    [index] = await Promise.all([getJSON('index.json'), loadTree()]);
+    await useTree();
+    index = await getJSON('index.json');
   }
 
   function setPoll(fn, ms) {
@@ -241,6 +264,7 @@
       el('p', { class: 'foot' }, `Updated ${new Date(index.generated).toLocaleString()}`));
     setPoll(async () => {
       const before = index.generated + tree.paths.size;
+      await loadTree();
       await refreshIndex();
       if (index.generated + tree.paths.size !== before) showList(tab);
     }, 60_000);
@@ -568,6 +592,7 @@
   }
 
   async function showStatus() {
+    await useTree();
     const [st] = await Promise.all([getJSON('state/status.json'), index.items.length ? null : refreshIndex()]);
     lastStatus = st;
     const titles = new Map(index.items.map((x) => [x.id, x.title]));
@@ -611,7 +636,7 @@
     await loadMine().catch(() => {});
     main().replaceChildren(deadlinesCard(), usage, ...sections,
       el('p', { class: 'foot' }, `Updated ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
-    setPoll(async () => { if (location.hash.startsWith('#/status')) await showStatus(); }, 60_000);
+    setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/status')) await showStatus(); }, 60_000);
   }
 
   // ------------------------------------------------------------ Manual: Read, Write, Students, Other
@@ -636,7 +661,7 @@
   }
 
   async function loadMine() {
-    await loadTree();
+    await useTree();
     const ids = [...tree.paths].filter((p) => /^personal\/[^/]+\/entry\.json$/.test(p)).map((p) => p.split('/')[1]);
     const [entries, people, cols, treeDoc, cites] = await Promise.all([
       Promise.all(ids.map((id) => getJSON(`personal/${id}/entry.json`).catch(() => null))),
@@ -847,7 +872,7 @@
           st.textContent = `"${path}" will be made in Zotero within about a minute (by the scheduled script)…`;
           clearInterval(timer);
           timer = setInterval(async () => {
-            const cols = (await getJSON('state/zotero_collections.json').catch(() => ({}))).collections || [];
+            const cols = (await getJSON('state/zotero_collections.json', { fresh: true }).catch(() => ({}))).collections || [];
             const made = cols.find((c) => c.name === path);
             if (made) { clearInterval(timer); mine.collections = cols; st.textContent = `Made "${path}" in Zotero.`; if (onMade) onMade(made); }
           }, 5000);
@@ -974,9 +999,9 @@
     main().replaceChildren(tabs, body, hist);
     drawSide().catch(() => {});
     setPoll(async () => {
-      const before = [...tree.paths].filter((x) => x.startsWith('personal/')).join();
+      const before = [...tree.sha].filter(([x]) => x.startsWith('personal/')).join();
       await loadTree();
-      if ([...tree.paths].filter((x) => x.startsWith('personal/')).join() !== before && !main().querySelector('.newentry input:focus, .newentry textarea:focus, .datein')) redraw();
+      if ([...tree.sha].filter(([x]) => x.startsWith('personal/')).join() !== before && !main().querySelector('.newentry input:focus, .newentry textarea:focus, .datein')) redraw();
     }, 30_000);
   }
 
@@ -1141,9 +1166,9 @@
       el('section', { class: 'gloghead' }, el('h3', {}, 'Growth'), state.events.length ? log : el('p', { class: 'empty' }, 'Nothing has grown yet: tick a Read paper done.'), more));
     requestAnimationFrame(viewer.start);
     setPoll(async () => {
-      const before = [...tree.paths].filter((x) => x.startsWith('personal/') || x === 'state/citations.json').join();
+      const before = [...tree.sha].filter(([x]) => x.startsWith('personal/') || x === 'state/citations.json').join();
       await loadTree();
-      if ([...tree.paths].filter((x) => x.startsWith('personal/') || x === 'state/citations.json').join() !== before && !main().querySelector('.gcreature input:focus')) redraw();
+      if ([...tree.sha].filter(([x]) => x.startsWith('personal/') || x === 'state/citations.json').join() !== before && !main().querySelector('.gcreature input:focus')) redraw();
     }, 60_000);
   }
 
@@ -1241,7 +1266,7 @@
   }
 
   async function showHills() {
-    await loadTree();                          // so a messages.json written since the last load is seen
+    await useTree();
     const [st, msgs] = await Promise.all([getJSON('state/status.json'),
       tree.paths.has('state/messages.json') ? getJSON('state/messages.json').catch(() => null) : null,
       index.items.length ? null : refreshIndex(), loadMine()]);
@@ -1289,6 +1314,7 @@
     animateAnts(view, L.hills, L.paths);
     treePic.scrollTop = treePic.scrollHeight;
     setPoll(async () => {
+      await loadTree();
       const fresh = await getJSON('state/status.json');
       if (fresh.generated !== st.generated && location.hash.startsWith('#/hills') && !info.querySelector('details[open], .hmsg')) showHills();
     }, 60_000);
@@ -1301,6 +1327,7 @@
     if (!wide() || !cfg.token || /^#\/(tree|hills|settings)/.test(location.hash)) {
       side.hidden = true;
       document.body.classList.remove('with-side');
+      if (cfg.token && !mineLoaded) await loadMine();        // so the first Mine, Tree or Hills opens at once
       return;
     }
     if (!mineLoaded) await loadMine();
@@ -1350,12 +1377,16 @@
         el('button', { class: 'ghost', onclick: () => { ['loop.token', 'loop.repo', 'loop.branch'].forEach((k) => safeSet(k, null)); showSettings('Signed out.'); } }, 'Sign out'))));
   }
 
-  async function route() {
+  // quiet: a redraw after the background tree reload, which keeps the scroll position.
+  async function route(opts) {
     if (!cfg.token || !cfg.repo) return showSettings();
-    const h = location.hash.replace(/^#\/?/, '').split('/');
+    const quiet = !!(opts && opts.quiet);
+    const hash = location.hash;
+    const h = hash.replace(/^#\/?/, '').split('/');
     if (h[0] === 'mine') { location.replace(`#/manual${h[1] ? '/' + h[1] : ''}`); return; }   // the tab's old name
     refreshItem = null;
-    justSent = null;
+    if (!quiet) justSent = null;
+    treeWasCached = false;
     try {
       const meta = ['status', 'manual', 'tree', 'hills'].includes(h[0]) ? h[0] : 'work';
       document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
@@ -1366,19 +1397,27 @@
       else if (h[0] === 'hills') await showHills();
       else if (h[0] === 'settings') showSettings();
       else await showList(h[0] === 'list' ? h[1] : null);
-      window.scrollTo(0, 0);
+      if (!quiet) window.scrollTo(0, 0);
       drawSide().catch(() => {});
+      if (treeWasCached && !quiet) revalidate(hash);
     } catch (e) {
       if (e.status === 401 || e.status === 403 || e.status === 404) showSettings(`GitHub said ${e.message}. Check the token and repository.`);
       else main().replaceChildren(el('p', { class: 'warn' }, `Could not load: ${e.message}`), el('button', { class: 'ghost', onclick: route }, 'Try again'));
     }
   }
 
+  async function revalidate(hash) {
+    const root = tree.root;
+    try { await loadTree(); } catch (e) { return; }
+    const typing = document.activeElement && document.activeElement.closest('#main') && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    if (tree.root !== root && location.hash === hash && !typing) route({ quiet: true });
+  }
+
   window.addEventListener('hashchange', route);
   let resizeTimer = null;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => drawSide().catch(() => {}), 300); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && tree.at && Date.now() - tree.at > 20_000) route(); });
-  $('#refresh').addEventListener('click', route);
+  $('#refresh').addEventListener('click', () => { tree.at = 0; route(); });
   route();
   window.LoopApp = { route, refresh: () => refreshItem && refreshItem() };
 })();

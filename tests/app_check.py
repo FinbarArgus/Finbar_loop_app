@@ -11,6 +11,7 @@ and no sideways scrolling.
 """
 import argparse
 import base64
+import hashlib
 import http.server
 import json
 import re
@@ -112,6 +113,10 @@ def serve(directory):
     return srv
 
 
+def blob_sha(data):
+    return hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest()
+
+
 def fake_github(repo):
     def handle(route):
         req = route.request
@@ -120,9 +125,10 @@ def fake_github(repo):
         if req.headers.get('authorization') != 'Bearer test-token':
             return route.fulfill(status=401, body='{}')
         if '/git/trees/' in u.path:
-            paths = [str(p.relative_to(repo)) for p in repo.rglob('*') if p.is_file() and '.loop' not in p.parts]
-            return route.fulfill(status=200, content_type='application/json',
-                                 body=json.dumps({'tree': [{'path': p, 'type': 'blob'} for p in paths]}))
+            files = sorted(p for p in repo.rglob('*') if p.is_file() and '.loop' not in p.parts)
+            blobs = [{'path': str(p.relative_to(repo)), 'type': 'blob', 'sha': blob_sha(p.read_bytes())} for p in files]
+            root = hashlib.sha1(json.dumps(blobs).encode()).hexdigest()
+            return route.fulfill(status=200, content_type='application/json', body=json.dumps({'sha': root, 'tree': blobs}))
         if parts[4] == 'contents' if len(parts) > 4 else False:
             rel = '/'.join(parts[5:])
             f = repo / rel
@@ -130,7 +136,8 @@ def fake_github(repo):
                 body = json.loads(req.post_data)
                 f.parent.mkdir(parents=True, exist_ok=True)
                 f.write_bytes(base64.b64decode(body['content']))
-                return route.fulfill(status=201, content_type='application/json', body='{}')
+                return route.fulfill(status=201, content_type='application/json',
+                                     body=json.dumps({'content': {'path': rel, 'sha': blob_sha(f.read_bytes())}}))
             if not f.is_file():
                 return route.fulfill(status=404, body='{}')
             return route.fulfill(status=200, body=f.read_bytes(),
@@ -314,6 +321,11 @@ def run(loop_bin, graph, shots):
                 loop(loop_bin, repo, 'pull')
                 page.goto(base + '#/list')
                 page.wait_for_selector('details.history')
+                # The list draws from the cached tree first, then redraws once the background reload sees the pull.
+                try:
+                    page.locator('details.history > summary', has_text='Questions history (2)').wait_for(timeout=5000)
+                except Exception:
+                    pass
                 check(page, 'Questions history (2)' in page.locator('details.history > summary').inner_text(),
                       'answered questions move to the Questions history', failures)
                 check(page, page.locator('.tabs a').count() == 3, 'three tabs, history below', failures)
