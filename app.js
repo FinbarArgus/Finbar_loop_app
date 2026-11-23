@@ -766,14 +766,15 @@
           const p = mine.collections.find((c) => c.key === parent.value);
           const path = p ? `${p.name} / ${n}` : n;
           await put(`zotero_requests/${stamp()}.json`, new TextEncoder().encode(JSON.stringify({ name: n, parent_key: p ? p.key : null, parent_name: p ? p.name : null })), `new Zotero collection: ${path}`);
-          st.textContent = `Asked for "${path}": the loop creates it within about a minute…`;
+          st.textContent = `"${path}" will be made in Zotero within about a minute (by the scheduled script)…`;
           clearInterval(timer);
           timer = setInterval(async () => {
             const cols = (await getJSON('state/zotero_collections.json').catch(() => ({}))).collections || [];
             const made = cols.find((c) => c.name === path);
-            if (made) { clearInterval(timer); mine.collections = cols; st.textContent = `Created "${path}".`; if (onMade) onMade(made); }
+            if (made) { clearInterval(timer); mine.collections = cols; st.textContent = `Made "${path}" in Zotero.`; if (onMade) onMade(made); }
           }, 5000);
         } }, 'Create')), st));
+    box.setParent = (key) => { if ([...parent.options].some((o) => o.value === key)) parent.value = key; };
     return box;
   }
 
@@ -807,10 +808,13 @@
         [...colSel.options].forEach((o) => { o.hidden = q && !o.textContent.toLowerCase().includes(q); });
       });
       parts.push(el('label', {}, 'Save to Zotero collection', filter, colSel));
-      parts.push(newCollectionForm(null, (c) => {
+      // "Inside" (where a new collection goes) follows the collection picked above.
+      const nc = newCollectionForm(null, (c) => {
         if (![...colSel.options].some((o) => o.value === c.key)) colSel.append(el('option', { value: c.key }, c.name));
         colSel.value = c.key;
-      }));
+      });
+      colSel.addEventListener('change', () => nc.setParent(colSel.value));
+      parts.push(nc);
     }
     parts.push(el('label', {}, 'Deadline (optional)', due));
     const status = el('div', { class: 'status' });

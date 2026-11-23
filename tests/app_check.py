@@ -364,18 +364,20 @@ def run(loop_bin, graph, shots):
                 check(page, form.locator('.colsel option:not([hidden])').count() == 1, 'collection filter', failures)
                 # a new collection from the form: requested, then selected once the loop has made it
                 nc = form.locator('details.newcol')
+                form.locator('.colsel').select_option('BBBB2222')
                 nc.locator('summary').click()
+                check(page, nc.locator('select').input_value() == 'BBBB2222', '"Inside" defaults to the chosen collection', failures)
                 nc.locator('input[type=text]').fill('Beat maps')
                 nc.locator('select').select_option('AAAA1111')
                 nc.locator('button.primary').click()
-                nc.locator('.status >> text=/^Asked for/').wait_for()
+                nc.locator('.status >> text=/will be made in Zotero within about a minute/').wait_for()
                 reqs = [json.loads(f.read_text()) for f in (repo / 'zotero_requests').glob('*.json')]
                 check(page, reqs and reqs[0] == {'name': 'Beat maps', 'parent_key': 'AAAA1111', 'parent_name': 'ROM'},
                       f'new collection requested {reqs}', failures)
                 cols = json.loads((repo / 'state/zotero_collections.json').read_text())
                 cols['collections'].append({'key': 'NEWC0001', 'id': None, 'name': 'ROM / Beat maps', 'pending': True})
                 (repo / 'state/zotero_collections.json').write_text(json.dumps(cols))
-                nc.locator('.status >> text=/^Created/').wait_for(timeout=15000)
+                nc.locator('.status >> text=/^Made "ROM \\/ Beat maps" in Zotero/').wait_for(timeout=15000)
                 check(page, form.locator('.colsel').input_value() == 'NEWC0001', 'new collection selected', failures)
                 form.locator('.colsel').select_option('BBBB2222')
                 form.locator(':scope > label > input[type=text]').fill('A paper to read')
