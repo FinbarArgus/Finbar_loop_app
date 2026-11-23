@@ -750,6 +750,33 @@
     return el('div', { class: 'pextras' }, summary, notes);
   }
 
+  // A new Zotero collection: written as zotero_requests/<t>.json; the loop creates it (web API) and adds it
+  // to state/zotero_collections.json. onMade(collection) runs when it appears.
+  function newCollectionForm(parentKey, onMade) {
+    const name = el('input', { type: 'text', placeholder: 'New collection name' });
+    const parent = el('select', {}, el('option', { value: '' }, 'Top level'),
+      mine.collections.filter((c) => !c.pending).map((c) => el('option', { value: c.key, selected: c.key === parentKey ? true : null }, c.name)));
+    const st = el('div', { class: 'status' });
+    let timer = null;
+    const box = el('details', { class: 'addlink newcol' }, el('summary', {}, '+ New Zotero collection'),
+      el('div', { class: 'newentry' }, el('label', {}, 'Name', name), el('label', {}, 'Inside', parent),
+        el('div', { class: 'row' }, el('span', { class: 'grow' }), el('button', { class: 'primary', onclick: async () => {
+          const n = name.value.trim();
+          if (!n) { st.textContent = 'Give it a name.'; return; }
+          const p = mine.collections.find((c) => c.key === parent.value);
+          const path = p ? `${p.name} / ${n}` : n;
+          await put(`zotero_requests/${stamp()}.json`, new TextEncoder().encode(JSON.stringify({ name: n, parent_key: p ? p.key : null, parent_name: p ? p.name : null })), `new Zotero collection: ${path}`);
+          st.textContent = `Asked for "${path}": the loop creates it within about a minute…`;
+          clearInterval(timer);
+          timer = setInterval(async () => {
+            const cols = (await getJSON('state/zotero_collections.json').catch(() => ({}))).collections || [];
+            const made = cols.find((c) => c.name === path);
+            if (made) { clearInterval(timer); mine.collections = cols; st.textContent = `Created "${path}".`; if (onMade) onMade(made); }
+          }, 5000);
+        } }, 'Create')), st));
+    return box;
+  }
+
   // A link (Overleaf or any other) as an entry, e.g. a student's draft.
   function linkForm(kind, preset, redraw, label) {
     const t = el('input', { type: 'text', placeholder: 'Title (optional)' });
@@ -780,6 +807,10 @@
         [...colSel.options].forEach((o) => { o.hidden = q && !o.textContent.toLowerCase().includes(q); });
       });
       parts.push(el('label', {}, 'Save to Zotero collection', filter, colSel));
+      parts.push(newCollectionForm(null, (c) => {
+        if (![...colSel.options].some((o) => o.value === c.key)) colSel.append(el('option', { value: c.key }, c.name));
+        colSel.value = c.key;
+      }));
     }
     parts.push(el('label', {}, 'Deadline (optional)', due));
     const status = el('div', { class: 'status' });
@@ -846,6 +877,7 @@
             redraw();
           } }, 'Add'))));
       }
+      if (tab === 'read') body.append(newCollectionForm(null, null));
       PRIOS.forEach(([p, label]) => {
         const list = byPrio(open.filter((e) => (e.priority || 'med') === p));
         const card = el('section', { class: `mgroup prio-${p}` }, el('h3', {}, label, el('span', { class: 'n' }, ` ${list.length}`)));
