@@ -2,11 +2,11 @@
 // A pure function of the agents (no clock, no network): the same agents give the same farm on every device.
 // Loaded in the browser (window.LoopHills) and by Node (tests).
 //
-// LOOP is the food source on the surface, in the middle. Every other session is an anthill on the surface beside it,
-// whose shaft leads down to that session's own chamber, its anthome. Sessions that messaged each other
-// (state/messages.json, the last 50) are joined by a tunnel underground, through a gallery below the homes; messages
-// with LOOP go up the session's shaft and along the surface to the food. A rock on an anthill means that session
-// is blocked on Finbar. Each anthome's shape, contents and lights come from its name, so each looks different; the
+// LOOP is the food source on the surface, in the middle: a pile of fruit, at the growth tree's foot in the app's
+// scene (scene.js). Every other session is an anthill on the surface beside it, whose shaft leads down to that
+// session's own chamber, its anthome. Sessions that messaged each other (state/messages.json, the last 50) are joined
+// by a tunnel underground, through a gallery below the homes; messages with LOOP go up the session's shaft and
+// along the surface to the food. A rock on an anthill means that session is blocked on Finbar. Each anthome's shape, contents and lights come from its name, so each looks different; the
 // colour of its lights is the session's role (HIGH, MED, LOW, IMPLEMENT or other), and the lights are off when the
 // session has stalled or stopped. Working sessions have ants walking from their home up to the surface.
 (function (root, factory) {
@@ -79,7 +79,7 @@
     sky: '#f3f2ea', grass: '#6f8a55', grassLight: '#87a068', topsoil: '#7d5e42', soil: ['#6e5139', '#634832', '#57402d'],
     pebble: '#8d8378', pebbleDark: '#6f675d', room: '#c9a77e', roomFloor: '#b99569', wall: '#9c7a57', tunnel: '#b8956b',
     trail: '#a89068', ant: '#1f1610', egg: '#f2ece0', seed: '#d2b483', seedDark: '#a8885b', larva: '#efe3c7', fungus: '#d9dccb',
-    fungusDark: '#b5b9a3', root: '#3c2c1f', crumb: '#e2c46e', leaf: '#7f9a5c', crown: '#b89b55', off: '#6d665e',
+    fungusDark: '#b5b9a3', root: '#3c2c1f', crumb: '#e2c46e', leaf: '#7f9a5c', crown: '#b89b55', fruit: '#c8553d', fruitDark: '#9a3d2c', fruitGold: '#e39a3b', off: '#6d665e',
     rock: '#8a8c88', rockDark: '#686a66', rockLight: '#b0b2ad', label: '#4a4036', inkUnder: '#f4ecdc',
   };
 
@@ -367,7 +367,7 @@
       }
     }
   }
-  // LOOP: a pile of seeds, crumbs and leaf bits on the surface, wearing a crown.
+  // LOOP: a pile of fruit fallen from the growth tree (which stands in it in the scene) and leaf bits, wearing a crown.
   function paintFood(hl, L, px) {
     const t = toneOf(hl), f = L.food, r = rng('food', hl.name);
     const set = (x, y, c) => px.set(`${x},${y}`, t(c));
@@ -378,7 +378,7 @@
       peak = Math.max(peak, col);
       for (let j = 0; j < col; j++) {
         const n = r();
-        set(Math.floor(f.x0) + i, L.surface - 1 - j, n < 0.4 ? C.seed : n < 0.65 ? C.crumb : n < 0.85 ? C.seedDark : C.leaf);
+        set(Math.floor(f.x0) + i, L.surface - 1 - j, n < 0.35 ? C.fruit : n < 0.55 ? C.fruitGold : n < 0.75 ? C.fruitDark : n < 0.88 ? C.crumb : C.leaf);
       }
     }
     ['# # #', '#####'].forEach((row, ry) => [...row].forEach((ch, rx) => {
@@ -437,8 +437,11 @@
   // are <circle class="glow" data-role=<role>>; tap targets are data-k="hill" (a group per hill, data-i its index
   // in layout().hills), data-k="food" (the food in an anthome: data-i its hill index) and data-k="path" (data-i its
   // index in layout().paths).
-  function svg(agents, opts = {}) {
+  // The farm's drawing without its <svg> wrapper: {body, L}, in blocks (y down, the surface at L.surface).
+  // opts.scene (for scene.js): no sky (the scene draws it), and the soil and grass run over opts.span [x0, x1].
+  function parts(agents, opts = {}) {
     const L = layout(agents, opts);
+    const [sx0, sx1] = opts.span || [0, L.width];
     const px = new Map(), carved = new Set();
     const put = (c) => (i, j) => { if (j >= L.surface && i >= 0 && i < L.width && j < L.height) { px.set(`${i},${j}`, c); carved.add(`${i},${j}`); } };
     const r = rng('soil');
@@ -447,7 +450,7 @@
       px.set(`${i},${j}`, r() < 0.5 ? C.pebble : C.pebbleDark);
       if (r() < 0.4) px.set(`${i + 1},${j}`, C.pebbleDark);
     }
-    for (let i = 0; i < L.width; i++) {                           // grass along the surface
+    for (let i = Math.floor(sx0); i < sx1; i++) {                  // grass along the surface
       px.set(`${i},${L.surface}`, C.topsoil);
       if (hash('grass', i) % 4 === 0) px.set(`${i},${L.surface - 1}`, hash('g', i) % 2 ? C.grass : C.grassLight);
     }
@@ -491,18 +494,24 @@
         + `<rect x="${f(hm.x0 - 0.5)}" y="${f(hm.y0 - 0.5)}" width="${f(hm.w + 1)}" height="${f(hm.h + LABEL + 0.5)}"/></g>`;
       foods += `<rect data-k="food" data-i="${n}" x="${f(hl.food.x0 - 0.6)}" y="${f(hl.food.y0 - 1)}" width="${f(hl.food.w + 1.2)}" height="${f(hl.food.h + 1.4)}"/>`;
     });
-    const counts = MOOD_ORDER.map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L.width} ${L.height}" class="anthills" role="img"`
-      + ` aria-label="${L.hills.length} agents: ${counts}">`
-      + `<rect width="${L.width}" height="${L.surface}" fill="${C.sky}"/>`
-      + `<rect y="${L.surface}" width="${L.width}" height="${f(L.height - L.surface)}" fill="${C.soil[0]}"/>`
-      + `<rect y="${L.surface + 10}" width="${L.width}" height="${f(L.height - L.surface - 10)}" fill="${C.soil[1]}"/>`
-      + `<rect y="${f(L.gallery - 2)}" width="${L.width}" height="${f(L.height - L.gallery + 2)}" fill="${C.soil[2]}"/>`
+    const sw = f(sx1 - sx0), sx = sx0 ? `x="${f(sx0)}" ` : '';
+    const body = (opts.scene ? '' : `<rect width="${L.width}" height="${L.surface}" fill="${C.sky}"/>`)
+      + `<rect ${sx}y="${L.surface}" width="${sw}" height="${f(L.height - L.surface)}" fill="${C.soil[0]}"/>`
+      + `<rect ${sx}y="${L.surface + 10}" width="${sw}" height="${f(L.height - L.surface - 10)}" fill="${C.soil[1]}"/>`
+      + `<rect ${sx}y="${f(L.gallery - 2)}" width="${sw}" height="${f(L.height - L.gallery + 2)}" fill="${C.soil[2]}"/>`
       + `<g shape-rendering="crispEdges">${rects(px)}</g>`
       + `<g class="glows" opacity="0.38">${glow}</g>${labels}<g class="ants">${ants}</g>`
-      + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}${foods}</g>`) + '</svg>';
+      + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}${foods}</g>`);
+    return { body, L };
   }
 
-  return { pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, svg, label,
+  function svg(agents, opts = {}) {
+    const { body, L } = parts(agents, opts);
+    const counts = MOOD_ORDER.map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L.width} ${L.height}" class="anthills" role="img"`
+      + ` aria-label="${L.hills.length} agents: ${counts}">${body}</svg>`;
+  }
+
+  return { pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, parts, svg, label,
     SIZES, ANTS, SHAPES, CONTENTS, SOILS, LIGHTS, ROLE_ORDER, ROLE_TEXT, SPEED, SCALE, COL };
 }));

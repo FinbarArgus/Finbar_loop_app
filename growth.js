@@ -362,7 +362,7 @@
   const f = (n) => (Math.round(n * 100) / 100).toString();
   // Colours (Finbar, C-0006): brown wood, muted green leaves, each animal its own muted ink and fill.
   const WOOD = '#6e4b2e', GROUND = '#4f3a26', LEAF_INK = '#5d7748', LEAF_FILL = '#cbd9b4';
-  const INK = '#3b2a1c', PAPER = '#fff', SCALE = '#b8b8b8';
+  const INK = '#3b2a1c', PAPER0 = '#fff', SCALE = '#b8b8b8';
   // Leaves: a diamond outline of cells, 3 wide (5 at a 1.6x multiplier or more).
   const LEAF = [[' # ', '#o#', ' # '], ['  #  ', ' #o# ', '#ooo#', ' #o# ', '  #  ']];
 
@@ -403,8 +403,12 @@
   // opts: {hour, mini (no names, no tap targets), branchNames (each collection's last name at its branch tip)}. Tap targets: data-k="seg" with data-i = the paper's entry id
   // and data-b = its branch ('trunk' or the collection name), data-k="branch" on a collection's stub, and
   // data-k="creature" with data-i = the Write entry id. Leaves have none.
-  function svg(state, opts = {}) {
+  // The tree's drawing without its <svg> wrapper: {body, hits, x0, y0, w, h} (hits: its tap targets), in tree units with y down (the ground at
+  // y = 0, the tree above it at negative y). opts.scene (for scene.js): no background and no ground, labels haloed
+  // in opts.paper, and the height scale at x = opts.scaleX (tree units) with its labels to its right.
+  function parts(state, opts = {}) {
     const L = layout(state);
+    const PAPER = opts.paper || PAPER0;
     const hour = opts.hour != null ? opts.hour : hourOf(Date.now());
     const cell = (x, y) => `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`;
     const wood = new Set();
@@ -464,33 +468,39 @@
     const top = Math.max(Math.max(...js) + 1, Math.round(MIN_FRAME / CELL));
     // Height scale: a light rule left of the tree, a tick every metre-step, labelled every other tick.
     const step = [1, 2, 5, 10, 20, 50, 100].find((s) => top * CELL / s <= 12) || 200;
-    const si = Math.min(...is, -4) - (opts.mini ? 3 : 6);
+    const si = opts.scaleX != null ? Math.round(opts.scaleX / CELL) : Math.min(...is, -4) - (opts.mini ? 3 : 6);
+    const right = opts.scaleX != null;
     const rule = new Set();
     let scaleText = '';
     for (let j = 0; j < top; j++) rule.add(`${si},${j}`);
     for (let m = 0, n = 0; m * step / CELL <= top; m++, n++) {
       const j = Math.round(m * step / CELL);
-      rule.add(`${si - 1},${j}`);
+      rule.add(`${right ? si + 1 : si - 1},${j}`);
       if (m % 2 === 0 && m > 0 && !opts.mini) {
-        scaleText += `<text x="${f((si - 1.5) * CELL)}" y="${f(-(j - 0.6) * CELL)}" font-size="${f(CELL * 2.4)}" font-family="ui-monospace, Menlo, Consolas, monospace"`
-          + ` text-anchor="end" fill="${SCALE}">${m * step} m</text>`;
+        scaleText += `<text x="${f((right ? si + 2.5 : si - 1.5) * CELL)}" y="${f(-(j - 0.6) * CELL)}" font-size="${f(CELL * 2.4)}" font-family="ui-monospace, Menlo, Consolas, monospace"`
+          + ` text-anchor="${right ? 'start' : 'end'}" fill="${SCALE}">${m * step} m</text>`;
       }
     }
-    const i0 = si - (opts.mini ? 2 : 10) - margin, i1 = Math.max(...is, 4) + margin + 1, j1 = top + margin, jg = -2;
+    const i0 = Math.min(si - (right ? 0 : opts.mini ? 2 : 10), Math.min(...is)) - margin, i1 = Math.max(...is, 4, si + (right ? 10 : 0)) + margin + 1;
+    const j1 = top + margin, jg = opts.scene ? 0 : -2;
     const ground = new Set();
     const g = Math.max(6, Math.round((i1 - si) * 0.3));
-    for (let i = -g; i <= g; i++) ground.add(`${i},-1`);
+    if (!opts.scene) for (let i = -g; i <= g; i++) ground.add(`${i},-1`);
     const x0 = i0 * CELL, y0 = -j1 * CELL, w = (i1 - i0) * CELL, h = (j1 - jg) * CELL;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${f(x0)} ${f(y0)} ${f(w)} ${f(h)}" class="growth-tree" role="img" shape-rendering="crispEdges"`
-      + ` aria-label="${esc(state.stage)}: ${state.papers.length} papers, ${state.leaves.length} leaves, ${f(state.height)} m tall">`
-      + `<rect x="${f(x0)}" y="${f(y0)}" width="${f(w)}" height="${f(h)}" fill="${PAPER}"/>`
+    const body = (opts.scene ? '' : `<rect x="${f(x0)}" y="${f(y0)}" width="${f(w)}" height="${f(h)}" fill="${PAPER}"/>`)
       + `<g class="scale">${runs(rule, SCALE)}${scaleText}</g>`
       + runs(ground, GROUND) + runs(wood, WOOD) + runs(leafPaper, LEAF_FILL) + runs(leafInk, LEAF_INK)
-      + critters + labels
-      + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits.join('')}</g>`) + '</svg>';
+      + critters + labels;
+    return { body, hits: opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits.join('')}</g>`, x0, y0, w, h };
+  }
+
+  function svg(state, opts = {}) {
+    const { body, hits, x0, y0, w, h } = parts(state, opts);
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${f(x0)} ${f(y0)} ${f(w)} ${f(h)}" class="growth-tree" role="img" shape-rendering="crispEdges"`
+      + ` aria-label="${esc(state.stage)}: ${state.papers.length} papers, ${state.leaves.length} leaves, ${f(state.height)} m tall">${body}${hits}</svg>`;
   }
 
   return { hash, rng, dayOf, addDays, hourOf, topicPath, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
     STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
-    derive, layout, walk, svg };
+    derive, layout, walk, parts, svg };
 }));
