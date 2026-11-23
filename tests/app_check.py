@@ -364,9 +364,16 @@ def run(loop_bin, graph, shots):
                 rq = [json.loads(f.read_text()) for f in (repo / 'requests/Q-0003').glob('*.json')]
                 check(page, any(r.get('kind') == 'revisit' and r['text'] == 'Was explicit right after all?' for r in rq),
                       'revisit request written for that item', failures)
-                # Mine: drop a paper under High, pick its Zotero collection, set a deadline, tick it done.
+                # The Manual tab was called Mine: old links redirect.
+                meta = page.locator('.meta a').all_inner_texts()
+                check(page, meta[:2] == ['Agents', 'Manual'], f'header tabs Agents and Manual {meta}', failures)
+                page.goto(base + '#/mine/write')
+                page.wait_for_url('**#/manual/write')
+                page.wait_for_selector('.tabs a.on[href="#/manual/write"]')
+                check(page, page.locator('.meta a.on').inner_text() == 'Manual', 'an old #/mine/write link opens Manual > Write', failures)
+                # Manual: drop a paper under High, pick its Zotero collection, set a deadline, tick it done.
                 import datetime as _dt
-                page.goto(base + '#/mine/read')
+                page.goto(base + '#/manual/read')
                 page.wait_for_selector('.mgroup.prio-high .dropzone')
                 check(page, page.locator('.mgroup').count() == 3, 'Read: High / Medium / Low groups', failures)
                 page.locator('.mgroup.prio-high input[type=file]').set_input_files(str(tmp_l / 'fig.png'))
@@ -416,21 +423,21 @@ def run(loop_bin, graph, shots):
                       'paper notes saved', failures)
                 (tmp_l / 'sum.json').write_text(json.dumps({'blocks': [{'type': 'callout', 'tone': 'note', 'md': 'It builds a beat map.'}]}))
                 loop(loop_bin, repo, 'summary', ents[0]['id'], '--spec', str(tmp_l / 'sum.json'))
-                page.goto(base + '#/mine/write')
-                page.goto(base + '#/mine/read')
+                page.goto(base + '#/manual/write')
+                page.goto(base + '#/manual/read')
                 page.wait_for_selector('.mrow details.pextra >> text=Summary')
                 row = page.locator('.mrow', has_text='A paper to read')
                 row.locator('details.pextra', has_text='Summary').locator('summary').click()
                 page.wait_for_selector('.mrow .pextra aside.callout')
                 check(page, 'It builds a beat map.' in row.inner_text(), 'paper summary shown', failures)
-                page.goto(base + '#/mine/write')
+                page.goto(base + '#/manual/write')
                 page.wait_for_selector('.newentry input[type=url]')
                 page.locator('.mine > .newentry input[type=text]').fill('Paper 1 draft')
                 page.locator('.mine > .newentry input[type=url]').fill('https://www.overleaf.com/project/abc')
                 page.locator('.mine > .newentry button.primary').click()
                 page.wait_for_selector('.mrow a[href="https://www.overleaf.com/project/abc"]')
                 check(page, True, 'Write: Overleaf link added', failures)
-                page.goto(base + '#/mine/student')
+                page.goto(base + '#/manual/student')
                 page.wait_for_selector('.switch button >> text=Ben')
                 page.locator('.switch button', has_text='Ben').click()
                 page.wait_for_selector('.switch button.on >> text=Ben')
@@ -450,9 +457,9 @@ def run(loop_bin, graph, shots):
                 page.locator('.mrow', has_text='fig').locator('input[type=checkbox]').check()
                 page.wait_for_selector('details.history >> text=Done (1)')
                 check(page, json.loads((repo / 'personal' / st[0]['id'] / 'entry.json').read_text())['done'], 'ticked done', failures)
-                check(page, narrow(), 'Mine: no sideways scroll', failures)
+                check(page, narrow(), 'Manual: no sideways scroll', failures)
                 if shots:
-                    page.goto(base + '#/mine/read')
+                    page.goto(base + '#/manual/read')
                     page.wait_for_selector('.mrow')
                     page.screenshot(path=f'{shots}/{label}-mine.png', full_page=True)
 
@@ -468,7 +475,7 @@ def run(loop_bin, graph, shots):
                 seed('read-key', title='Smith2026Hopfit', title_from='record', key_title='Smith2026Hopfit', journal='J Clin Monit Comput',
                      full_title='HOPFIT: A neuro-cardiovascular monitoring framework')
                 seed('read-typed', title='My own title', key_title='Smith2025Atlas', journal='Physiol Rep', full_title='An atlas')
-                page.goto(base + '#/mine/read')
+                page.goto(base + '#/manual/read')
                 page.reload()
                 krow = page.locator('.mrow', has_text='Smith2026Hopfit')
                 krow.wait_for()
@@ -498,7 +505,7 @@ def run(loop_bin, graph, shots):
 
                 # Write: draft v1 -> v2, submitted, DOI (normalised), citations shown, published moves it to Done.
                 wid = [json.loads(f.read_text()) for f in (repo / 'personal').glob('write-*/entry.json')][0]['id']
-                page.goto(base + '#/mine/write')
+                page.goto(base + '#/manual/write')
                 row = page.locator('.mrow', has_text='Paper 1 draft')
                 check(page, row.locator('.mcheck').count() == 0, 'Write: no single done tick', failures)
                 row.locator('.wstate', has_text='Draft').locator('input').check()
