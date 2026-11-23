@@ -29,9 +29,14 @@ This repository holds code only. The items, figures and answers are in the priva
 | `style.css` | Light and dark themes, phone-first layout |
 | `vendor/katex` | KaTeX 0.16.11 (MIT), for the maths |
 | `tests/app_check.py` | Headless check against a fake GitHub API (Playwright) |
+| `tests/tab_speed.py` | Times switching the top tabs, with a delay per API request |
 
 The content-security policy lets the page run only its own scripts and talk only to `api.github.com`.
 
 ## Check
 
     python tests/app_check.py --loop <data repo>/bin/loop [--graph provenance_graph.json] [--shots DIR]
+    python tests/tab_speed.py --loop <data repo>/bin/loop [--delay 0.15] [--entries 60] [--width 390]
+
+Views draw from the last loaded repo tree and the JSON files cached by blob sha, then reload the tree in the
+background and redraw if it changed. A write marks the tree stale, so the redraw after it reloads.
