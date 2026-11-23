@@ -587,13 +587,17 @@ def run(loop_bin, graph, shots):
                 check(page, narrow(), 'status: no sideways scroll', failures)
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-status.png', full_page=True)
-                # Hills: every agent an anthill (size by priority, rock when blocked, ants when working), the tree beside.
+                # Hills: the ant farm (LOOP the food on top, an anthome per session sized by tokens, lights by role, a rock
+                # when blocked, ants when working, tunnels for messages), the tree beside.
                 st = json.loads((repo / 'state/status.json').read_text())
                 mk = lambda name, state, **kw: {'name': name, 'job': name[:8], 'state': state, 'running': state != 'stalled',
                                                 'why': '', 'working_on': f'{name} at work', 'recent': [], 'items': [], **kw}
                 st['agents'] = [mk('LOOP', 'working', loop=True), mk('HIGH-session-a', 'blocked', items=['Q-0001'], why='waiting on Finbar',
                                 recent=[{'id': 'Q-0001', 'title': 'Which step size for the run?', 'tab': 'question', 'status': 'question', 'blocking_now': True}]),
                                 mk('HIGH-paper', 'working'), mk('MED-y', 'stalled'), mk('LOW-x', 'working'), mk('IMPLEMENT-app', 'working')]
+                for a, tok in zip(st['agents'], [9e6, 4e6, 2.5e7, 3e5, 1e6, 1.2e7]):
+                    a['week_tokens'] = {'total': tok, 'output': tok * 0.01, 'input': tok * 0.002, 'cache_write': tok * 0.1, 'cache_read': tok * 0.888}
+                st.setdefault('usage', {})['week_start'] = '2026-11-19T07:00:00+13:00'
                 (repo / 'state/status.json').write_text(json.dumps(st))
                 msgs = [{'at': f'2026-11-23T0{k}:00:00Z', 'from': fr, 'to': to, 'text': f'fixture message {k}'}
                         for k, (fr, to) in enumerate([('LOOP', 'HIGH-paper'), ('HIGH-paper', 'LOOP'), ('LOOP', 'HIGH-paper'),
@@ -617,9 +621,38 @@ def run(loop_bin, graph, shots):
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-hills-screen.png')
                 ys = page.evaluate("Object.fromEntries([...document.querySelectorAll('.hview text')].map((t) => [t.textContent, t.getBoundingClientRect().top]))")
-                middle = [ys[n] for n in ('HIGH-session-a', 'HIGH-paper', 'MED-y', 'LOW-x', 'old-session')]
-                check(page, ys['LOOP'] < min(middle) and max(middle) < ys['IMPLEMENT-app'],
-                      f'Hills: LOOP at the back, managers in the middle, IMPLEMENT- in front {ys}', failures)
+                check(page, all(ys['LOOP'] < y for n, y in ys.items() if n != 'LOOP'), f'Hills: LOOP the food on the surface, the homes below {ys}', failures)
+                glows = page.evaluate("[...document.querySelectorAll('.hview .glow')].map((c) => [c.dataset.role, c.getAttribute('fill')])")
+                roles = {r: c for r, c in glows}
+                check(page, roles.get('high') == '#e0482f' and roles.get('implement') == '#3f8fe0' and roles.get('low') == '#5fb04a' and 'med' not in roles,
+                      f'Hills: lights in the role colour, off when stalled {roles}', failures)
+                widths = page.evaluate("Object.fromEntries([...document.querySelectorAll('.hview .hits g[data-k=hill]')].map((g) => [g.dataset.i, g.lastElementChild.getBoundingClientRect().width]))")
+                names = page.evaluate("[...document.querySelectorAll('.hview text')].map((t) => t.textContent)")
+                wd = {names[int(i)]: w for i, w in widths.items()}
+                check(page, wd['HIGH-paper'] > wd['IMPLEMENT-app'] > wd['HIGH-session-a'] > wd['LOW-x'] > wd['MED-y'],
+                      f'Hills: anthomes sized by tokens since the weekly reset {wd}', failures)
+                # Hover (tap on a phone) an anthome for its usage, the food inside it for its focus.
+                hp = names.index('HIGH-paper')
+                home = page.locator(f'.hview .hits g[data-k="hill"][data-i="{hp}"] rect').last
+                food = page.locator(f'.hview .hits [data-k="food"][data-i="{hp}"]')
+                if label == 'computer':
+                    home.hover(position={'x': 2, 'y': 2}, force=True)
+                else:
+                    home.dispatch_event('click')
+                info = page.locator('.hinfo').inner_text()
+                check(page, 'HIGH-paper' in info and '25M tokens' in info and 'since the weekly reset' in info and 'cache reads' in info,
+                      f'Hills: {"hovering" if label == "computer" else "tapping"} an anthome shows its usage {info!r}', failures)
+                if label == 'computer':
+                    food.hover(force=True)
+                else:
+                    food.dispatch_event('click')
+                info = page.locator('.hinfo').inner_text()
+                check(page, 'current focus' in info and 'HIGH-paper at work' in info,
+                      f'Hills: {"hovering" if label == "computer" else "tapping"} the food shows its focus {info!r}', failures)
+                if shots:
+                    page.locator('.hinfo').scroll_into_view_if_needed()
+                    page.screenshot(path=f'{shots}/{label}-hills-focus.png')
+                    page.evaluate('scrollTo(0, 0)')
                 n_ants = page.locator('.hview .ant[data-h]').count()
                 check(page, n_ants == 6 + 5 + 2 + 5, f'Hills: ants on the working hills only ({n_ants})', failures)   # LOOP, HIGH, LOW, IMPLEMENT (large)
                 check(page, page.locator('.hview [data-k="path"]').count() == 3 and page.locator('.hview .ant[data-p]').count() == 3 + 1 + 1,
