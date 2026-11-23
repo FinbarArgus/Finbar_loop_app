@@ -91,7 +91,8 @@ test("each paper grows one segment on its collection's branch, which hangs from 
   const [ga, gb] = ch.get('physiology / cardiac / valves').segs;
   assert.ok(Math.abs(gb.len / ga.len - 1.2 / Math.sqrt(1 + 1 / G.SEG_HALF)) < 1e-12);
   // Every paper also raises the trunk.
-  assert.ok(Math.abs(s.height - G.trunkHeight(s.grown)) < 1e-9 || s.height > G.trunkHeight(s.grown));
+  // (height is the drawn tree's, scaled by the young tree's scale)
+  assert.ok(Math.abs(s.height / s.scale - G.trunkHeight(s.grown)) < 1e-9 || s.height / s.scale > G.trunkHeight(s.grown));
   assert.equal(ch.get('trunk').segs.filter((g) => g.paper).length, 5);
   // Hover: every paper's segment is a tap target with its entry id and branch; leaves have none.
   const svg = G.svg(s, { hour: 0 });
@@ -184,7 +185,7 @@ test('the hourly walk: fixed for a given hour, one step to a neighbour each hour
 });
 
 test('names are escaped in the SVG', () => {
-  const svg = G.svg(G.derive([{ ...W, submitted: true, submitted_at: '2026-12-01T10:00:00' }], { creatures: { w1: { name: '<b>&"x' } } }, {}, NOW), { hour: 0 });
+  const svg = G.svg(G.derive([read('a', '2026-11-30'), { ...W, submitted: true, submitted_at: '2026-12-01T10:00:00' }], { creatures: { w1: { name: '<b>&"x' } } }, {}, NOW), { hour: 0 });
   assert.ok(svg.includes('&lt;b&gt;&amp;&quot;x') && !svg.includes('<b>'));
 });
 
@@ -246,11 +247,38 @@ test('the seedling starts small: SEEDLING tall, rising in a line to the sapling 
   for (const g of [G.SAPLING, 150, 600]) assert.equal(G.trunkHeight(g), G.TRUNK_BASE + G.TRUNK_K * Math.sqrt(g));
   const bare = G.derive([], {}, {}, NOW);
   assert.equal(bare.stage, 'seedling');
-  assert.equal(bare.height, G.SEEDLING);
-  // the frame is a seedling's frame, so a young seedling stands small in it
+  assert.equal(bare.height, 0);
+  // the frame is a seedling's frame (drawn at the first paper's scale), so a young seedling stands small in it
   const vb = (s) => G.svg(s, { hour: 0 }).match(/viewBox="([^"]+)"/)[1].split(' ').map(Number);
-  assert.ok(vb(bare)[3] >= G.MIN_FRAME, `frame ${vb(bare)[3]}`);
+  assert.ok(vb(bare)[3] >= G.trunkHeight(1) * G.youngScale(1), `frame ${vb(bare)[3]}`);
   assert.ok(G.MIN_FRAME > G.trunkHeight(G.SAPLING));
+});
+
+// n papers on every other day (no streak, so each grows 1 unit), dated before NOW.
+const papersN = (n) => Array.from({ length: n }, (_, k) => read(`p${k}`, new Date(Date.UTC(2026, 0, 1) + 2 * k * 864e5).toISOString().slice(0, 10)));
+const NOW100 = '2026-12-31T12:00:00';
+
+test('a young tree is the same tree scaled down (Q-0036): 0 m, 5 cm after 1 paper, ~1.1 m after 5, full size from 20', () => {
+  const h = (n) => G.derive(papersN(n), {}, {}, NOW100).height;
+  assert.equal(h(0), 0);
+  assert.ok(h(1) >= 0.04 && h(1) <= 0.06, `1 paper: ${h(1)} m`);
+  assert.ok(h(5) > 0.9 && h(5) < 1.3, `5 papers: ${h(5)} m`);
+  assert.ok(Math.abs(h(20) - G.trunkHeight(20)) < 0.5, `20 papers: ${h(20)} m`);
+  assert.ok(Math.abs(h(100) - G.trunkHeight(100)) < 0.5, `100 papers: ${h(100)} m`);
+  for (let n = 0; n < 25; n++) assert.ok(h(n + 1) > h(n), `rises from ${n} papers`);
+  assert.equal(G.youngScale(0), 0);
+  assert.equal(G.youngScale(G.SAPLING), 1);
+  // the whole drawing shrinks: wood, blocks and frame are scaled together, and its scale is labelled in true units
+  const one = G.derive(papersN(1), {}, {}, NOW100), twenty = G.derive(papersN(20), {}, {}, NOW100);
+  const svg1 = G.svg(one, { hour: 0 });
+  assert.match(svg1, new RegExp(`<g transform="scale\\(${one.scale}\\)">`));
+  assert.match(svg1, />\d+ cm<\/text>/);
+  assert.doesNotMatch(G.svg(twenty, { hour: 0 }), /<g transform="scale/);
+  const parts1 = G.parts(one, {}), full1 = G.parts({ ...one, scale: 1 }, {});
+  // the same drawing, scaled: as wide x scale; framed to its own height (no seedling minimum), and still taller than the tree
+  assert.ok(Math.abs(parts1.w - one.scale * full1.w) < 1e-9);
+  assert.ok(parts1.h < one.scale * full1.h && parts1.h > one.height, `frame ${parts1.h}, tree ${one.height}`);
+  assert.doesNotMatch(G.svg(G.derive([], {}, {}, NOW100), { hour: 0 }), /fill="#[0-9a-f]+" d=|<polygon/);  // nothing grown, no wood
 });
 
 test('a paper carries its journal and full title, for the line under its key title', () => {

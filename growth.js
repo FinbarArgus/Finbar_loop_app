@@ -73,6 +73,13 @@
   const grownHeight = (grown) => TRUNK_BASE + TRUNK_K * Math.sqrt(grown);
   const trunkHeight = (grown) => (grown >= SAPLING ? grownHeight(grown)
     : SEEDLING + (grownHeight(SAPLING) - SEEDLING) * Math.max(0, grown) / SAPLING);
+  // A young tree is the same tree drawn smaller (Finbar, Q-0036): below SAPLING units grown the whole drawing,
+  // blocks and branches with it, is scaled by youngScale(grown) = (grown / SAPLING)^YOUNG_P, which is 0 with nothing
+  // grown and 1 from SAPLING on. YOUNG_P puts the first paper's tree at FIRST_HEIGHT (5 cm). Heights: 0 m, then 5 cm
+  // after 1 paper, ~1.1 m after 5, ~22 m after 20, ~44 m after 100.
+  const FIRST_HEIGHT = 0.05;
+  const YOUNG_P = Math.log(trunkHeight(1) / FIRST_HEIGHT) / Math.log(SAPLING);
+  const youngScale = (grown) => (grown >= SAPLING ? 1 : Math.pow(Math.max(0, grown) / SAPLING, YOUNG_P));
   // The tree view is never shorter than a seedling's frame (a little over its height at SAPLING), so a seedling
   // stands small in it and grows into it.
   const MIN_FRAME = Math.ceil(grownHeight(SAPLING) + 2);
@@ -294,8 +301,9 @@
     ].sort((a, b) => b.day.localeCompare(a.day));
     const lastGood = goodDays[goodDays.length - 1];
     const streakNow = lastGood && (lastGood === today || lastGood === addDays(today, -1)) ? streak.get(lastGood) : 0;
-    return { seed, today, papers, leaves, passed, creatures, goodDays, events, chains: order,
-      grown, height: Math.max(...order.flatMap((c) => c.segs.map((g) => Math.max(g.y0, g.y1)))),
+    const scale = youngScale(grown);
+    return { seed, today, papers, leaves, passed, creatures, goodDays, events, chains: order, grown, scale,
+      height: scale * Math.max(...order.flatMap((c) => c.segs.map((g) => Math.max(g.y0, g.y1)))),
       streak: streakNow, mult: multOf(streakNow), multToday: multOfDay(today),
       stage: stageOf(grown) };
   }
@@ -405,8 +413,12 @@
   // data-k="creature" with data-i = the Write entry id. Leaves have none.
   // The tree's drawing without its <svg> wrapper: {body, hits, x0, y0, w, h} (hits: its tap targets), in tree units with y down (the ground at
   // y = 0, the tree above it at negative y). opts.scene (for scene.js): no background and no ground, labels haloed
-  // in opts.paper, and the height scale at x = opts.scaleX (tree units) with its labels to its right.
+  // in opts.paper, and the height scale at x = opts.scaleX (true tree units) with its labels to its right.
+  // A young tree (state.scale < 1) is drawn at full size and scaled down as a whole: x0, y0, w, h and the hits
+  // are in true tree units, and the height scale is labelled in true metres. With nothing grown nothing is drawn but
+  // the scale, in the first paper's frame.
   function parts(state, opts = {}) {
+    const k = state.scale == null ? 1 : state.scale > 0 ? state.scale : youngScale(1);
     const L = layout(state);
     const PAPER = opts.paper || PAPER0;
     const hour = opts.hour != null ? opts.hour : hourOf(Date.now());
@@ -462,23 +474,26 @@
           + ` text-anchor="middle" fill="#666" stroke="${PAPER}" stroke-width="${f(CELL * 0.6)}" paint-order="stroke">${esc(c.id.split(' / ').pop())}</text>`;
       }
     }
-    const all = [...wood, ...leafInk, ...leafPaper, ...critCells].map((c) => c.split(',').map(Number));
+    if (!(state.scale > 0) && state.scale != null) { wood.clear(); leafInk.clear(); leafPaper.clear(); critCells.length = 0; critters = ''; labels = ''; hits.length = 0; }
+    const all = [...wood, ...leafInk, ...leafPaper, ...critCells, '0,0'].map((c) => c.split(',').map(Number));
     const is = all.map((c) => c[0]), js = all.map((c) => c[1]);
     const margin = opts.mini ? 2 : 4;
-    const top = Math.max(Math.max(...js) + 1, Math.round(MIN_FRAME / CELL));
-    // Height scale: a light rule left of the tree, a tick every metre-step, labelled every other tick.
-    const step = [1, 2, 5, 10, 20, 50, 100].find((s) => top * CELL / s <= 12) || 200;
-    const si = opts.scaleX != null ? Math.round(opts.scaleX / CELL) : Math.min(...is, -4) - (opts.mini ? 3 : 6);
+    // A full-size tree's frame is at least MIN_FRAME tall; a young one (drawn smaller) is framed to its own height.
+    const top = Math.max(Math.max(...js) + 1, k < 1 ? Math.round((trunkHeight(state.grown || 1) + 2) / CELL) : Math.round(MIN_FRAME / CELL));
+    // Height scale: a light rule left of the tree, a tick every step (true metres), labelled every other tick.
+    const step = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100].find((s) => top * CELL * k / s <= 12) || 200;
+    const mark = (m) => (m < 1 ? `${Math.round(m * 100)} cm` : `${Math.round(m * 10) / 10} m`);
+    const si = opts.scaleX != null ? Math.round(opts.scaleX / k / CELL) : Math.min(...is, -4) - (opts.mini ? 3 : 6);
     const right = opts.scaleX != null;
     const rule = new Set();
     let scaleText = '';
     for (let j = 0; j < top; j++) rule.add(`${si},${j}`);
-    for (let m = 0, n = 0; m * step / CELL <= top; m++, n++) {
-      const j = Math.round(m * step / CELL);
+    for (let m = 0, n = 0; m * step / k / CELL <= top; m++, n++) {
+      const j = Math.round(m * step / k / CELL);
       rule.add(`${right ? si + 1 : si - 1},${j}`);
       if (m % 2 === 0 && m > 0 && !opts.mini) {
         scaleText += `<text x="${f((right ? si + 2.5 : si - 1.5) * CELL)}" y="${f(-(j - 0.6) * CELL)}" font-size="${f(CELL * 2.4)}" font-family="ui-monospace, Menlo, Consolas, monospace"`
-          + ` text-anchor="${right ? 'start' : 'end'}" fill="${SCALE}">${m * step} m</text>`;
+          + ` text-anchor="${right ? 'start' : 'end'}" fill="${SCALE}">${mark(m * step)}</text>`;
       }
     }
     const i0 = Math.min(si - (right ? 0 : opts.mini ? 2 : 10), Math.min(...is)) - margin, i1 = Math.max(...is, 4, si + (right ? 10 : 0)) + margin + 1;
@@ -487,11 +502,13 @@
     const g = Math.max(6, Math.round((i1 - si) * 0.3));
     if (!opts.scene) for (let i = -g; i <= g; i++) ground.add(`${i},-1`);
     const x0 = i0 * CELL, y0 = -j1 * CELL, w = (i1 - i0) * CELL, h = (j1 - jg) * CELL;
-    const body = (opts.scene ? '' : `<rect x="${f(x0)}" y="${f(y0)}" width="${f(w)}" height="${f(h)}" fill="${PAPER}"/>`)
+    const inner = (opts.scene ? '' : `<rect x="${f(x0)}" y="${f(y0)}" width="${f(w)}" height="${f(h)}" fill="${PAPER}"/>`)
       + `<g class="scale">${runs(rule, SCALE)}${scaleText}</g>`
       + runs(ground, GROUND) + runs(wood, WOOD) + runs(leafPaper, LEAF_FILL) + runs(leafInk, LEAF_INK)
       + critters + labels;
-    return { body, hits: opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits.join('')}</g>`, x0, y0, w, h };
+    const wrap = (s) => (k === 1 ? s : `<g transform="scale(${k})">${s}</g>`);
+    const hitG = opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${wrap(hits.join(''))}</g>`;
+    return { body: wrap(inner), hits: hitG, x0: x0 * k, y0: y0 * k, w: w * k, h: h * k };
   }
 
   function svg(state, opts = {}) {
@@ -501,6 +518,6 @@
   }
 
   return { hash, rng, dayOf, addDays, hourOf, topicPath, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
-    STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
+    STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, FIRST_HEIGHT, YOUNG_P, youngScale, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
     derive, layout, walk, parts, svg };
 }));

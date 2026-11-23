@@ -666,6 +666,28 @@ def run(loop_bin, graph, shots):
                 w = rj(wid)
                 check(page, w['published'] and w.get('published_at') and w['done'] and w.get('done_at'), 'Write: published is done', failures)
 
+                # A young tree (one paper so far, Q-0036): a few centimetres tall beside the fruit pile. The default view shows
+                # a marker with its height over the trunk's foot; tapping it zooms onto the tree, its wood seen up close.
+                page.goto(base + '#/tree')
+                page.reload()
+                page.wait_for_selector('.gview .sprout text')
+                mk = page.locator('.gview .sprout text').text_content()
+                check(page, re.fullmatch(r'tree: \d+ cm ↓', mk) is not None and 'cm' in page.locator('.ghead').inner_text(),
+                      f'Young tree: a marker with its height in cm {mk!r}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-young-tree.png')
+                page.locator('.gview .hits [data-k="sprout"]').dispatch_event('click')
+                vy = [float(x) for x in page.locator('.gview svg').first.get_attribute('viewBox').split()]
+                wood = page.evaluate("""() => { const v = document.querySelector('.gview').getBoundingClientRect();
+                    const r = [...document.querySelectorAll('.gview .tree .hits [data-k="seg"]')].map((n) => n.getBoundingClientRect());
+                    return r.length ? { h: Math.max(...r.map((b) => b.bottom)) - Math.min(...r.map((b) => b.top)),
+                      inside: r.every((b) => b.left >= v.left - 1 && b.right <= v.right + 1 && b.top >= v.top - 1 && b.bottom <= v.bottom + 1) } : null; }""")
+                check(page, vy[2] < 12 and wood and wood['h'] > 40 and wood['inside'],
+                      f'Young tree: tapping the marker zooms onto the whole tree {vy} {wood}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-young-tree-zoom.png')
+                page.locator('.gzoom button', has_text='Reset').click()
+                page.goto(base + '#/list')
                 # Tree: papers read on past days in two collections, one met deadline (a leaf), the animal.
                 import datetime as _dt2
                 for k, (name, days) in enumerate([('ROM / OpInf', 3), ('ROM / OpInf', 2), ('ROM / Beat maps', 2),
@@ -946,7 +968,12 @@ def run(loop_bin, graph, shots):
                 # First zoom until the view is shorter than the scene: a view taller than the scene keeps its foot on the
                 # farm's floor, so a zoom there moves the view up and down by design.
                 vh = vb()                                                                     # the opening view
-                wheel(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+                mid = lambda v: v[1] + v[3] / 2
+                for _ in range(6):                     # until shorter than the scene: a zoom then keeps the centre still
+                    a = vb()
+                    wheel(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+                    if abs(mid(vb()) - mid(a)) < 0.3 or vb()[2] < 40:
+                        break
                 v0 = vb()
                 cx, cy = box['x'] + box['width'] * 0.3, box['y'] + box['height'] * 0.8      # a point in the farm
                 world = lambda v: (v[0] + (cx - box['x']) * v[2] / box['width'], v[1] + (cy - box['y']) * v[2] / box['width'])
