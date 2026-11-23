@@ -2,8 +2,8 @@
 // A pure function of the agents (no clock, no network): the same agents give the same farm on every device.
 // Loaded in the browser (window.LoopHills) and by Node (tests).
 //
-// LOOP is the food source on the surface, in the middle: a pile of fruit, at the growth tree's foot in the app's
-// scene (scene.js). Every other session is an anthill on the surface beside it, whose shaft leads down to that
+// LOOP is the food source on the surface, in the middle: a pile of fruit, beside the growth tree in the app's
+// scene (scene.js; layout's opts.gap leaves the tree's place to the food's right). Every other session is an anthill on the surface beside it, whose shaft leads down to that
 // session's own chamber, its anthome. Sessions that messaged each other (state/messages.json, the last 50) are joined
 // by a tunnel underground, through a gallery below the homes; messages with LOOP go up the session's shaft and
 // along the surface to the food. A rock on an anthill means that session is blocked on Finbar. Each anthome's shape, contents and lights come from its name, so each looks different; the
@@ -148,8 +148,12 @@
       || ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || MOOD_ORDER.indexOf(a.mood) - MOOD_ORDER.indexOf(b.mood) || a.name.localeCompare(b.name));
     const homes = list.filter((h) => h.kind === 'home');
     const right = Math.ceil(homes.length / 2), left = homes.length - right;
-    const width = Math.max(48, FOOD + 2 * Math.max(right, left, 1) * COL + 2 * MARGIN);
-    const fx = width / 2, surface = SKY;
+    // opts.gap: blocks of open surface between the food and the first anthill to its right (where the app's tree
+    // stands); the farm widens by it and the food stays in the middle of the rest.
+    const gap = Math.max(0, Math.round(opts.gap || 0));
+    const base = Math.max(48, FOOD + 2 * Math.max(right, left, 1) * COL + 2 * MARGIN);
+    const width = base + gap;
+    const fx = base / 2, surface = SKY;
     const top0 = surface + HOME_TOP;
     const gallery = top0 + TIER + HOME_H + LABEL + 3;
     const tok = (hl) => Number(((hl.agent || {}).week_tokens || {}).total);
@@ -162,7 +166,7 @@
     }
     homes.forEach((hl, i) => {
       const side = i % 2 ? -1 : 1, k = Math.floor(i / 2);
-      const x = Math.round(fx + side * (FOOD / 2 + COL / 2 + k * COL));
+      const x = Math.round(fx + side * (FOOD / 2 + COL / 2 + k * COL)) + (side > 0 ? gap : 0);
       const tier = k % 2;
       const d = hl.design;
       const t = tok(hl);
@@ -191,7 +195,8 @@
         food: { x0: fx0, y0: Math.round(y0 + h) - 3, w: fw, h: 2 },
         trail: [{ x: x - w * 0.3, y: floor }, { x, y: floor }, ...shaft.slice().reverse()] });
     });
-    const L = { width, height, surface, gallery, food, hills: list };
+    const L = { width, height, surface, gallery, food, hills: list,
+      gap: gap ? { x0: fx + FOOD / 2, x1: fx + FOOD / 2 + gap, cx: fx + FOOD / 2 + gap / 2 } : null };
     L.paths = pathsOf(L, opts.messages);
     return L;
   }
