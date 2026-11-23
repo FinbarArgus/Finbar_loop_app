@@ -211,6 +211,7 @@ details.revisit { margin: 4px 0 0; }
 .ufill.lo { background: var(--ok); } .ufill.mid { background: var(--wait); } .ufill.hi { background: var(--bad); }
 .utips ul { padding-left: 1.1em; margin: 6px 0; font-size: 14px; }
 .agent { border-top: 1px solid var(--line); padding: 8px 0; }
+.rdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; flex: none; }
 .agent:first-of-type { border-top: 0; }
 .arow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }

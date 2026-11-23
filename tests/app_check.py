@@ -625,6 +625,19 @@ def run(loop_bin, graph, shots):
                     {'a': 'HIGH-paper', 'b': 'LOOP', 'count': 3, 'last': msgs[2]['at']},
                     {'a': 'IMPLEMENT-app', 'b': 'LOOP', 'count': 1, 'last': msgs[3]['at']},
                     {'a': 'LOW-x', 'b': 'old-session', 'count': 1, 'last': msgs[4]['at']}]}))
+                page.goto(base + '#/status')
+                page.reload()
+                page.locator('.agent', has_text='IMPLEMENT-app').wait_for()
+                names = page.locator('.agent.working .arow b').all_inner_texts()
+                check(page, names == ['LOOP', 'HIGH-paper', 'IMPLEMENT-app', 'LOW-x'], f'Status: sessions by role, IMPLEMENT between HIGH and LOW {names}', failures)
+                dot = page.locator('.agent', has_text='IMPLEMENT-app').locator('.rdot').evaluate('(n) => getComputedStyle(n).backgroundColor')
+                check(page, dot == 'rgb(63, 143, 224)', f'Status: IMPLEMENT has the blue of its anthome lights {dot}', failures)
+                page.goto(base + '#/list')
+                page.locator('.card .from .rdot').first.wait_for()
+                who = page.locator('.card .from').first.inner_text()
+                dot = page.locator('.card .from .rdot').first.evaluate('(n) => getComputedStyle(n).backgroundColor')
+                want = {'HIGH': 'rgb(224, 72, 47)', 'IMPLEMENT': 'rgb(63, 143, 224)', 'MED': 'rgb(240, 169, 42)', 'LOW': 'rgb(95, 176, 74)'}
+                check(page, dot == want.get(who.split('-')[0], 'rgb(164, 106, 214)'), f'Agents: a card shows its session in its role colour {who!r} {dot}', failures)
                 page.goto(base + '#/hills')
                 page.wait_for_selector('.hview svg .hits [data-k="hill"]')
                 check(page, page.locator('.meta a.on').inner_text() == 'Hills', 'Hills tab in the header', failures)
