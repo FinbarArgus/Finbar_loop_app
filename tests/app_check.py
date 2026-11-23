@@ -152,6 +152,90 @@ def check(page, cond, what, failures):
     if not ok:
         failures.append(what)
 
+PDF = b'%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n'
+
+# Records window.open and navigator.share instead of opening anything; `act` sets navigator.userActivation.isActive.
+FILE_STUBS = """
+window.__opens = []; window.__shared = []; window.__act = true;
+window.open = (u) => { const r = { u, href: null }; window.__opens.push(r);
+  return { close() { r.closed = true; }, location: { set href(v) { r.href = v; } } }; };
+navigator.canShare = () => true;
+navigator.share = async (d) => { window.__shared.push(d.files.map((f) => ({ name: f.name, type: f.type, size: f.size }))); };
+Object.defineProperty(navigator, 'userActivation', { get: () => ({ isActive: window.__act }) });
+"""
+STANDALONE = """
+const mm = window.matchMedia.bind(window);
+window.matchMedia = (q) => q.includes('display-mode: standalone') ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : mm(q);
+"""
+
+
+def check_file_links(browser, base, repo, vp, label, failures):
+    """A Read entry's PDF opens from the tap that asked for it, typed application/pdf, while the download is slow:
+    a browser tab opens a blank tab at once and points it at the file; the installed app shares the file."""
+    (repo / 'personal' / 'read-pdf').mkdir(parents=True, exist_ok=True)
+    (repo / 'personal' / 'read-pdf' / 'paper.pdf').write_bytes(PDF)
+    (repo / 'personal' / 'read-pdf' / 'entry.json').write_text(json.dumps({
+        'id': 'read-pdf', 'kind': 'read', 'title': 'PDF paper', 'priority': 'low', 'deadline': None, 'done': False,
+        'created': '2026-01-01T00:00:00Z', 'files': ['paper.pdf']}))
+    gh = fake_github(repo)
+
+    def slow(route):
+        if route.request.url.endswith('.pdf'):
+            time.sleep(0.8)
+        return gh(route)
+
+    def poll(page, js, timeout=5):
+        end = time.time() + timeout
+        while time.time() < end:
+            v = page.evaluate(js)
+            if v:
+                return v
+            time.sleep(0.05)
+        return page.evaluate(js)
+
+    for mode in ('tab', 'app'):
+        ctx = browser.new_context(viewport=vp)
+        ctx.add_init_script("localStorage.setItem('loop.token','test-token');localStorage.setItem('loop.repo','me/loop');")
+        ctx.add_init_script(FILE_STUBS + (STANDALONE if mode == 'app' else ''))
+        ctx.route('https://api.github.com/**', slow)
+        page = ctx.new_page()
+        errors = []
+        page.on('pageerror', lambda e: errors.append(str(e)))
+        page.goto(base + '#/manual/read')
+        link = page.locator('.mrow', has_text='PDF paper').locator('a.flink')
+        link.wait_for()
+        if mode == 'tab':
+            link.click()
+            first = page.evaluate('window.__opens.slice()')
+            check(page, len(first) == 1 and first[0]['u'] == '' and first[0]['href'] is None,
+                  f'{label} PDF link: a tab opens in the tap, before the slow download ends {first}', failures)
+            href = poll(page, 'window.__opens[0] && window.__opens[0].href')
+            typ = page.evaluate('(u) => fetch(u).then((r) => r.blob()).then((b) => [b.type, b.size])', href) if href else None
+            check(page, href and href.startswith('blob:') and typ == ['application/pdf', len(PDF)],
+                  f'{label} PDF link: the tab goes to the file, typed application/pdf {href} {typ}', failures)
+            link.click()
+            again = page.evaluate('window.__opens.slice()')
+            check(page, len(again) == 2 and again[1]['u'] == href, f'{label} PDF link: a loaded file opens straight away {again}', failures)
+        else:
+            link.click()
+            shared = poll(page, 'window.__shared.length && window.__shared')
+            check(page, page.evaluate('window.__opens.length') == 0 and shared == [[{'name': 'paper.pdf', 'type': 'application/pdf', 'size': len(PDF)}]],
+                  f'{label} PDF link (installed app): shares the file, no blob: window {shared}', failures)
+            # The tap's activation ran out while the file loaded: the link asks for a second tap, which shares.
+            page.reload()
+            link.wait_for()
+            page.evaluate('window.__act = false')
+            link.click()
+            poll(page, "document.querySelector('a.flink.ready')")
+            check(page, link.inner_text() == 'paper.pdf: tap again to open' and page.evaluate('window.__shared.length') == 0,
+                  f'{label} PDF link (installed app): "tap again" once the tap has expired {link.inner_text()!r}', failures)
+            page.evaluate('window.__act = true')
+            link.click()
+            check(page, page.evaluate('window.__shared.length') == 1 and link.inner_text() == 'paper.pdf',
+                  f'{label} PDF link (installed app): the second tap shares it', failures)
+        check(page, not errors, f'{label} PDF link ({mode}): no page errors {errors}', failures)
+        ctx.close()
+
 
 def run(loop_bin, graph, shots):
     failures = []
@@ -742,6 +826,7 @@ def run(loop_bin, graph, shots):
                       'answer from the general box counts as answered', failures)
                 check(page, not errors, f'no console errors {errors}', failures)
                 ctx.close()
+                check_file_links(browser, base, repo, vp, label, failures)
 
             ctx = browser.new_context()
             page = ctx.new_page()
