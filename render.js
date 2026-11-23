@@ -47,6 +47,8 @@
       (_, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
     s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,
       (_, pre, u) => `${pre}<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+    s = s.replace(/\{\{(?:(ok|paper|assume|warn|bad|info)\|)?([^}|]+)\}\}/g,
+      (_, tone, t) => `<span class="pill ${tone || 'info'}">${t}</span>`);
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
     return s.replace(/\u0000(\d+)\u0000/g, (_, i) => keep[+i]);
@@ -67,7 +69,7 @@
         const buf = [];
         for (i++; i < lines.length && !/^\$\$\s*$/.test(lines[i]); i++) buf.push(lines[i]);
         i++;
-        out.push(`<div class="math">${math(buf.join('\n'), true)}</div>`);
+        out.push(`<div class="math mathscroll">${math(buf.join('\n'), true)}</div>`);
       } else if (/^#{1,4}\s/.test(line)) {
         const n = line.match(/^#+/)[0].length;
         out.push(`<h${n + 2}>${inline(line.replace(/^#+\s*/, ''))}</h${n + 2}>`);
@@ -297,6 +299,56 @@
       })));
   }
 
+  // A folding section: its title, an optional one-line summary, then its blocks.
+  function section(b, ctx) {
+    const box = el('details', { class: 'section', id: b.id || null, open: b.open ? true : null },
+      el('summary', {}, el('span', { class: 'stitle', html: inline(b.title || '') }),
+        b.summary ? el('span', { class: 'ssum', html: inline(b.summary) }) : null));
+    const body = el('div', { class: 'sbody' });
+    LoopRender.blocks(body, b.blocks || [], ctx);
+    box.append(body);
+    return box;
+  }
+
+  // Numbered steps of a derivation: each with its maths, labelled fields and an "I understand this" tick.
+  const STEP_FIELDS = [['what', 'What happens'], ['why', 'Why it is allowed'], ['ref', 'Where'], ['lean', 'Lean']];
+  function steps(b, ctx) {
+    const key = 'steps:' + (b.id || b.title || '') + ':' + (b.steps || []).length;
+    const ticks = ctx.store.get(key) || {};
+    const count = el('span', { class: 'who' });
+    const update = () => { count.textContent = `${Object.values(ticks).filter(Boolean).length} of ${(b.steps || []).length} understood`; };
+    const list = el('ol', { class: 'steps' }, (b.steps || []).map((st, k) => {
+      const cb = el('input', { type: 'checkbox', onchange: () => { ticks[k] = cb.checked; ctx.store.set(key, ticks); card.classList.toggle('done', cb.checked); update(); } });
+      cb.checked = !!ticks[k];
+      const card = el('li', { class: 'step' + (cb.checked ? ' done' : '') },
+        el('div', { class: 'snum' }, `Step ${k + 1}`, st.label ? el('span', { html: ' · ' + inline(st.label) }) : null),
+        st.math ? el('div', { class: 'math mathscroll', html: math(st.math, true) }) : null,
+        ...STEP_FIELDS.filter(([f]) => st[f]).map(([f, label]) => el('div', { class: 'sfield' },
+          el('div', { class: 'slabel' }, label), el('div', { class: 'md', html: md(st[f]) }))),
+        el('label', { class: 'stick' }, cb, ' I understand this step'));
+      return card;
+    }));
+    update();
+    return el('section', { class: 'stepsblock' },
+      el('div', { class: 'qhead' }, b.title ? el('h3', { html: inline(b.title) }) : el('span'), count), list);
+  }
+
+  // Symbols or a glossary: term and meaning side by side.
+  function defs(b) {
+    return el('section', { class: 'defs' }, b.title ? el('h4', { html: inline(b.title) }) : null,
+      el('dl', {}, (b.items || []).flatMap((x) => [el('dt', { html: inline(x.term) }), el('dd', { html: inline(x.def) })])));
+  }
+
+  // A highlighted box: a claim, a numerical check, a paper proof, a question for the reviewer, a note.
+  const TONES = { claim: 'Claim', check: 'Check', paper: 'On paper', ask: 'For the reviewer', note: 'Note', warn: 'Caution', result: 'Result' };
+  function callout(b, ctx) {
+    const box = el('aside', { class: `callout ${b.tone || 'note'}` },
+      el('div', { class: 'clabel', html: inline(b.title || TONES[b.tone] || '') }));
+    if (b.md) box.append(el('div', { class: 'md', html: md(b.md) }));
+    LoopRender.blocks(box, b.blocks || [], ctx);
+    return box;
+  }
+
   const LoopRender = {
     esc, el, md, inline,
     setMacros(m) { MACROS = m && typeof m === 'object' ? m : {}; },
@@ -307,6 +359,10 @@
         case 'file': return fileBlock(b);
         case 'provenance': return provenance(b, ctx);
         case 'diagram': return diagram(b);
+        case 'section': return section(b, ctx);
+        case 'steps': return steps(b, ctx);
+        case 'defs': return defs(b);
+        case 'callout': return callout(b, ctx);
         case 'quiz': return quiz(b, ctx);
         case 'checklist': return checklist(b, ctx);
         default: return el('p', { class: 'warn' }, `Unknown block ${b.type}`);
