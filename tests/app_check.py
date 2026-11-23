@@ -468,6 +468,7 @@ def run(loop_bin, graph, shots):
                 seed('read-key', title='Smith2026Hopfit', title_from='record', key_title='Smith2026Hopfit', journal='J Clin Monit Comput',
                      full_title='HOPFIT: A neuro-cardiovascular monitoring framework')
                 seed('read-typed', title='My own title', key_title='Smith2025Atlas', journal='Physiol Rep', full_title='An atlas')
+                seed('read-norec', title='2011.03959v1', files=['2011.03959v1.pdf'], title_warning='no bibliographic record: title from file name')
                 page.goto(base + '#/mine/read')
                 page.reload()
                 krow = page.locator('.mrow', has_text='Smith2026Hopfit')
@@ -482,6 +483,10 @@ def run(loop_bin, graph, shots):
                 check(page, trow.locator('.mtitle').inner_text() == 'My own title' and trow.locator('.msub').inner_text() == 'Physiol Rep · An atlas',
                       'Read: a typed title stays the heading', failures)
                 check(page, page.locator('.mrow', has_text='Unnoted paper').locator('.msub').count() == 0, 'Read: no subtitle without a record', failures)
+                wrow = page.locator('.mrow', has_text='2011.03959v1')
+                check(page, wrow.locator('.mwarn').inner_text() == '⚠ no bibliographic record: title from file name'
+                      and page.locator('.mrow', has_text='Smith2026Hopfit').locator('.mwarn').count() == 0,
+                      'Read: a paper with no bibliographic record shows the warning', failures)
                 if shots:
                     krow.screenshot(path=f'{shots}/{label}-read-key-title.png')
                 row = page.locator('.mrow', has_text='Unnoted paper')
@@ -530,7 +535,9 @@ def run(loop_bin, graph, shots):
                     seed(f'read-tree{k}', title=f'Tree paper {k}', done=True, done_at=at, deadline=dl,
                          **({'zotero': {'name': name}} if name else {}))
                 page.goto(base + '#/tree')
-                page.wait_for_selector('.gview svg .hits [data-k="seg"]')
+                # The tree draws from the cached repo tree first, then redraws once the background reload sees the
+                # papers seeded above: wait for a seeded paper's segment, so the tap lands on the final drawing.
+                page.wait_for_selector('.gview svg .hits [data-k="seg"][data-i="read-tree2"]', state='attached')
                 check(page, page.locator('.meta a.on').inner_text() == 'Tree', 'Tree tab in the header', failures)
                 head = page.locator('.ghead').inner_text()
                 check(page, 'seedling' in head and 'papers' in head and 'days in a row' in head, f'Tree: stage, streak and counts {head!r}', failures)

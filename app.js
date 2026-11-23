@@ -767,6 +767,7 @@
       el('div', { class: 'mmain' },
         el('div', { class: 'mtitle' }, e.link ? el('a', { href: e.link, target: '_blank', rel: 'noopener' }, e.title || e.link) : (e.title || (e.files || [])[0] || 'note')),
         paperSub(e),
+        e.title_warning ? el('div', { class: 'mwarn', title: 'The loop found no author and year for this paper; the summary or a later lookup fixes it.' }, `⚠ ${e.title_warning}`) : null,
         e.note ? el('div', { class: 'mnote', html: inline(e.note) }) : null,
         isWrite ? writeStates(e, redraw) : null,
         el('div', { class: 'mmeta' }, ...fileLinks(e), zb, extra || null, deadlineChip(e, redraw), prio),
