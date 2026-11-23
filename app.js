@@ -708,7 +708,62 @@
       el('div', { class: 'mmain' },
         el('div', { class: 'mtitle' }, e.link ? el('a', { href: e.link, target: '_blank', rel: 'noopener' }, e.title || e.link) : (e.title || (e.files || [])[0] || 'note')),
         e.note ? el('div', { class: 'mnote', html: inline(e.note) }) : null,
-        el('div', { class: 'mmeta' }, ...fileLinks(e), zb, extra || null, deadlineChip(e, redraw), prio)));
+        el('div', { class: 'mmeta' }, ...fileLinks(e), zb, extra || null, deadlineChip(e, redraw), prio),
+        e.kind === 'read' ? paperExtras(e) : null));
+  }
+
+  // A paper's Notes (saved as you type; the loop writes them into the notes repo under the paper's \\cite,
+  // one \\item per line) and its Summary (written by the paper_summary agent).
+  function paperExtras(e) {
+    const notesPath = `personal/${e.id}/notes.md`;
+    const ta = el('textarea', { rows: 4, class: 'pnotes', placeholder: 'One note per line: each becomes an \\item under the paper\'s \\cite in your notes.' });
+    const st = el('div', { class: 'status' });
+    let loaded = false, timer = null;
+    const where = (e.zotero && e.zotero.name ? e.zotero.name : 'Unsorted');
+    const leaf = where.split(' / ').pop();
+    const notes = el('details', { class: 'pextra' }, el('summary', {}, 'Notes'),
+      el('div', { class: 'who' }, `Goes to ${where.split(' / ').join('/')}/${leaf}.tex in your notes repo`), ta, st);
+    notes.addEventListener('toggle', async () => {
+      if (!notes.open || loaded) return;
+      loaded = true;
+      if (tree.paths.has(notesPath)) ta.value = await (await gh(repoPath(notesPath), { raw: true })).text();
+    });
+    ta.addEventListener('input', () => {
+      clearTimeout(timer);
+      st.textContent = 'Not saved yet…';
+      timer = setTimeout(async () => {
+        try { await put(notesPath, new TextEncoder().encode(ta.value), `${e.id}: notes`); st.textContent = 'Saved; the loop adds it to your notes repo within a minute.'; }
+        catch (err) { st.textContent = `Not saved: ${err.message}`; }
+      }, 1500);
+    });
+    const sumPath = `personal/${e.id}/summary.json`;
+    const sbody = el('div', { class: 'blocks' });
+    const has = tree.paths.has(sumPath);
+    const summary = el('details', { class: 'pextra' }, el('summary', {}, has ? 'Summary' : 'Summary (not yet)'), sbody);
+    summary.addEventListener('toggle', async () => {
+      if (!summary.open || sbody.childElementCount) return;
+      if (!has) { sbody.append(el('p', { class: 'empty' }, 'The paper_summary agent has not summarised this paper yet. It is sent each new paper; the summary appears here.')); return; }
+      const s = await getJSON(sumPath);
+      window.LoopRender.blocks(sbody, s.blocks || [], { store: store(e.id), fileUrl: (n) => fileUrl(`personal/${e.id}/${n}`) });
+      sbody.append(el('div', { class: 'who' }, `by ${s.by || 'paper_summary'}, ${age(s.at)} ago`));
+    });
+    return el('div', { class: 'pextras' }, summary, notes);
+  }
+
+  // A link (Overleaf or any other) as an entry, e.g. a student's draft.
+  function linkForm(kind, preset, redraw, label) {
+    const t = el('input', { type: 'text', placeholder: 'Title (optional)' });
+    const link = el('input', { type: 'url', placeholder: 'Paste a link (Overleaf, Google Doc, …)' });
+    const due = el('input', { type: 'date' });
+    const st = el('div', { class: 'status' });
+    return el('details', { class: 'addlink' }, el('summary', {}, label || '+ Add a link'),
+      el('div', { class: 'newentry' }, link, t, el('div', { class: 'row' }, el('label', {}, 'Deadline', due), el('span', { class: 'grow' }),
+        el('button', { class: 'primary', onclick: async () => {
+          const u = link.value.trim();
+          if (!/^https?:\/\//.test(u)) { st.textContent = 'Paste the link.'; return; }
+          await createEntry(kind, { title: t.value.trim() || u.replace(/^https?:\/\//, '').slice(0, 60), link: u, deadline: due.value || null, ...preset }, []);
+          redraw();
+        } }, 'Add')), st));
   }
 
   // The short form shown after a drop: title, Zotero collection (Read), deadline.
@@ -761,7 +816,8 @@
       (who === 'all' ? mine.people : [who]).forEach((p) => {
         const mineP = byPrio(open.filter((e) => e.student === p));
         const card = el('section', { class: 'mgroup' }, el('h3', {}, p, el('span', { class: 'n' }, ` ${mineP.length}`)));
-        card.append(dropZone(`Drop files to review for ${p}`, (files) => card.insertBefore(newEntryForm('student', files, { student: p }, redraw), card.children[2] || null)));
+        card.append(dropZone(`Drop files to review for ${p}`, (files) => card.insertBefore(newEntryForm('student', files, { student: p }, redraw), card.children[2] || null)),
+          linkForm('student', { student: p }, redraw, `+ Add a link for ${p} (Overleaf, …)`));
         mineP.forEach((e) => card.append(entryRow(e, redraw)));
         body.append(card);
       });

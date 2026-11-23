@@ -377,6 +377,22 @@ def run(loop_bin, graph, shots):
                 page.wait_for_selector('.mrow .due.soon')
                 check(page, json.loads((repo / 'personal' / ents[0]['id'] / 'entry.json').read_text())['deadline'] == soon,
                       'deadline saved', failures)
+                # a paper's Notes save as you type; its Summary shows what paper_summary attached
+                row = page.locator('.mrow', has_text='A paper to read')
+                row.locator('details.pextra', has_text='Notes').locator('summary').click()
+                row.locator('textarea.pnotes').fill('uses a return map\nerror grows like k eta')
+                page.wait_for_selector('.mrow .status >> text=/^Saved;/')
+                check(page, (repo / 'personal' / ents[0]['id'] / 'notes.md').read_text() == 'uses a return map\nerror grows like k eta',
+                      'paper notes saved', failures)
+                (tmp_l / 'sum.json').write_text(json.dumps({'blocks': [{'type': 'callout', 'tone': 'note', 'md': 'It builds a beat map.'}]}))
+                loop(loop_bin, repo, 'summary', ents[0]['id'], '--spec', str(tmp_l / 'sum.json'))
+                page.goto(base + '#/mine/write')
+                page.goto(base + '#/mine/read')
+                page.wait_for_selector('.mrow details.pextra >> text=Summary')
+                row = page.locator('.mrow', has_text='A paper to read')
+                row.locator('details.pextra', has_text='Summary').locator('summary').click()
+                page.wait_for_selector('.mrow .pextra aside.callout')
+                check(page, 'It builds a beat map.' in row.inner_text(), 'paper summary shown', failures)
                 page.goto(base + '#/mine/write')
                 page.wait_for_selector('.newentry input[type=url]')
                 page.locator('.newentry input[type=text]').fill('Paper 1 draft')
@@ -389,12 +405,19 @@ def run(loop_bin, graph, shots):
                 page.locator('.switch button', has_text='Ben').click()
                 page.wait_for_selector('.switch button.on >> text=Ben')
                 page.wait_for_function("document.querySelectorAll('.mgroup').length === 1")
+                page.locator('.mgroup details.addlink summary').click()
+                page.locator('.mgroup details.addlink input[type=url]').fill('https://www.overleaf.com/project/thesis')
+                page.locator('.mgroup details.addlink button.primary').click()
+                page.wait_for_selector('.mrow a[href="https://www.overleaf.com/project/thesis"]')
+                lk = [json.loads(f.read_text()) for f in (repo / 'personal').glob('student-*/entry.json')]
+                check(page, lk and lk[0]['student'] == 'Ben' and lk[0]['link'].endswith('/thesis'), 'Students: a link for Ben', failures)
                 page.locator('.mgroup input[type=file]').set_input_files(str(tmp_l / 'fig.png'))
-                page.locator('.newentry button.primary').click()
-                page.wait_for_selector('.mrow')
-                st = [json.loads(f.read_text()) for f in (repo / 'personal').glob('student-*/entry.json')]
+                page.locator('.mgroup > .newentry button.primary').click()
+                page.locator('.mrow').nth(1).wait_for()
+                st = [json.loads(f.read_text()) for f in sorted((repo / 'personal').glob('student-*/entry.json'))]
+                st = [x for x in st if x.get('files')]
                 check(page, st and st[0]['student'] == 'Ben', 'Students: file filed under Ben', failures)
-                page.locator('.mrow input[type=checkbox]').first.check()
+                page.locator('.mrow', has_text='fig').locator('input[type=checkbox]').check()
                 page.wait_for_selector('details.history >> text=Done (1)')
                 check(page, json.loads((repo / 'personal' / st[0]['id'] / 'entry.json').read_text())['done'], 'ticked done', failures)
                 check(page, narrow(), 'Mine: no sideways scroll', failures)

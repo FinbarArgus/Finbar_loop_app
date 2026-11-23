@@ -347,3 +347,13 @@ li.step, .sbody, details.section, aside.callout, .stepsblock, ol.steps { min-wid
 .deadlines .dline { display: block; text-decoration: none; color: var(--ink); padding: 6px 8px; border-radius: 6px; margin: 4px 0; background: var(--soft); border-left: 3px solid var(--line); }
 .deadlines .dline.over { border-left-color: var(--high); } .deadlines .dline.over b { color: var(--high); }
 .deadlines .dline.soon { border-left-color: var(--ask); }
+
+/* paper notes and summaries; link forms */
+.pextras { display: grid; gap: 4px; margin-top: 4px; }
+details.pextra { background: var(--soft); border-radius: 8px; padding: 4px 10px; }
+details.pextra > summary { cursor: pointer; font-size: 14px; color: var(--accent); font-weight: 600; }
+.pnotes { width: 100%; font: 14px/1.5 ui-monospace, monospace; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); resize: vertical; margin-top: 4px; }
+details.pextra .blocks { font-size: 15px; }
+details.addlink { margin: 4px 0 8px; }
+details.addlink > summary { cursor: pointer; font-size: 14px; color: var(--accent); }
+details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
