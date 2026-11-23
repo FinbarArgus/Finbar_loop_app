@@ -291,7 +291,7 @@
 
   function checklist(b, ctx) {
     const ticks = ctx.store.get('checklist') || {};
-    return el('section', { class: 'checklist' }, el('h3', {}, b.title || 'Before you merge'),
+    return el('section', { class: 'checklist' }, (b.title ?? 'Before you merge') ? el('h3', { html: inline(b.title ?? 'Before you merge') }) : null,
       el('ul', {}, (b.items || []).map((t, k) => {
         const cb = el('input', { type: 'checkbox', onchange: () => { ticks[k] = cb.checked; ctx.store.set('checklist', ticks); li.classList.toggle('done', cb.checked); } });
         cb.checked = !!ticks[k];
