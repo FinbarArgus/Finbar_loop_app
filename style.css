@@ -448,3 +448,5 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .plibopt.new { color: var(--ok); }
 .plibpick .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .plibpick input[type=text] { flex: 1 1 160px; min-width: 0; }
+.flink.loading { opacity: .6; }
+.flink.ready { font-weight: 600; }

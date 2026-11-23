@@ -48,12 +48,26 @@
     return JSON.parse(text);
   }
 
-  const blobCache = new Map();
-  async function fileUrl(p) {
+  // A blob gets its file's type from the name (GitHub serves raw files untyped), so a PDF opens as a PDF.
+  // Types that run script when opened (html, svg) are left untyped.
+  const FILE_TYPES = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', txt: 'text/plain', csv: 'text/csv', json: 'application/json' };
+  const fileType = (p) => FILE_TYPES[(p.split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
+  const blobCache = new Map();   // path -> Promise<{ file, url }>
+  const blobReady = new Map();   // path -> { file, url }, once loaded: lets a tap open it without awaiting
+  function fileBlob(p) {
     if (!blobCache.has(p)) {
-      blobCache.set(p, gh(repoPath(p), { raw: true }).then((r) => r.blob()).then((b) => URL.createObjectURL(b)));
+      blobCache.set(p, gh(repoPath(p), { raw: true }).then((r) => r.blob()).then((b) => {
+        const file = new File([b], p.split('/').pop(), { type: fileType(p) });
+        const f = { file, url: URL.createObjectURL(file) };
+        blobReady.set(p, f);
+        return f;
+      }));
     }
     return blobCache.get(p);
+  }
+  async function fileUrl(p) {
+    return (await fileBlob(p)).url;
   }
 
   let tree = { paths: new Set(), sha: new Map(), at: 0, root: null };
@@ -739,12 +753,57 @@
     return parts.length ? el('div', { class: 'msub' }, parts.join(' · ')) : null;
   }
 
+  // A file link opens the file in the tap itself, since browsers only open windows (and share sheets) from a tap.
+  // In a browser tab: a blank tab opens at once and goes to the file when it has loaded. In the installed app
+  // (standalone, which can't show blob: URLs): the share sheet, with the file, so it opens in a PDF viewer; if
+  // the file was still loading, the link says "tap again to open" and the next tap shares it.
+  const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  function shareFile(f, a) {
+    if (navigator.canShare && navigator.canShare({ files: [f.file] })) {
+      navigator.share({ files: [f.file], title: f.file.name }).catch(() => {});
+    } else {
+      const d = el('a', { href: f.url, download: f.file.name });
+      document.body.append(d);
+      d.click();
+      d.remove();
+    }
+    a.textContent = f.file.name;
+    a.classList.remove('loading', 'ready');
+  }
   function fileLinks(e) {
-    return (e.files || []).map((n) => el('a', { href: '#', class: 'flink', onclick: async (ev) => {
-      ev.preventDefault();
-      const u = await fileUrl(`personal/${e.id}/${n}`);
-      window.open(u, '_blank');
-    } }, n));
+    return (e.files || []).map((n) => {
+      const p = `personal/${e.id}/${n}`;
+      const a = el('a', { href: '#', class: 'flink', onpointerdown: () => { fileBlob(p).catch(() => {}); }, onclick: async (ev) => {
+        ev.preventDefault();
+        const ready = blobReady.get(p);
+        if (ready && standalone()) return shareFile(ready, a);
+        if (ready) return void window.open(ready.url, '_blank');
+        const w = standalone() ? null : window.open('', '_blank');
+        a.classList.add('loading');
+        a.textContent = `${n} (loading…)`;
+        let f;
+        try {
+          f = await fileBlob(p);
+        } catch {
+          blobCache.delete(p);
+          if (w) w.close();
+          a.classList.remove('loading');
+          a.textContent = `${n} (couldn't load: tap to retry)`;
+          return;
+        }
+        a.classList.remove('loading');
+        if (w) {
+          w.location.href = f.url;
+          a.textContent = n;
+        } else if (standalone() && !(navigator.userActivation && !navigator.userActivation.isActive)) {
+          shareFile(f, a);
+        } else {
+          a.classList.add('ready');
+          a.textContent = `${n}: tap again to open`;
+        }
+      } }, n);
+      return a;
+    });
   }
 
   // `done_at` dates the tick for the growth tree. A Read entry needs a note before it is ticked done: ticking
