@@ -768,6 +768,7 @@
     const z = mine.zotero[e.id];
     const zb = e.kind === 'read' && e.zotero ? el('span', { class: `badge z ${z ? z.status : 'waiting'}`, title: (z && z.why) || '' },
       z && z.status === 'saved' ? `in Zotero: ${e.zotero.name || ''}` : z && z.status === 'error' ? 'Zotero: error' : `to Zotero: ${e.zotero.name || ''} (waiting)`) : null;
+    const plibs = e.kind === 'read' && z && z.status === 'saved' && z.key ? paperLibs(e, z, redraw) : null;
     const isWrite = e.kind === 'write';
     return el('div', { class: 'mrow' + (e.done ? ' done' : '') },
       isWrite ? null : el('label', { class: 'mcheck' }, done),
@@ -777,8 +778,78 @@
         e.title_warning ? el('div', { class: 'mwarn', title: 'The loop found no author and year for this paper; the summary or a later lookup fixes it.' }, `⚠ ${e.title_warning}`) : null,
         e.note ? el('div', { class: 'mnote', html: inline(e.note) }) : null,
         isWrite ? writeStates(e, redraw) : null,
-        el('div', { class: 'mmeta' }, ...fileLinks(e), zb, extra || null, deadlineChip(e, redraw), prio),
+        el('div', { class: 'mmeta' }, ...fileLinks(e), zb, ...(plibs ? plibs.chips : []), plibs ? plibs.button : null, extra || null, deadlineChip(e, redraw), prio),
+        plibs ? plibs.picker : null,
         pex ? pex.el : null));
+  }
+
+  // "Add to paper lib": a paper saved to Zotero (its item key known) can be put in paper libraries, the Zotero
+  // collections under _work / papers and _work / my_papers, and taken out of them. The picker ticks the ones it
+  // is in (zotero.json work, read from Zotero by the loop). Saving writes zotero_requests/<t>.json {kind: work,
+  // entry, add, remove, new}; the loop changes the item's collections in one PATCH, so the paper keeps its topic
+  // collection and is not copied. A new library is made as _work / papers / <lower_snake_case>.
+  const LIB_ROOTS = ['_work / papers / ', '_work / my_papers / '];
+  const isLib = (c) => LIB_ROOTS.some((r) => c.name.startsWith(r));
+  const snake = (t) => t.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  function paperLibs(e, z, redraw) {
+    const byKey = new Map(mine.collections.map((c) => [c.key, c]));
+    const work = z.work || [];
+    const chips = work.filter((k) => byKey.has(k)).map((k) => el('span', { class: 'badge plib', title: byKey.get(k).name },
+      byKey.get(k).name.replace(/^_work \/ /, '').replace(/ \/ /g, '/')));
+    const picker = el('div', { class: 'plibpick', hidden: true });
+    const st = el('div', { class: 'status' });
+    const newNames = [];
+    const ticked = new Set(work);              // kept across redraws of the picker
+    const draw = () => {
+      const libs = mine.collections.filter(isLib).sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase()));
+      const boxes = libs.map((c) => {
+        const b = el('input', { type: 'checkbox', value: c.key, onchange: () => { if (b.checked) ticked.add(c.key); else ticked.delete(c.key); } });
+        b.checked = ticked.has(c.key);
+        return el('label', { class: 'plibopt' }, b, c.name.replace(/^_work \/ /, ''));
+      });
+      const news = newNames.map((n) => el('label', { class: 'plibopt new' }, el('input', { type: 'checkbox', checked: true, disabled: true }), `papers / ${n} (new)`));
+      const name = el('input', { type: 'text', placeholder: 'New paper lib name' });
+      const addNew = () => {
+        const n = snake(name.value);
+        if (!n) { st.textContent = 'Give it a name.'; return; }
+        if (libs.some((c) => c.name === `_work / papers / ${n}`) || newNames.includes(n)) { st.textContent = `papers / ${n} exists already: tick it.`; return; }
+        newNames.push(n);
+        st.textContent = '';
+        draw();
+      };
+      name.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addNew(); } });
+      const save = el('button', { class: 'primary', onclick: async () => {
+        const req = { kind: 'work', entry: e.id, add: [...ticked].filter((k) => !work.includes(k)),
+          remove: work.filter((k) => byKey.has(k) && isLib(byKey.get(k)) && !ticked.has(k)), new: [...newNames] };
+        if (!req.add.length && !req.remove.length && !req.new.length) { st.textContent = 'Nothing changed.'; return; }
+        const id = stamp();
+        save.disabled = true;
+        try {
+          await put(`zotero_requests/${id}.json`, new TextEncoder().encode(JSON.stringify(req)), `${e.id}: paper libraries`);
+        } catch (err) { st.textContent = `Not saved: ${err.message}`; save.disabled = false; return; }
+        st.textContent = 'Zotero is updated within about a minute (by the scheduled script)…';
+        const t0 = Date.now();
+        const timer = setInterval(async () => {
+          if (Date.now() - t0 > 600_000) { clearInterval(timer); st.textContent = 'Still waiting for the scheduled script: check back later.'; return; }
+          const res = await getJSON(`zotero_requests/${id}.result.json`, { fresh: true }).catch(() => null);
+          if (!res) return;
+          clearInterval(timer);
+          if (res.status !== 'done') { st.textContent = `Zotero not changed: ${res.why || res.status}`; save.disabled = false; return; }
+          tree.stale = true;                       // the loop wrote zotero.json work with the result
+          redraw();
+        }, 5000);
+      } }, 'Save');
+      picker.replaceChildren(
+        el('div', { class: 'who' }, 'Paper libraries (Zotero _work collections). The paper stays in its topic collection.'),
+        libs.length || news.length ? el('div', { class: 'plibopts' }, ...boxes, ...news) : el('p', { class: 'empty' }, 'No paper libraries in Zotero yet: make one below.'),
+        el('div', { class: 'row' }, name, el('button', { class: 'ghost', onclick: addNew }, 'New paper lib…'), el('span', { class: 'grow' }), save),
+        st);
+    };
+    const button = el('button', { class: 'ghost plibbtn', onclick: () => {
+      picker.hidden = !picker.hidden;
+      if (!picker.hidden) draw();
+    } }, 'Add to paper lib');
+    return { chips, button, picker };
   }
 
   // A Write entry's states (Q-0027), in place of one done tick: a draft version (▲ steps v1, v2, …), submitted
