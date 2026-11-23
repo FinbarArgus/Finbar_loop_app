@@ -59,15 +59,23 @@
   // SEG x its multiplier, shrinking along a long branch as 1/sqrt(1 + k/SEG_HALF) for its k-th paper, so one
   // busy collection does not outgrow the whole tree. Only the paper's own collection grows (Finbar, C-0006): a
   // collection with no paper of its own (a parent of the paper's collection) is a STUB, one STUB longer for each
-  // further subcollection born on it, so its subtopics have room. The trunk starts TRUNK_BASE tall and its
-  // height is TRUNK_BASE + TRUNK_K sqrt(growth so far); each paper adds the rise it causes as a trunk segment,
-  // and its wood thickens the trunk (Leonardo's rule, below).
+  // further subcollection born on it, so its subtopics have room. From the sapling stage (SAPLING units grown) the
+  // trunk's height is TRUNK_BASE + TRUNK_K sqrt(growth so far); a seedling starts SEEDLING tall and rises in a
+  // straight line to that height at SAPLING, so it starts small (Finbar). Each paper adds the rise it causes as a
+  // trunk segment, and its wood thickens the trunk (Leonardo's rule, below).
   const SEG = 1;
   const SEG_HALF = 20;
   const STUB = 1.5;
   const TRUNK_BASE = 4;
   const TRUNK_K = 4;
-  const trunkHeight = (grown) => TRUNK_BASE + TRUNK_K * Math.sqrt(grown);
+  const SEEDLING = 1;
+  const SAPLING = 20;
+  const grownHeight = (grown) => TRUNK_BASE + TRUNK_K * Math.sqrt(grown);
+  const trunkHeight = (grown) => (grown >= SAPLING ? grownHeight(grown)
+    : SEEDLING + (grownHeight(SAPLING) - SEEDLING) * Math.max(0, grown) / SAPLING);
+  // The tree view is never shorter than a seedling's frame (a little over its height at SAPLING), so a seedling
+  // stands small in it and grows into it.
+  const MIN_FRAME = Math.ceil(grownHeight(SAPLING) + 2);
   // Shape: the branches of one parent leave it in the order they were born, oldest lowest, spread over
   // ATTACH (fractions of the parent's length), alternately left and right, 25-45 degrees off the trunk
   // (18-36 off a branch). Each segment turns BEND of the way towards LEAN off vertical on its side, so the
@@ -80,7 +88,7 @@
   // and wind-induced stresses in trees", Phys. Rev. Lett. 107, 258101, doi:10.1103/PhysRevLett.107.258101): a
   // point's cross-section is proportional to the wood it carries, so its width is WIDTH_K sqrt(1 + growth beyond).
   const WIDTH_K = 0.12;
-  const STAGES = [[0, 'seedling'], [20, 'sapling'], [150, 'young tree'], [600, 'tree'], [1500, 'old tree']];
+  const STAGES = [[0, 'seedling'], [SAPLING, 'sapling'], [150, 'young tree'], [600, 'tree'], [1500, 'old tree']];
   const stageOf = (units) => STAGES.filter(([m]) => units >= m).pop()[1];
   // The animals, drawn in blocks: '#' its ink, 'o' its fill, ' ' clear; each in muted colours [ink, fill].
   const ANIMALS = [
@@ -196,7 +204,7 @@
     const order = [trunk];
     const seg = (c, len, r, paper, weight, day) => c.segs.push({ len, wob: r ? (r() - 0.5) * 8 * DEG : 0, paper, weight, day });
     let grown = 0;
-    seg(trunk, TRUNK_BASE, null, null, 0, null);
+    seg(trunk, trunkHeight(0), null, null, 0, null);
     for (const p of papers) {
       const r = rng(seed, 'paper', p.id);
       p.mult = multOfDay(p.day);
@@ -452,7 +460,7 @@
     const all = [...wood, ...leafInk, ...leafPaper, ...critCells].map((c) => c.split(',').map(Number));
     const is = all.map((c) => c[0]), js = all.map((c) => c[1]);
     const margin = opts.mini ? 2 : 4;
-    const top = Math.max(...js) + 1;
+    const top = Math.max(Math.max(...js) + 1, Math.round(MIN_FRAME / CELL));
     // Height scale: a light rule left of the tree, a tick every metre-step, labelled every other tick.
     const step = [1, 2, 5, 10, 20, 50, 100].find((s) => top * CELL / s <= 12) || 200;
     const si = Math.min(...is, -4) - (opts.mini ? 3 : 6);
@@ -482,6 +490,6 @@
   }
 
   return { hash, rng, dayOf, addDays, hourOf, topicPath, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
-    STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
+    STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
     derive, layout, walk, svg };
 }));

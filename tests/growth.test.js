@@ -237,3 +237,18 @@ test('colours: brown wood, green leaves, each animal in its own muted colours', 
     assert.ok(Math.max(r, g, b) - Math.min(r, g, b) < 80 && Math.max(r, g, b) < 230, c);
   }
 });
+
+test('the seedling starts small: SEEDLING tall, rising in a line to the sapling height, which is unchanged', () => {
+  assert.equal(G.trunkHeight(0), G.SEEDLING);
+  assert.ok(G.SEEDLING < G.TRUNK_BASE);
+  for (let g = 0; g < 40; g += 0.5) assert.ok(G.trunkHeight(g + 0.5) > G.trunkHeight(g), `rises at ${g}`);
+  for (const g of [1, 5, 10, 19]) assert.ok(G.trunkHeight(g) < G.TRUNK_BASE + G.TRUNK_K * Math.sqrt(g), `smaller at ${g}`);
+  for (const g of [G.SAPLING, 150, 600]) assert.equal(G.trunkHeight(g), G.TRUNK_BASE + G.TRUNK_K * Math.sqrt(g));
+  const bare = G.derive([], {}, {}, NOW);
+  assert.equal(bare.stage, 'seedling');
+  assert.equal(bare.height, G.SEEDLING);
+  // the frame is a seedling's frame, so a young seedling stands small in it
+  const vb = (s) => G.svg(s, { hour: 0 }).match(/viewBox="([^"]+)"/)[1].split(' ').map(Number);
+  assert.ok(vb(bare)[3] >= G.MIN_FRAME, `frame ${vb(bare)[3]}`);
+  assert.ok(G.MIN_FRAME > G.trunkHeight(G.SAPLING));
+});

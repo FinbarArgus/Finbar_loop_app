@@ -2,12 +2,15 @@
 // A pure function of the agents (no clock, no network): the same agents give the same hills on every device.
 // Loaded in the browser (window.LoopHills) and by Node (tests).
 //
-// Size is the agent's priority (its name's prefix): LOOP is the queen's mound, HIGH- and IMPLEMENT- large (Finbar),
-// MED- medium, LOW- small, the rest medium-small. Its design (shape, soil, entrances, grass, twigs, flowers)
+// The meadow has three layers, rows of depth back to front (Finbar): LOOP's hill alone at the back, the management
+// hills (HIGH-, MED-, LOW- and every other session that is not IMPLEMENT-) in the middle, the IMPLEMENT- hills in
+// front. Size is the agent's priority (its name's prefix): LOOP is the queen's mound, HIGH- and IMPLEMENT- large
+// (Finbar), MED- medium, LOW- small, the rest medium-small; back rows are drawn a little smaller and hazier. Its design (shape, soil, entrances, grass, twigs, flowers)
 // is drawn from a hash of its name, so each hill is recognisable and stays the same. Its state shows at a
 // glance: working hills have ants running along a trail, a blocked hill has a rock on top and an amber tint,
 // a stalled or stopped hill is grey and still. Dirt paths join agents that messaged each other (state/messages.json,
-// the last 50), wider and busier with ants the more messages went between them.
+// the last 50), wider and busier with ants the more messages went between them. Paths run along lanes between the
+// rows and through the gaps between hills, and end on the ground beside each hill, so no hill hides them.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -46,6 +49,16 @@
     if (/^MED-/i.test(n)) return 'medium';
     if (/^LOW-/i.test(n)) return 'small';
     return 'medium-small';
+  }
+  // The layer (row of depth) an agent's hill stands in.
+  const LAYERS = ['back', 'middle', 'front'];
+  const DEPTH = { back: 0.8, middle: 0.9, front: 1 };     // size factor
+  const HAZE = { back: 0.22, middle: 0.1, front: 0 };     // mixed towards the sky
+  function layerOf(agent) {
+    const n = String(agent.name || '');
+    if (agent.loop || n === 'LOOP') return 'back';
+    if (/^IMPLEMENT-/i.test(n)) return 'front';
+    return 'middle';
   }
   // blocked: a rock on top. working (and running): ants. Anything else (stalled, stopped): quiet.
   function moodOf(agent) {
@@ -92,18 +105,37 @@
 
   // ---------------------------------------------------------------- layout
 
-  const GAP = 6;            // blocks between hills (the trails run into it)
+  const GAP = 6;            // blocks between hills (the trails and paths run into it)
   const TOP = 6;            // room above the tallest hill of a row (for a rock)
   const LABEL = 5;          // room below a row for the names
-  const MARGIN = 3;
+  const LANE = 5;           // the lane below a row's names, where paths run between rows
+  const MARGIN = 4;
 
-  // agents (status.json agents[]) -> {width, height, hills}: each hill with its agent, size, mood, design,
-  // w, h, x0 (left), base (ground row), cx, ants (how many), rock, trail (polyline the ants follow, in blocks).
-  // Rows hold the hills in priority order (queen first), blocked before working before quiet, then by name.
+  // Rows (each {layer, hills}) for a meadow `width` blocks wide: each layer, back to front, fills rows of its own.
+  function pack(list, width) {
+    const rows = [];
+    for (const layer of LAYERS) {
+      let row = [], used = 0;
+      for (const hl of list.filter((x) => x.layer === layer)) {
+        const need = hl.w + (row.length ? GAP : 0);
+        if (row.length && used + need > width - 2 * MARGIN) { rows.push({ layer, hills: row }); row = []; used = 0; }
+        used += hl.w + (row.length ? GAP : 0);
+        row.push(hl);
+      }
+      if (row.length) rows.push({ layer, hills: row });
+    }
+    return rows;
+  }
+  const rowsHeight = (rows) => rows.reduce((y, r) => y + TOP + Math.max(...r.hills.map((x) => x.h)) + LABEL + LANE, 0) + 1;
+
+  // agents (status.json agents[]) -> {width, height, rows, hills, paths}: each hill with its agent, layer, size,
+  // mood, design, w, h, x0 (left), base (ground row), cx, row, ants (how many), rock, trail (the polyline its ants
+  // follow, in blocks). Each layer's hills are in priority order, blocked before working before quiet, then by name.
+  // opts.width: the meadow's width in blocks. opts.fit {w, h}: a box in pixels to fill instead; the width is the one
+  // that draws the meadow largest inside it, so the whole meadow shows without scrolling.
   // opts.messages: state/messages.json ({messages: [{at, from, to}], pairs: [{a, b, count, last}]}); agents named
-  // there but missing from the status are drawn as stalled hills (ghost: true). Adds `paths`.
+  // there but missing from the status are drawn as stalled hills (ghost: true).
   function layout(agents, opts = {}) {
-    const width = Math.max(40, opts.width || 72);
     const all = (agents || []).filter((a) => a && a.name);
     const known = new Set(all.map((a) => a.name));
     for (const pr of (opts.messages || {}).pairs || []) {
@@ -112,39 +144,42 @@
       }
     }
     const list = all.map((agent) => {
-      const size = sizeOf(agent);
-      const [w, h] = SIZES[size];
-      const mood = moodOf(agent);
-      return { name: agent.name, agent, size, mood, design: design(agent.name), w, h,
+      const size = sizeOf(agent), layer = layerOf(agent), mood = moodOf(agent);
+      const [w, h] = SIZES[size].map((v) => Math.round(v * DEPTH[layer]));
+      return { name: agent.name, agent, layer, size, mood, design: design(agent.name), w, h,
         ants: mood === 'working' ? ANTS[size] : 0, rock: mood === 'blocked' };
-    }).sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size)
+    }).sort((a, b) => LAYERS.indexOf(a.layer) - LAYERS.indexOf(b.layer) || SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size)
       || MOOD_ORDER.indexOf(a.mood) - MOOD_ORDER.indexOf(b.mood) || a.name.localeCompare(b.name));
-    const rows = [];
-    let row = [], used = 0;
-    for (const hl of list) {
-      const need = hl.w + (row.length ? GAP : 0);
-      if (row.length && used + need > width - 2 * MARGIN) { rows.push(row); row = []; used = 0; }
-      used += hl.w + (row.length ? GAP : 0);
-      row.push(hl);
+    const least = Math.max(0, ...list.map((x) => x.w)) + 2 * MARGIN;
+    let width = Math.max(40, opts.width || 72, least);
+    if (opts.fit && opts.fit.w > 0 && opts.fit.h > 0 && list.length) {
+      const most = Math.max(least, ...LAYERS.map((ly) => list.filter((x) => x.layer === ly)
+        .reduce((s, x, i) => s + x.w + (i ? GAP : 0), 0) + 2 * MARGIN));
+      let best = -1;
+      for (let w = Math.max(30, least); w <= most; w++) {
+        const scale = Math.min(opts.fit.w / w, opts.fit.h / rowsHeight(pack(list, w)));
+        if (scale > best + 1e-9) { best = scale; width = w; }
+      }
     }
-    if (row.length) rows.push(row);
+    const rows = pack(list, width);
     let y = 0;
-    for (const r of rows) {
-      const tall = Math.max(...r.map((x) => x.h));
+    rows.forEach((r, ri) => {
+      const tall = Math.max(...r.hills.map((x) => x.h));
       const base = y + TOP + tall;
-      const span = r.reduce((s, x) => s + x.w, 0) + GAP * (r.length - 1);
+      const span = r.hills.reduce((s, x) => s + x.w, 0) + GAP * (r.hills.length - 1);
       let x = Math.floor((width - span) / 2);
-      for (const hl of r) {
-        hl.x0 = x;
-        hl.base = base;
-        hl.cx = x + hl.w / 2;
+      for (const hl of r.hills) {
+        Object.assign(hl, { x0: x, base, cx: x + hl.w / 2, row: ri });
         x += hl.w + GAP;
         hl.trail = trailOf(hl, width);
       }
-      y = base + LABEL;
-    }
+      r.base = base;
+      r.lane = base + LABEL + LANE / 2;
+      r.gaps = [r.hills[0].x0 - GAP / 2, ...r.hills.map((hl) => hl.x0 + hl.w + GAP / 2)];
+      y = base + LABEL + LANE;
+    });
     const height = y + 1;
-    return { width, height, hills: list, paths: pathsOf(list, opts.messages, width, height) };
+    return { width, height, rows, hills: list, paths: pathsOf(list, rows, opts.messages, width) };
   }
 
   // ---------------------------------------------------------------- message paths
@@ -153,26 +188,41 @@
   const pathWidth = (n) => Math.min(5, 1 + 0.8 * Math.sqrt(Math.max(0, n - 1)));
   const MAX_PATH_ANTS = 8;
 
-  // One path per pair that messaged: from the foot of one hill (the side facing the other) to the other's, bowed
-  // so it does not run straight through the hills between (downwards, under the names, when both share a row).
-  function pathsOf(hills, messages, width, height) {
+  // The ground in the gap beside a hill, on its side dir (+1 right, -1 left).
+  const gapOf = (hl, dir) => (dir > 0 ? hl.x0 + hl.w + GAP / 2 : hl.x0 - GAP / 2);
+
+  // A path's corners from hill U to hill D (U's row above D's, or the same). It starts on the ground in the gap
+  // beside U (the side facing D), drops to the lane below U's row, runs along the lanes and down through the gaps
+  // of the rows between (the gap nearest its goal), and enters the gap beside D down to D's ground. So a path never
+  // crosses a hill, and its ends show. `off` shifts it within the lanes, so paths sharing a lane stay apart.
+  function route(U, D, rows, off) {
+    const lane = (r) => rows[r].lane + off;
+    if (U.row === D.row) {
+      const dir = Math.sign(D.cx - U.cx) || 1;
+      const gu = gapOf(U, dir), gd = gapOf(D, -dir);
+      return [{ x: gu, y: U.base + 0.5 }, { x: gu, y: lane(U.row) }, { x: gd, y: lane(U.row) }, { x: gd, y: D.base + 0.5 }];
+    }
+    const gu = gapOf(U, Math.sign(D.cx - U.cx) || 1);
+    const gd = gapOf(D, Math.sign(gu - D.cx) || 1);
+    const pts = [{ x: gu, y: U.base + 0.5 }, { x: gu, y: lane(U.row) }];
+    for (let r = U.row + 1; r < D.row; r++) {
+      const g = rows[r].gaps.reduce((a, b) => (Math.abs(b - gd) < Math.abs(a - gd) ? b : a));
+      pts.push({ x: g, y: lane(r - 1) }, { x: g, y: lane(r) });
+    }
+    pts.push({ x: gd, y: lane(D.row - 1) }, { x: gd, y: D.base + 0.5 });
+    return pts;
+  }
+
+  // One path per pair that messaged, routed as above (from a to b).
+  function pathsOf(hills, rows, messages, width) {
     const by = new Map(hills.map((h) => [h.name, h]));
     const msgs = (messages || {}).messages || [];
     return ((messages || {}).pairs || []).filter((pr) => by.has(pr.a) && by.has(pr.b) && pr.a !== pr.b && pr.count > 0).map((pr) => {
       const A = by.get(pr.a), B = by.get(pr.b);
-      const dir = Math.sign(B.cx - A.cx) || 1;
-      const p0 = { x: A.cx + dir * A.w * 0.35, y: A.base - 0.5 }, p2 = { x: B.cx - dir * B.w * 0.35, y: B.base - 0.5 };
-      const dx = p2.x - p0.x, dy = p2.y - p0.y, d = Math.hypot(dx, dy) || 1;
-      const bow = (hash('bow', pr.a, pr.b) % 2 ? 1 : -1) * Math.min(10, 0.18 * d);
-      const c = A.base === B.base ? { x: (p0.x + p2.x) / 2, y: A.base + 2 + Math.min(LABEL + 4, 0.12 * d) }
-        : { x: (p0.x + p2.x) / 2 - (dy / d) * bow, y: (p0.y + p2.y) / 2 + (dx / d) * bow };
-      const n = Math.max(8, Math.ceil(d / 1.5));
-      const trail = [];
-      for (let k = 0; k <= n; k++) {
-        const t = k / n, u = 1 - t;
-        trail.push({ x: Math.max(0.5, Math.min(width - 0.5, u * u * p0.x + 2 * u * t * c.x + t * t * p2.x)),
-          y: Math.max(0.5, Math.min(height - 1.5, u * u * p0.y + 2 * u * t * c.y + t * t * p2.y)) });
-      }
+      const off = ((hash('lane', pr.a, pr.b) % 3) - 1) * 1.4;
+      const pts = A.row <= B.row ? route(A, B, rows, off) : route(B, A, rows, off).reverse();
+      const trail = pts.map((q) => ({ x: Math.max(0.5, Math.min(width - 0.5, q.x)), y: q.y }))
+        .filter((q, i, a) => !i || q.x !== a[i - 1].x || q.y !== a[i - 1].y);
       const between = msgs.filter((m) => (m.from === pr.a && m.to === pr.b) || (m.from === pr.b && m.to === pr.a));
       return { a: pr.a, b: pr.b, count: pr.count, last: pr.last, w: pathWidth(pr.count), trail,
         ants: Math.min(MAX_PATH_ANTS, pr.count),
@@ -227,16 +277,19 @@
   }
   // The colours a hill is drawn in, for its mood: blocked takes an amber tint, quiet is greyed.
   function tone(hl) {
-    const f = hl.mood === 'quiet' ? (c) => grey(c, 0.85) : hl.mood === 'blocked' ? (c) => mix(c, C.warn, 0.28) : (c) => c;
+    const m = hl.mood === 'quiet' ? (c) => grey(c, 0.85) : hl.mood === 'blocked' ? (c) => mix(c, C.warn, 0.28) : (c) => c;
+    const f = (c) => mix(m(c), C.bg, HAZE[hl.layer] || 0);
     const soil = SOILS[hl.design.soil];
     return { base: f(soil.base), dark: f(soil.dark), light: f(soil.light), grass: GRASS.map(f),
-      flower: (c) => (hl.mood === 'quiet' ? grey(c, 0.85) : c), twig: f(C.twig), hole: C.hole };
+      flower: (c) => mix(hl.mood === 'quiet' ? grey(c, 0.85) : c, C.bg, HAZE[hl.layer] || 0), twig: f(C.twig), hole: C.hole };
   }
 
-  // One hill's blocks into px (Map "x,y" -> colour; later blocks paint over earlier ones).
-  function paint(hl, px) {
+  // One hill's blocks into px (Map "x,y" -> colour; later blocks paint over earlier ones). Its twigs, grass,
+  // pebbles and flowers leave the blocks in `keep` (the message paths) uncovered.
+  function paint(hl, px, keep = new Set()) {
     const d = hl.design, t = tone(hl), r = rng('paint', hl.name);
-    const set = (x, y, c) => px.set(`${x},${y}`, c);
+    const put = (x, y, c) => px.set(`${x},${y}`, c);
+    const set = (x, y, c) => { if (!keep.has(`${x},${y}`)) px.set(`${x},${y}`, c); };
     const cols = [];
     for (let i = 0; i < hl.w; i++) cols.push(colHeight(hl, i));
     for (let i = 0; i < hl.w; i++) {
@@ -244,7 +297,7 @@
         const x = hl.x0 + i, y = hl.base - 1 - j;
         const edge = j === cols[i] - 1 || i === 0 || i === hl.w - 1 || j >= Math.min(cols[i - 1] ?? 0, cols[i + 1] ?? 0);
         const n = rng(d.seed, i, j)();
-        set(x, y, edge ? t.dark : n < d.speckle ? (n < d.speckle / 2 ? t.dark : t.light) : t.base);
+        put(x, y, edge ? t.dark : n < d.speckle ? (n < d.speckle / 2 ? t.dark : t.light) : t.base);
       }
     }
     // entrances: the main one where the trail starts, the others spread over the mound
@@ -253,9 +306,9 @@
     for (const i of holes) {
       if (cols[i] < 4) continue;
       const y = hl.base - cols[i] + 2;
-      set(hl.x0 + i, y, t.hole);
-      if (i + 1 < hl.w && cols[i + 1] >= 4) set(hl.x0 + i + 1, y, t.hole);
-      if (hl.w >= 18) set(hl.x0 + i, y + 1, t.hole);
+      put(hl.x0 + i, y, t.hole);
+      if (i + 1 < hl.w && cols[i + 1] >= 4) put(hl.x0 + i + 1, y, t.hole);
+      if (hl.w >= 18) put(hl.x0 + i, y + 1, t.hole);
     }
     // twigs: lines of 3-5 blocks leaning out of the mound
     for (let k = 0; k < d.twigs; k++) {
@@ -346,11 +399,11 @@
   function svg(agents, opts = {}) {
     const L = layout(agents, opts);
     const px = new Map();
-    const bands = new Set(L.hills.map((hl) => hl.base));
-    for (const b of bands) for (let x = 0; x < L.width; x++) {
-      px.set(`${x},${b}`, C.ground);
-      px.set(`${x},${b + 1}`, C.groundDark);
+    for (const row of L.rows) for (let x = 0; x < L.width; x++) {
+      px.set(`${x},${row.base}`, mix(C.ground, C.bg, HAZE[row.layer]));
+      px.set(`${x},${row.base + 1}`, mix(C.groundDark, C.bg, HAZE[row.layer]));
     }
+    const keep = new Set();
     for (const pa of L.paths) {                 // dirt paths, under everything else
       const r = pa.w / 2;
       for (let k = 1; k < pa.trail.length; k++) {
@@ -359,7 +412,10 @@
           const x = a.x + (b.x - a.x) * m / steps, y = a.y + (b.y - a.y) * m / steps;
           for (let i = Math.floor(x - r); i <= Math.floor(x + r - 1e-9); i++) {
             for (let j = Math.floor(y - r); j <= Math.floor(y + r - 1e-9); j++) {
-              if (Math.hypot(i + 0.5 - x, j + 0.5 - y) <= Math.max(0.75, r)) px.set(`${i},${j}`, (hash('dirt', i, j) % 7) ? C.path : C.pathDark);
+              if (Math.hypot(i + 0.5 - x, j + 0.5 - y) <= Math.max(0.75, r)) {
+                px.set(`${i},${j}`, (hash('dirt', i, j) % 7) ? C.path : C.pathDark);
+                keep.add(`${i},${j}`);
+              }
             }
           }
         }
@@ -373,7 +429,7 @@
       px.set(`${Math.floor(end.x)},${hl.base - 1}`, C.crumb);
       px.set(`${Math.floor(end.x) + 1},${hl.base - 1}`, C.crumb);
     }
-    L.hills.forEach((hl) => paint(hl, px));
+    L.hills.forEach((hl) => paint(hl, px, keep));
     let ants = '', labels = '', hits = '';
     L.paths.forEach((pa, n) => {
       for (let k = 0; k < pa.ants; k++) {
@@ -402,5 +458,5 @@
       + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}</g>`) + '</svg>';
   }
 
-  return { pathWidth, antPose, hash, rng, sizeOf, moodOf, design, profile, layout, antAt, svg, label, SIZES, ANTS, SHAPES, SOILS, SPEED };
+  return { pathWidth, antPose, hash, rng, sizeOf, layerOf, LAYERS, DEPTH, moodOf, design, profile, layout, antAt, svg, label, SIZES, ANTS, SHAPES, SOILS, SPEED };
 }));

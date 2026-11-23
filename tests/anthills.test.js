@@ -44,13 +44,50 @@ test('the same name always gives the same design; names give varied designs', ()
   assert.deepEqual(one, H.layout(AGENTS).hills.find((h) => h.name === 'HIGH-a').design);
 });
 
-test('layout: queen first, by priority then blocked-working-quiet; every hill inside the width, none overlapping', () => {
+test('layers: LOOP alone at the back, IMPLEMENT- in front, every other session in the middle', () => {
+  assert.equal(H.layerOf({ name: 'LOOP' }), 'back');
+  assert.equal(H.layerOf({ name: 'anything', loop: true }), 'back');
+  for (const n of ['IMPLEMENT-loop-app', 'implement-x']) assert.equal(H.layerOf({ name: n }), 'front');
+  for (const n of ['HIGH-a', 'MED-READ-lung', 'LOW-x', 'git-projects-2b', 'cam-session', 'IMPLEMENTER', 'paper_summary']) {
+    assert.equal(H.layerOf({ name: n }), 'middle', n);
+  }
+});
+
+test('rows of depth: back above middle above front; size by priority, a little smaller further back', () => {
+  for (const width of [48, 96]) {
+    const many = [...AGENTS, ag('IMPLEMENT-f'), ...Array.from({ length: 6 }, (_, i) => ag(`MED-x${i}`))];
+    const L = H.layout(many, { width });
+    const bases = (ly) => L.hills.filter((h) => h.layer === ly).map((h) => h.base);
+    assert.deepEqual(L.hills.filter((h) => h.layer === 'back').map((h) => h.name), ['LOOP']);
+    assert.ok(Math.max(...bases('back')) < Math.min(...bases('middle')), `back above middle at ${width}`);
+    assert.ok(Math.max(...bases('middle')) < Math.min(...bases('front')), `middle above front at ${width}`);
+    assert.deepEqual(L.rows.map((r) => r.layer), [...L.rows.map((r) => r.layer)].sort((a, b) => H.LAYERS.indexOf(a) - H.LAYERS.indexOf(b)));
+  }
+  const by = new Map(H.layout(AGENTS, { width: 96 }).hills.map((h) => [h.name, h]));
+  assert.equal(by.get('IMPLEMENT-e').w, H.SIZES.large[0]);                          // front: full size
+  assert.equal(by.get('HIGH-a').w, Math.round(H.SIZES.large[0] * H.DEPTH.middle));    // middle: a little smaller
+  assert.equal(by.get('LOOP').w, Math.round(H.SIZES.queen[0] * H.DEPTH.back));
+  assert.ok(by.get('HIGH-a').w > by.get('MED-c').w && by.get('MED-c').w > by.get('LOW-d').w, 'priority still sets size');
+  assert.ok(H.DEPTH.back < H.DEPTH.middle && H.DEPTH.middle < H.DEPTH.front);
+});
+
+test('fit: the width chosen draws the meadow largest in the box, at phone and computer shapes', () => {
+  const many = [...AGENTS, ag('IMPLEMENT-f'), ag('IMPLEMENT-g'), ...Array.from({ length: 9 }, (_, i) => ag(`MED-x${i}`))];
+  for (const fit of [{ w: 358, h: 560 }, { w: 594, h: 620 }, { w: 1000, h: 400 }]) {
+    const L = H.layout(many, { fit });
+    const scale = (Lx) => Math.min(fit.w / Lx.width, fit.h / Lx.height);
+    for (const width of [40, 60, 80, 100, 140, 200]) assert.ok(scale(H.layout(many, { width })) <= scale(L) + 1e-9, `${width} vs ${L.width}`);
+    for (const h of L.hills) assert.ok(h.x0 >= 0 && h.x0 + h.w <= L.width && h.base < L.height);
+  }
+});
+
+test('layout: within a layer by priority then blocked-working-quiet; every hill inside the width, none overlapping', () => {
   for (const width of [48, 64, 96]) {
     const many = [...AGENTS, ...Array.from({ length: 12 }, (_, i) => ag(`MED-x${i}`, ['working', 'blocked', 'stalled'][i % 3]))];
     const L = H.layout(many, { width });
     assert.equal(L.hills[0].name, 'LOOP');
     const order = ['queen', 'large', 'medium', 'medium-small', 'small'];
-    L.hills.forEach((h, i) => { if (i) assert.ok(order.indexOf(h.size) >= order.indexOf(L.hills[i - 1].size)); });
+    L.hills.forEach((h, i) => { if (i && h.layer === L.hills[i - 1].layer) assert.ok(order.indexOf(h.size) >= order.indexOf(L.hills[i - 1].size)); });
     const meds = L.hills.filter((h) => h.size === 'medium').map((h) => h.mood);
     assert.deepEqual(meds, [...meds].sort((a, b) => ['blocked', 'working', 'quiet'].indexOf(a) - ['blocked', 'working', 'quiet'].indexOf(b)));
     for (const h of L.hills) assert.ok(h.x0 >= 0 && h.x0 + h.w <= width && h.base < L.height, `${h.name} at ${width}`);
@@ -121,10 +158,11 @@ test('message paths: one per pair, ants in proportion, messages newest first; ag
   const pa = L.paths.find((x) => x.a === 'HIGH-a');
   assert.deepEqual([pa.count, pa.ab, pa.ba, pa.ants, pa.w], [3, 1, 2, 3, H.pathWidth(3)]);
   assert.deepEqual(pa.msgs.map((m) => m.text), ['third', 'second', 'first']);
-  // ends at the two hills' feet, and ants stay on it
+  // ends on the ground beside the two hills, outside them, and ants stay on it
   const A = L.hills.find((h) => h.name === 'HIGH-a'), B = L.hills.find((h) => h.name === 'LOOP');
   const [s, e] = [pa.trail[0], pa.trail.at(-1)];
-  assert.ok(Math.abs(s.y - (A.base - 0.5)) < 1e-9 && Math.abs(e.y - (B.base - 0.5)) < 1e-9);
+  assert.ok(Math.abs(s.y - (A.base + 0.5)) < 1e-9 && Math.abs(e.y - (B.base + 0.5)) < 1e-9);
+  assert.ok(Math.abs(s.x - A.cx) > A.w / 2 && Math.abs(e.x - B.cx) > B.w / 2);
   for (const p of pa.trail) assert.ok(p.x >= 0 && p.x <= L.width && p.y >= 0 && p.y <= L.height);
   const q = H.antAt(pa, 1, 5.5);
   assert.ok(pa.trail.some((p, i) => i && Math.min(Math.hypot(q.x - p.x, q.y - p.y), Math.hypot(q.x - pa.trail[i - 1].x, q.y - pa.trail[i - 1].y))
@@ -135,4 +173,29 @@ test('message paths: one per pair, ants in proportion, messages newest first; ag
   assert.match(svg, /fill="#d3c59f"/);                           // dirt
   assert.doesNotMatch(H.svg(AGENTS, { width: 96 }), /data-k="path"|#d3c59f/);
   assert.doesNotMatch(H.svg(AGENTS, { width: 96, messages: MSGS, mini: true }), /data-k=/);
+});
+
+test('paths go round the hills: no path, at its full width, crosses any hill, at any width', () => {
+  const many = [...AGENTS, ag('IMPLEMENT-f'), ag('IMPLEMENT-g'), ag('git-projects-2b'), ...Array.from({ length: 5 }, (_, i) => ag(`MED-x${i}`))];
+  const names = many.map((a) => a.name);
+  const pairs = [];
+  for (let i = 0; i < names.length; i += 2) for (let j = i + 1; j < names.length; j += 3) pairs.push({ a: names[i], b: names[j], count: 1 + ((i + j) % 9) });
+  for (const opts of [{ width: 48 }, { width: 96 }, { fit: { w: 358, h: 560 } }, { fit: { w: 594, h: 620 } }]) {
+    const L = H.layout(many, { ...opts, messages: { messages: [], pairs } });
+    assert.equal(L.paths.length, pairs.length);
+    for (const pa of L.paths) {
+      for (let k = 1; k < pa.trail.length; k++) {
+        const a = pa.trail[k - 1], b = pa.trail[k];
+        assert.ok(a.x === b.x || a.y === b.y, 'paths run along lanes and gaps');
+        for (let m = 0; m <= 40; m++) {
+          const x = a.x + (b.x - a.x) * m / 40, y = a.y + (b.y - a.y) * m / 40;
+          assert.ok(x >= 0 && x <= L.width && y >= 0 && y <= L.height);
+          for (const h of L.hills) {
+            const dx = Math.max(h.x0 - x, 0, x - (h.x0 + h.w)), dy = Math.max(h.base - h.h - y, 0, y - h.base);
+            assert.ok(Math.hypot(dx, dy) >= pa.w / 2 - 1e-9, `${pa.a}-${pa.b} crosses ${h.name} (${JSON.stringify(opts)})`);
+          }
+        }
+      }
+    }
+  }
 });

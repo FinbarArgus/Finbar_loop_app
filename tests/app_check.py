@@ -588,6 +588,20 @@ def run(loop_bin, graph, shots):
                 page.wait_for_selector('.hview svg .hits [data-k="hill"]')
                 check(page, page.locator('.meta a.on').inner_text() == 'Hills', 'Hills tab in the header', failures)
                 check(page, page.locator('.hview [data-k="hill"]').count() == 7, 'Hills: one hill per agent, and one for an agent only in the messages', failures)
+                # The whole meadow on one screen: every hill and path inside the viewport with the page unscrolled.
+                out = page.evaluate("""() => { scrollTo(0, 0);
+                    const r0 = document.querySelector('.hview svg').getBoundingClientRect();
+                    return [...document.querySelectorAll('.hview svg [data-k]'), document.querySelector('.hview svg')].map((n) => {
+                      const r = n.getBoundingClientRect();
+                      return [n.dataset.k || 'svg', n.dataset.i, Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)];
+                    }).filter(([, , l, t, r, b]) => l < -1 || t < -1 || r > innerWidth + 1 || b > innerHeight + 1); }""")
+                check(page, not out and page.evaluate('scrollY') == 0, f'Hills: every hill and path on one screen, no scroll {out}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-hills-screen.png')
+                ys = page.evaluate("Object.fromEntries([...document.querySelectorAll('.hview text')].map((t) => [t.textContent, t.getBoundingClientRect().top]))")
+                middle = [ys[n] for n in ('HIGH-session-a', 'HIGH-paper', 'MED-y', 'LOW-x', 'old-session')]
+                check(page, ys['LOOP'] < min(middle) and max(middle) < ys['IMPLEMENT-app'],
+                      f'Hills: LOOP at the back, managers in the middle, IMPLEMENT- in front {ys}', failures)
                 n_ants = page.locator('.hview .ant[data-h]').count()
                 check(page, n_ants == 6 + 5 + 2 + 5, f'Hills: ants on the working hills only ({n_ants})', failures)   # LOOP, HIGH, LOW, IMPLEMENT (large)
                 check(page, page.locator('.hview [data-k="path"]').count() == 3 and page.locator('.hview .ant[data-p]').count() == 3 + 1 + 1,
