@@ -569,6 +569,57 @@ def run(loop_bin, graph, shots):
                 check(page, narrow(), 'status: no sideways scroll', failures)
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-status.png', full_page=True)
+                # Hills: every agent an anthill (size by priority, rock when blocked, ants when working), the tree beside.
+                st = json.loads((repo / 'state/status.json').read_text())
+                mk = lambda name, state, **kw: {'name': name, 'job': name[:8], 'state': state, 'running': state != 'stalled',
+                                                'why': '', 'working_on': f'{name} at work', 'recent': [], 'items': [], **kw}
+                st['agents'] = [mk('LOOP', 'working', loop=True), mk('HIGH-session-a', 'blocked', items=['Q-0001'], why='waiting on Finbar',
+                                recent=[{'id': 'Q-0001', 'title': 'Which step size for the run?', 'tab': 'question', 'status': 'question', 'blocking_now': True}]),
+                                mk('HIGH-paper', 'working'), mk('MED-y', 'stalled'), mk('LOW-x', 'working'), mk('IMPLEMENT-app', 'working')]
+                (repo / 'state/status.json').write_text(json.dumps(st))
+                msgs = [{'at': f'2026-11-23T0{k}:00:00Z', 'from': fr, 'to': to, 'text': f'fixture message {k}'}
+                        for k, (fr, to) in enumerate([('LOOP', 'HIGH-paper'), ('HIGH-paper', 'LOOP'), ('LOOP', 'HIGH-paper'),
+                                                      ('IMPLEMENT-app', 'LOOP'), ('old-session', 'LOW-x')])]
+                (repo / 'state/messages.json').write_text(json.dumps({'messages': msgs, 'pairs': [
+                    {'a': 'HIGH-paper', 'b': 'LOOP', 'count': 3, 'last': msgs[2]['at']},
+                    {'a': 'IMPLEMENT-app', 'b': 'LOOP', 'count': 1, 'last': msgs[3]['at']},
+                    {'a': 'LOW-x', 'b': 'old-session', 'count': 1, 'last': msgs[4]['at']}]}))
+                page.goto(base + '#/hills')
+                page.wait_for_selector('.hview svg .hits [data-k="hill"]')
+                check(page, page.locator('.meta a.on').inner_text() == 'Hills', 'Hills tab in the header', failures)
+                check(page, page.locator('.hview [data-k="hill"]').count() == 7, 'Hills: one hill per agent, and one for an agent only in the messages', failures)
+                n_ants = page.locator('.hview .ant[data-h]').count()
+                check(page, n_ants == 6 + 5 + 2 + 3, f'Hills: ants on the working hills only ({n_ants})', failures)
+                check(page, page.locator('.hview [data-k="path"]').count() == 3 and page.locator('.hview .ant[data-p]').count() == 3 + 1 + 1,
+                      'Hills: a path per pair that messaged, ants on them', failures)
+                page.locator('.hview [data-k="path"][data-i="0"]').dispatch_event('click')
+                info = page.locator('.hinfo').inner_text()
+                check(page, 'HIGH-paper ↔ LOOP' in info and 'fixture message 2' in info and '1 of 3' in info,
+                      f'Hills: tapping a path shows its latest message {info!r}', failures)
+                page.locator('.hinfo button', has_text='older').click()
+                check(page, 'fixture message 1' in page.locator('.hinfo').inner_text(), 'Hills: ◀ older', failures)
+                page.locator('.hinfo button', has_text='newer').click()
+                check(page, 'fixture message 2' in page.locator('.hinfo').inner_text(), 'Hills: newer ▶', failures)
+                if shots:
+                    page.locator('.hinfo').scroll_into_view_if_needed()
+                    page.screenshot(path=f'{shots}/{label}-hills-path.png')
+                check(page, page.locator('.hview svg rect[fill="#686a66"]').count() > 0, 'Hills: a rock on the blocked hill', failures)
+                check(page, page.locator('.treecol svg').count() == 1, 'Hills: the growth tree beside the hills', failures)
+                t0 = page.locator('.hview .ant').first.get_attribute('transform')
+                page.wait_for_timeout(400)
+                check(page, page.locator('.hview .ant').first.get_attribute('transform') != t0, 'Hills: the ants move', failures)
+                blocked = page.evaluate("[...document.querySelectorAll('.hview text')].findIndex((t) => t.textContent.startsWith('HIGH-session'))")
+                page.locator(f'.hview [data-k="hill"][data-i="{blocked}"]').dispatch_event('click')
+                info = page.locator('.hinfo').inner_text()
+                check(page, 'HIGH-session-a' in info and 'blocked' in info and 'Waiting on' in info, f'Hills: tap a blocked hill {info!r}', failures)
+                check(page, narrow(), 'Hills: no sideways scroll', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-hills.png', full_page=True)
+                if label == 'computer':
+                    check(page, not page.locator('#gside').is_visible(), 'Hills: no side panel (the tree is on the page)', failures)
+                page.locator('.hinfo a', has_text='Q-0001').first.click()
+                page.wait_for_selector('.item-head h2')
+                check(page, 'Which step size' in page.locator('.item-head h2').inner_text(), 'Hills: the item it waits on opens', failures)
                 check(page, not errors, f'no console errors {errors}', failures)
                 ctx.close()
 
