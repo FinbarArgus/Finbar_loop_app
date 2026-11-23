@@ -442,6 +442,107 @@ def run(loop_bin, graph, shots):
                     page.wait_for_selector('.mrow')
                     page.screenshot(path=f'{shots}/{label}-mine.png', full_page=True)
 
+                # Read: ticking done without a note asks for one; with a note it ticks and dates the tick.
+                rj = lambda i: json.loads((repo / 'personal' / i / 'entry.json').read_text())
+                def seed(eid, **kw):
+                    (repo / 'personal' / eid).mkdir(parents=True, exist_ok=True)
+                    e = {'id': eid, 'kind': 'read', 'priority': 'low', 'deadline': None, 'done': False,
+                         'created': '2026-01-01T00:00:00Z', 'files': [], **kw}
+                    (repo / 'personal' / eid / 'entry.json').write_text(json.dumps(e))
+                seed('read-nonote', title='Unnoted paper', zotero={'name': 'ROM / OpInf'})
+                page.goto(base + '#/mine/read')
+                page.reload()
+                row = page.locator('.mrow', has_text='Unnoted paper')
+                row.locator('.mcheck input').click()       # the app un-ticks it and asks for a note
+                row.locator('.status.ask-note').wait_for()
+                check(page, not rj('read-nonote')['done'] and not row.locator('.mcheck input').is_checked()
+                      and row.locator('details.pextra', has_text='Notes').get_attribute('open') is not None,
+                      'Read: ticking without a note opens Notes and does not tick', failures)
+                row.locator('textarea.pnotes').fill('a note')
+                page.wait_for_selector('.mrow .status >> text=/^Saved;/')
+                row.locator('.mcheck input').check()
+                page.wait_for_selector('details.history .mrow >> text=Unnoted paper', state='attached')
+                check(page, rj('read-nonote')['done'] and rj('read-nonote').get('done_at'), 'Read: ticked with a note, done_at set', failures)
+
+                # Write: draft v1 -> v2, submitted, DOI (normalised), citations shown, published moves it to Done.
+                wid = [json.loads(f.read_text()) for f in (repo / 'personal').glob('write-*/entry.json')][0]['id']
+                page.goto(base + '#/mine/write')
+                row = page.locator('.mrow', has_text='Paper 1 draft')
+                check(page, row.locator('.mcheck').count() == 0, 'Write: no single done tick', failures)
+                row.locator('.wstate', has_text='Draft').locator('input').check()
+                page.wait_for_selector('.mrow .wver >> text=v1')
+                page.locator('.mrow', has_text='Paper 1 draft').locator('.wup').click()
+                page.wait_for_selector('.mrow .wver >> text=v2')
+                page.locator('.mrow', has_text='Paper 1 draft').locator('.wstate', has_text='Submitted').locator('input').check()
+                page.locator('.mrow', has_text='Paper 1 draft').locator('.wstate', has_text='Submitted').locator('input:checked').wait_for()
+                doi = '10.1016/j.cmpb.2026.109528'
+                (repo / 'state' / 'citations.json').write_text(json.dumps({'dois': {doi: {'count': 12, 'status': 'ok'}}}))
+                d = page.locator('.mrow', has_text='Paper 1 draft').locator('.wdoi')
+                d.fill('https://doi.org/' + doi)
+                d.dispatch_event('change')
+                page.wait_for_selector('.mrow .badge >> text=12 citations')
+                w = rj(wid)
+                check(page, w['draft'] == 2 and w['submitted'] and w.get('submitted_at') and w['doi'] == doi and not w['done'],
+                      f'Write: draft v2, submitted, DOI saved {w}', failures)
+                page.locator('.mrow', has_text='Paper 1 draft').locator('.wstate', has_text='Published').locator('input').check()
+                page.wait_for_selector('details.history >> text=Done (1)')
+                w = rj(wid)
+                check(page, w['published'] and w.get('published_at') and w['done'] and w.get('done_at'), 'Write: published is done', failures)
+
+                # Tree: papers read on past days in two collections, one met deadline (a leaf), the animal.
+                import datetime as _dt2
+                for k, (name, days) in enumerate([('ROM / OpInf', 3), ('ROM / OpInf', 2), ('ROM / Beat maps', 2),
+                                                  ('Physiology', 1), ('ROM', 1), (None, 0)]):
+                    at = (_dt2.datetime.now() - _dt2.timedelta(days=days)).replace(hour=10).astimezone().isoformat()
+                    dl = (_dt2.date.today() - _dt2.timedelta(days=days - 1)).isoformat() if k == 0 else None
+                    seed(f'read-tree{k}', title=f'Tree paper {k}', done=True, done_at=at, deadline=dl,
+                         **({'zotero': {'name': name}} if name else {}))
+                page.goto(base + '#/tree')
+                page.wait_for_selector('.gview svg .hits [data-k="seg"]')
+                check(page, page.locator('.meta a.on').inner_text() == 'Tree', 'Tree tab in the header', failures)
+                head = page.locator('.ghead').inner_text()
+                check(page, 'seedling' in head and 'papers' in head and 'days in a row' in head, f'Tree: stage, streak and counts {head!r}', failures)
+                page.locator('.hits [data-k="seg"][data-i="read-tree2"]').first.dispatch_event('click')
+                info = page.locator('.ginfo').inner_text()
+                check(page, 'Tree paper 2' in info and 'ROM / Beat maps' in info and '1.2x' in info,
+                      f'Tree: tapping a segment shows its paper and collection {info!r}', failures)
+                check(page, page.locator('.hits .on').count() >= 1, 'Tree: the tapped paper lights up', failures)
+                page.locator(f'.hits [data-k="creature"][data-i="{wid}"]').dispatch_event('click')
+                info = page.locator('.ginfo').inner_text()
+                check(page, 'Paper 1 draft' in info and '12 citations' in info, f'Tree: tapping the animal shows its paper {info!r}', failures)
+                log = page.locator('.glog').inner_text()
+                check(page, 'Tree paper 0' in log and 'a leaf' in log and 'arrived' in log, 'Tree: growth log', failures)
+                cr = page.locator(f'.gcreature[data-i="{wid}"]')
+                cr.locator('input').fill('Hopper')
+                cr.locator('select').select_option('owl')
+                cr.locator('button.primary').click()
+                page.wait_for_selector('.gview svg text >> text=Hopper')
+                td = json.loads((repo / 'personal' / 'tree.json').read_text())
+                check(page, td['creatures'][wid] == {'name': 'Hopper', 'animal': 'owl'} and td['seed'],
+                      f'Tree: animal named, personal/tree.json written {td}', failures)
+                page.locator('.gtools .wstate input').check()
+                page.wait_for_selector('.gview svg text >> text=Beat maps')
+                check(page, True, 'Tree: branch names shown', failures)
+                page.locator('.gtools .wstate input').uncheck()
+                page.wait_for_selector('.gview svg .hits')
+                w0 = page.evaluate("document.querySelector('.gview svg').clientWidth")
+                page.locator('.gzoom button', has_text='+').click()
+                check(page, page.evaluate("document.querySelector('.gview svg').clientWidth") > w0, 'Tree: zoom in', failures)
+                check(page, narrow(), 'Tree: no sideways scroll', failures)
+                if shots:
+                    page.locator('.gzoom button', has_text='Fit').click()
+                    page.screenshot(path=f'{shots}/{label}-tree.png', full_page=True)
+                page.goto(base + '#/list')
+                page.wait_for_selector('.card')
+                if label == 'computer':
+                    page.wait_for_selector('#gside .gmini svg')
+                    check(page, 'seedling' in page.locator('#gside').inner_text(), 'wide screen: the tree in the side panel', failures)
+                    if shots:
+                        page.screenshot(path=f'{shots}/{label}-side.png')
+                else:
+                    check(page, not page.locator('#gside').is_visible(), 'phone: no side panel', failures)
+                check(page, narrow(), 'board with the side panel: no sideways scroll', failures)
+
                 # Status: usage, each agent with what it does, its entries, and a message box.
                 page.goto(base + '#/status')
                 page.wait_for_selector('.status-card .ulimit')
