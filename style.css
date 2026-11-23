@@ -454,3 +454,23 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .badge.pd.allow, .badge.pd.approved { color: var(--ok); }
 .badge.pd.deny, .badge.pd.denied { color: var(--bad); }
 .badge.pd.asked { color: var(--ask); font-weight: 600; }
+
+/* PR-review bundles: a row per PR at the top of the item; the Status tab's triage table */
+.bundle { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 12px 0; display: grid; gap: 10px; }
+.bundle h3 { margin: 0; font-size: 16px; }
+.bundle .n { color: var(--muted); }
+.brow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.brow .grow { flex: 1; }
+.bpr { border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 6px; }
+.bpr.cls-high { box-shadow: inset 3px 0 0 var(--high); padding-left: 8px; }
+.bwhy { color: var(--muted); font-size: 14px; }
+.bgiven { font-size: 14px; font-weight: 600; }
+.bgiven.approve { color: var(--ok); } .bgiven.changes { color: var(--bad); }
+.bverdict { display: flex; gap: 8px; }
+.bverdict .choice-btn { flex: 1; text-align: center; }
+.badge.cls.high { background: var(--high); color: #fff; }
+.badge.cls.skim { background: color-mix(in srgb, var(--ask) 22%, transparent); color: var(--ask); }
+.ttable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ttable th, .ttable td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.bverdict .choice-btn { padding: 6px 8px; }
+.bverdict .choice-btn.sent { border-style: dashed; }
