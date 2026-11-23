@@ -800,6 +800,62 @@ def run(loop_bin, graph, shots):
                 check(page, narrow(), 'status with permissions: no sideways scroll', failures)
                 if shots:
                     page.locator('.perms').screenshot(path=f'{shots}/{label}-permissions.png')
+                # A PR-review bundle (ledger: spec "bundle"; the installed loop may predate it, so it is patched in): a row per PR
+                # with its class and why, Approve all low, Changes with a note, sent as per-PR verdicts; Status shows triage accuracy.
+                sec = lambda k: {'type': 'section', 'id': f'ca-{k}', 'title': f'CA #{k}', 'summary': f'what #{k} does',
+                                 'blocks': [{'type': 'text', 'md': f'Review of #{k}.'}]}
+                (repo.parent / 'bundle.json').write_text(json.dumps({'title': 'Bundle CA-3a',
+                    'blocks': [{'type': 'text', 'md': 'Three PRs.'}] + [sec(k) for k in (650, 651, 652)]}))
+                bid = loop(loop_bin, repo, 'post', 'review', '--from', 'HIGH-merge-coordination-3', '--category', 'pr',
+                           '--spec', str(repo.parent / 'bundle.json'))
+                bp = repo / f'items/{bid}/item.json'
+                it = json.loads(bp.read_text())
+                mkpr = lambda k, cls, why: {'repo': 'CA', 'pr': k, 'head': 'abc', 'url': f'https://github.com/org/ca/pull/{k}',
+                                            'class': cls, 'why': why, 'class_facts': [], 'predicted_verdict': 'approve',
+                                            'predicted_reason': 'r', 'author_session': 'IMPLEMENT-ca', 'review_section': f'ca-{k}'}
+                it['bundle'] = {'id': 'CA-3a', 'title': 'CA-3a', 'prs': [mkpr(650, 'high', 'changes the solver API'),
+                                                                         mkpr(651, 'low', 'docs only'), mkpr(652, 'low', 'a test only')]}
+                it['page'] = 'pr-review'
+                bp.write_text(json.dumps(it))
+                page.goto(base + f'#/item/{bid}')
+                page.reload()
+                page.wait_for_selector('.bundle .bpr')
+                rows = page.locator('.bundle .bpr')
+                check(page, rows.count() == 3 and page.locator('.bundle .bpr.cls-high').count() == 1
+                      and 'changes the solver API' in rows.nth(0).inner_text() and '0 of 3' in page.locator('.bundle').inner_text(),
+                      'Bundle: a row per PR with its class and why', failures)
+                page.locator('.bundle .bapprove-low').click()
+                check(page, page.locator('.bundle .bpr.cls-low .v-approve.on').count() == 2
+                      and page.locator('.bundle .bpr.cls-high .v-approve.on').count() == 0
+                      and '2 verdicts chosen' in page.locator('.answer').inner_text(), 'Bundle: Approve all low marks only the low rows', failures)
+                page.locator('.answer textarea').fill('Thanks.')
+                page.locator('.bundle .bpr.cls-high .v-changes').click()
+                page.locator('.bundle .bpr.cls-high textarea').fill('add a test')
+                check(page, page.locator('.answer textarea').input_value() == 'Thanks.' and '3 verdicts chosen' in page.locator('.answer').inner_text(),
+                      'Bundle: choosing a verdict keeps the comment typed', failures)
+                page.locator('.bundle .bpr.cls-high .bsec').click()
+                check(page, page.locator('details.section#ca-650').get_attribute('open') is not None
+                      and page.locator('details.section#ca-651').get_attribute('open') is None, 'Bundle: Review ↓ opens its section', failures)
+                page.locator('.answer button.primary').click()
+                page.wait_for_selector('.bundle >> text=3 of 3 with your verdict')
+                ans = [json.loads(f.read_text()) for f in (repo / f'answers/{bid}').glob('*.json')]
+                check(page, len(ans) == 1 and ans[0]['text'] == 'Thanks.' and ans[0]['prs'] == [
+                    {'repo': 'CA', 'pr': 650, 'verdict': 'changes', 'text': 'add a test'},
+                    {'repo': 'CA', 'pr': 651, 'verdict': 'approve', 'text': ''},
+                    {'repo': 'CA', 'pr': 652, 'verdict': 'approve', 'text': ''}], f'Bundle: one answer with a verdict per PR {ans}', failures)
+                check(page, 'You sent: changes — add a test' in rows.nth(0).inner_text() and not page.locator('.bundle .bapprove-low').count(),
+                      'Bundle: sent verdicts shown on their rows', failures)
+                check(page, narrow(), 'bundle: no sideways scroll', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-bundle.png', full_page=True)
+                (repo / 'state/pr_triage.json').write_text(json.dumps({'classes': {
+                    'high': {'reviews': 1, 'answered': 1, 'change_requests': 1, 'agreed': 0, 'agreement': 0.0},
+                    'low': {'reviews': 2, 'answered': 2, 'change_requests': 0, 'agreed': 2, 'agreement': 1.0}}, 'recent': []}))
+                page.goto(base + '#/status')
+                page.reload()
+                page.wait_for_selector('.triage tr[data-class="low"]')
+                check(page, page.locator('.triage tr[data-class="low"]').inner_text().split('\t')[-1].strip() == '100% (2/2)'
+                      and '0% (0/1)' in page.locator('.triage tr[data-class="high"]').inner_text(), 'Status: triage accuracy per class', failures)
                 # The ant farm under the tree (LOOP the fruit pile at the trunk's foot, an anthome per session sized by
                 # tokens, lights by role, a rock when blocked, ants when working, tunnels for messages).
                 st = json.loads((repo / 'state/status.json').read_text())
