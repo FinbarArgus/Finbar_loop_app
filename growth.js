@@ -59,13 +59,16 @@
   // SEG x its multiplier, shrinking along a long branch as 1/sqrt(1 + k/SEG_HALF) for its k-th paper, so one
   // busy collection does not outgrow the whole tree. A collection with no paper of its own yet (a parent of
   // the paper's collection) starts as a STUB. The trunk starts TRUNK_BASE tall and its height is
-  // TRUNK_BASE + TRUNK_K sqrt(growth so far); each paper adds the rise it causes as a trunk segment.
+  // TRUNK_BASE + TRUNK_K sqrt(growth so far); each paper adds the rise it causes as a trunk segment. In the same
+  // way every collection above the paper's own (its parent, grandparent, ...) lengthens by LIMB_K sqrt(growth
+  // in its subcollections), so a big topic is a long limb with its subtopics spread along it.
   const SEG = 1;
   const SEG_HALF = 20;
   const STUB = 1.5;
   const TRUNK_BASE = 3;
   const TRUNK_K = 2.6;
   const trunkHeight = (grown) => TRUNK_BASE + TRUNK_K * Math.sqrt(grown);
+  const LIMB_K = 1.6;
   // Shape: the branches of one parent leave it in the order they were born, oldest lowest, spread over
   // ATTACH (fractions of the parent's length), alternately left and right, 25-45 degrees off the trunk
   // (18-36 off a branch). Each segment turns BEND of the way towards LEAN off vertical on its side, so the
@@ -121,7 +124,10 @@
         const sibs = p.kids;
         const [lo, hi] = ATTACH[p.parent ? 'branch' : 'trunk'];
         const t = lo + (hi - lo) * (c.rank + 0.3 + 0.4 * c.at) / sibs;
-        c.node = Math.max(1, Math.min(p.segs.length, Math.round(t * p.segs.length)));
+        const L = p.segs.reduce((acc, g) => acc + g.len, 0);
+        let run = 0, n = 0;
+        while (n < p.segs.length && run + p.segs[n].len / 2 < t * L) run += p.segs[n++].len;
+        c.node = Math.max(1, n);                    // the node at fraction t of the parent's length
         const g = p.segs[c.node - 1];
         x = g.x1; y = g.y1;
         if (p.firstSide == null) p.firstSide = hash(seed, 'side', p.id) % 2 ? 1 : -1;
@@ -202,12 +208,19 @@
         let c = chains.get(name);
         if (!c) {
           c = { id: name, parent: host.id, rank: host.kids++, segs: [], papers: 0, kids: 0, born: p.day,
-            off: r(), at: r() };
+            off: r(), at: r(), below: 0 };
           chains.set(name, c);
           order.push(c);
           if (name !== p.path[p.path.length - 1]) seg(c, STUB, r, null, 0, p.day);
         }
         host = c;
+      }
+      // Every ancestor collection of the paper's own lengthens by the rise its growth below causes.
+      for (const name of p.path.slice(0, -1)) {
+        const c = chains.get(name);
+        const rise2 = LIMB_K * (Math.sqrt(c.below + p.mult) - Math.sqrt(c.below));
+        c.below += p.mult;
+        seg(c, rise2, r, p.id, 0, p.day);
       }
       if (host === trunk) {
         seg(trunk, rise, null, p.id, p.mult, p.day);             // an unsorted paper's wood stays in the trunk
@@ -382,7 +395,7 @@
   }
 
   // The tree as an SVG string, drawn in CELL-sized blocks, with a height scale on its left.
-  // opts: {hour, mini (no names, no tap targets)}. Tap targets: data-k="seg" with data-i = the paper's entry id
+  // opts: {hour, mini (no names, no tap targets), branchNames (each collection's last name at its branch tip)}. Tap targets: data-k="seg" with data-i = the paper's entry id
   // and data-b = its branch ('trunk' or the collection name), data-k="branch" on a collection's stub, and
   // data-k="creature" with data-i = the Write entry id. Leaves have none.
   function svg(state, opts = {}) {
@@ -429,6 +442,14 @@
       labels += `<text x="${f((b.i0 + b.w / 2) * CELL)}" y="${f(-(b.j0 + b.h + 0.6) * CELL)}" font-size="${f(CELL * 3.2)}" font-family="ui-monospace, Menlo, Consolas, monospace" font-weight="700"`
         + ` text-anchor="middle" fill="${INK}" stroke="${PAPER}" stroke-width="${f(CELL * 0.9)}" paint-order="stroke">${esc(c.name || `${c.animal} (name me)`)}</text>`;
     });
+    if (opts.branchNames && !opts.mini) {
+      for (const c of state.chains) {
+        if (!c.parent || !c.segs.length) continue;
+        const g = c.segs[c.segs.length - 1];
+        labels += `<text x="${f(g.x1)}" y="${f(-g.y1 - CELL)}" font-size="${f(CELL * 2.2)}" font-family="ui-monospace, Menlo, Consolas, monospace"`
+          + ` text-anchor="middle" fill="#666" stroke="${PAPER}" stroke-width="${f(CELL * 0.6)}" paint-order="stroke">${esc(c.id.split(' / ').pop())}</text>`;
+      }
+    }
     const all = [...wood, ...leafInk, ...leafPaper, ...critInk, ...critPaper].map((c) => c.split(',').map(Number));
     const is = all.map((c) => c[0]), js = all.map((c) => c[1]);
     const margin = opts.mini ? 2 : 4;
@@ -462,6 +483,6 @@
   }
 
   return { hash, rng, dayOf, addDays, hourOf, topicPath, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
-    STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
+    STREAK_STEP, MAX_MULT, LIMB_K, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
     derive, layout, walk, svg };
 }));

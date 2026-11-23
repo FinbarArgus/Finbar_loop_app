@@ -83,7 +83,9 @@ test("each paper grows one segment on its collection's branch, which hangs from 
   assert.equal(ch.get('physiology / cardiac').parent, 'physiology');
   assert.equal(ch.get('physiology').parent, 'trunk');
   assert.deepEqual(ch.get('physiology / cardiac / valves').segs.map((g) => g.paper), ['a', 'b']);
-  assert.deepEqual(ch.get('physiology').segs.map((g) => g.paper), [null]);      // a stub: no paper of its own yet
+  // A parent collection starts as a stub and lengthens with each paper below it; that wood is the paper's own.
+  assert.deepEqual(ch.get('physiology').segs.map((g) => [g.paper, g.weight]), [[null, 0], ['a', 0], ['b', 0]]);
+  assert.ok(Math.abs(ch.get('physiology').segs[1].len - G.LIMB_K) < 1e-12);
   assert.deepEqual(s.papers.map((p) => p.branch), ['physiology / cardiac / valves', 'physiology / cardiac / valves', 'inference', 'trunk', 'trunk']);
   // The segment's length is set by the multiplier (b's day is the 2nd good day in a row: 1.2x).
   const [ga, gb] = ch.get('physiology / cardiac / valves').segs;
@@ -184,4 +186,22 @@ test('the hourly walk: fixed for a given hour, one step to a neighbour each hour
 test('names are escaped in the SVG', () => {
   const svg = G.svg(G.derive([{ ...W, submitted: true, submitted_at: '2026-12-01T10:00:00' }], { creatures: { w1: { name: '<b>&"x' } } }, {}, NOW), { hour: 0 });
   assert.ok(svg.includes('&lt;b&gt;&amp;&quot;x') && !svg.includes('<b>'));
+});
+
+test('branch names: each collection named at its branch tip, only when asked', () => {
+  const s = G.derive([read('a', '2026-12-01', inZ('physiology / cardiac'))], {}, {}, NOW);
+  assert.match(G.svg(s, { hour: 0, branchNames: true }), />cardiac<\/text>/);
+  assert.doesNotMatch(G.svg(s, { hour: 0 }), />cardiac<\/text>/);
+});
+
+test("branches leave the trunk spread over its height, by length, oldest lowest", () => {
+  const { entries } = EX.history(2 * 365);
+  const s = G.derive(entries, {}, {}, '2028-11-22T12:00:00');
+  const trunk = s.chains[0];
+  const H = trunk.segs.reduce((a, g) => a + g.len, 0);
+  const kids = s.chains.filter((c) => c.parent === 'trunk').sort((a, b) => a.rank - b.rank);
+  const ys = kids.map((c) => c.segs[0].y0 / H);
+  assert.ok(ys[0] < 0.25, `lowest at ${ys[0]}`);
+  assert.ok(ys.at(-1) > 0.75, `highest at ${ys.at(-1)}`);
+  assert.deepEqual(ys, [...ys].sort((a, b) => a - b));
 });

@@ -96,6 +96,7 @@ if (require.main === module) {
   for (const y of [1, 2, 5]) {
     const { s, now } = snapshot(entries, writes, y * 365);
     fs.writeFileSync(path.join(out, `year-${y}.svg`), G.svg(s, { hour: G.hourOf(now) }));
+    fs.writeFileSync(path.join(out, `year-${y}-names.svg`), G.svg(s, { hour: G.hourOf(now), branchNames: true }));
     const streaks = s.papers.map((p) => p.mult);
     stats[y] = { now, stage: s.stage, papers: s.papers.length, good_days: s.goodDays.length, days: y * 365,
       grown: Math.round(s.grown * 10) / 10, height_m: Math.round(s.height * 10) / 10, branches: s.chains.length - 1,
