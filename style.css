@@ -439,3 +439,5 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .hmsgnav { justify-content: space-between; }
 .hnav[disabled] { opacity: .4; cursor: default; }
 @media (max-width: 759px) { .htree { max-width: 240px; margin-left: auto; margin-right: auto; } }
+.flink.loading { opacity: .6; }
+.flink.ready { font-weight: 600; }
