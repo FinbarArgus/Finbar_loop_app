@@ -1138,117 +1138,13 @@
       } }, 'Save')), st);
   }
 
-  // A mouse drag on the tree view pans it (one pair of window listeners for every view drawn).
-  let gdrag = null, gdragged = false;
-  window.addEventListener('pointermove', (ev) => {
-    if (!gdrag) return;
-    if (Math.abs(ev.clientX - gdrag.x) + Math.abs(ev.clientY - gdrag.y) > 4) gdrag.moved = true;
-    gdrag.view.scrollLeft = gdrag.l - (ev.clientX - gdrag.x);
-    gdrag.view.scrollTop = gdrag.t - (ev.clientY - gdrag.y);
-  });
-  window.addEventListener('pointerup', () => { gdragged = !!(gdrag && gdrag.moved); gdrag = null; });
-
-  // The tree in a scrolling view: + and − zoom (and Ctrl+wheel), drag pans with a mouse, touch scrolls.
-  // It opens fitted to the view and scrolled to the bottom, where the tree starts.
-  function growthViewer(state, info) {
-    const names = safeGet('loop.tree.names') === '1';
-    const view = el('div', { class: 'gview' });
-    view.innerHTML = G.svg(state, { branchNames: names });
-    const svgEl = view.querySelector('svg');
-    const vb = svgEl.viewBox.baseVal;
-    let z = 1, fit = 1;
-    const apply = (nz, cx, cy) => {
-      const W = view.clientWidth, H = view.clientHeight;
-      const fx = (view.scrollLeft + (cx ?? W / 2)) / (svgEl.clientWidth || 1);
-      const fy = (view.scrollTop + (cy ?? H / 2)) / (svgEl.clientHeight || 1);
-      z = Math.max(fit, Math.min(12, nz));
-      svgEl.style.width = `${z * 100}%`;
-      view.scrollLeft = fx * svgEl.clientWidth - (cx ?? W / 2);
-      view.scrollTop = fy * svgEl.clientHeight - (cy ?? H / 2);
-    };
-    const start = () => {
-      const W = view.clientWidth, H = view.clientHeight;
-      fit = Math.min(1, (H * vb.width / vb.height) / W);
-      z = fit;
-      svgEl.style.width = `${z * 100}%`;
-      view.scrollTop = view.scrollHeight;
-    };
-    view.addEventListener('wheel', (ev) => {
-      if (!ev.ctrlKey) return;
-      ev.preventDefault();
-      const r = view.getBoundingClientRect();
-      apply(z * (ev.deltaY < 0 ? 1.15 : 1 / 1.15), ev.clientX - r.left, ev.clientY - r.top);
-    }, { passive: false });
-    view.addEventListener('pointerdown', (ev) => {
-      if (ev.pointerType !== 'mouse') return;
-      gdrag = { view, x: ev.clientX, y: ev.clientY, l: view.scrollLeft, t: view.scrollTop, moved: false };
-    });
-    // Tap or hover: the info line; every segment of the same paper lights up.
-    const show = (target) => {
-      view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
-      const k = target && target.dataset ? target.dataset.k : null;
-      const body = k ? growthInfo(state, k, target.dataset.i, target.dataset.b) : null;
-      if (!body) return false;
-      const sel = k === 'seg' ? `[data-k="seg"][data-i="${CSS.escape(target.dataset.i)}"]` : null;
-      (sel ? view.querySelectorAll(sel) : [target]).forEach((n) => n.classList.add('on'));
-      info.replaceChildren(body);
-      info.classList.add('on');
-      return true;
-    };
-    svgEl.addEventListener('pointerover', (ev) => { if (ev.pointerType === 'mouse') show(ev.target); });
-    svgEl.addEventListener('click', (ev) => {
-      if (gdragged) { gdragged = false; return; }
-      if (!show(ev.target)) { info.classList.remove('on'); info.replaceChildren(el('span', { class: 'who' }, 'Tap a branch or an animal.')); }
-    });
-    const zoom = el('div', { class: 'gzoom' },
-      el('button', { class: 'ghost', title: 'zoom in', onclick: () => apply(z * 1.5) }, '+'),
-      el('button', { class: 'ghost', title: 'zoom out', onclick: () => apply(z / 1.5) }, '−'),
-      el('button', { class: 'ghost', title: 'whole tree', onclick: start }, 'Fit'));
-    return { el: el('div', { class: 'gwrap' }, view, zoom), start };
-  }
-
-  async function showTree() {
-    await loadMine();
-    const state = growthState();
-    const redraw = () => showTree();
-    const info = el('div', { class: 'ginfo' }, el('span', { class: 'who' }, 'Tap a branch or an animal.'));
-    const viewer = growthViewer(state, info);
-    const names = el('input', { type: 'checkbox' });
-    names.checked = safeGet('loop.tree.names') === '1';
-    names.addEventListener('change', () => { safeSet('loop.tree.names', names.checked ? '1' : null); redraw(); });
-    const stat = (k, v) => el('div', { class: 'gstat' }, el('b', {}, v), el('span', {}, k));
-    const head = el('section', { class: 'ghead' },
-      stat('stage', state.stage), stat('tall', metres(state.height)),
-      stat(`day${state.streak === 1 ? '' : 's'} in a row`, String(state.streak)),
-      stat('multiplier now', `${state.mult.toFixed(1)}x`),
-      stat('papers', String(state.papers.length)), stat('leaves', String(state.leaves.length)));
-    const log = el('ol', { class: 'glog' }, state.events.slice(0, 40).map(growthEvent));
-    const more = state.events.length > 40 ? el('button', { class: 'link', onclick: () => {
-      log.replaceChildren(...state.events.map(growthEvent)); more.remove();
-    } }, `Show all ${state.events.length}`) : null;
-    const animals = state.creatures.length
-      ? el('details', { class: 'pextra ganimals', open: state.creatures.some((c) => !c.name) ? true : null },
-        el('summary', {}, `Animals (${state.creatures.length})`), ...state.creatures.map((c) => creatureBox(c, redraw)))
-      : el('p', { class: 'who' }, 'Animals arrive when a Write entry is ticked Submitted.');
-    main().replaceChildren(head,
-      el('div', { class: 'row gtools' }, el('label', { class: 'wstate' }, names, 'Show branch names'), el('span', { class: 'grow' }),
-        el('span', { class: 'who' }, 'A good day: a paper read and no deadline passed. Each good day in a row adds 0.2x, up to 2x.')),
-      viewer.el, info, animals,
-      el('section', { class: 'gloghead' }, el('h3', {}, 'Growth'), state.events.length ? log : el('p', { class: 'empty' }, 'Nothing has grown yet: tick a Read paper done.'), more));
-    requestAnimationFrame(viewer.start);
-    setPoll(async () => {
-      const before = [...tree.sha].filter(([x]) => x.startsWith('personal/') || x === 'state/citations.json').join();
-      await loadTree();
-      if ([...tree.sha].filter(([x]) => x.startsWith('personal/') || x === 'state/citations.json').join() !== before && !main().querySelector('.gcreature input:focus')) redraw();
-    }, 60_000);
-  }
-
-  // ------------------------------------------------------------ Hills: the ant farm (anthills.js)
-  // From state/status.json, a cross-section of the ground: LOOP the food on the surface, every other session an
+  // ------------------------------------------------------------ The ant farm (anthills.js), drawn under the tree
+  // From state/status.json, a cross-section of the ground: LOOP the fruit pile on the surface, every other session an
   // anthill with its own anthome below, sized by its tokens since the weekly reset and lit in its role's colour; a
   // rock on a blocked anthill, ants on a working one, dark lights when stalled. Hover (tap on a phone) an anthome
-  // for its usage, the food inside it for its current focus, a tunnel for its messages. The growth tree stands beside. Ants move with requestAnimationFrame (about 20 frames a second,
-  // only while the tab shows), and stand still for people who ask for reduced motion.
+  // for its usage, the food inside it for its current focus, a tunnel for its messages. Ants move with
+  // requestAnimationFrame (about 20 frames a second, only while the tab shows), and stand still for people who ask
+  // for reduced motion.
 
   const H = window.LoopHills;
   let lastStatus = null;
@@ -1336,58 +1232,187 @@
     hillsFrame = requestAnimationFrame(step);
   }
 
-  async function showHills() {
+  // ------------------------------------------------------------ Tree: the growth tree on the ant farm (scene.js)
+  // One drawing: the tree stands in LOOP's fruit pile in the middle of the surface, the sessions' anthills around its
+  // foot, their shafts down to the anthomes. The view is a camera over it (sceneCam, in farm blocks; kept across
+  // redraws until Reset): Ctrl+wheel or a trackpad pinch zooms toward the pointer, a mouse drag pans, Shift+wheel
+  // (or a sideways swipe) pans sideways; on a phone two fingers pinch and pan, and one finger scrolls the page.
+  // It opens on the anthills and the trunk's foot; the tree is above, a drag (or "Whole tree") away.
+
+  const SC = window.LoopScene;
+  let sceneCam = null, sceneDraw = null;
+  let sdrag = null, sdragged = false;           // a mouse drag in progress, and whether the last one moved
+  window.addEventListener('pointermove', (ev) => {
+    if (!sdrag) return;
+    if (Math.abs(ev.clientX - sdrag.x0) + Math.abs(ev.clientY - sdrag.y0) > 4) sdrag.moved = true;
+    sdrag.pan(ev.clientX - sdrag.x, ev.clientY - sdrag.y);
+    sdrag.x = ev.clientX; sdrag.y = ev.clientY;
+  });
+  window.addEventListener('pointerup', () => { sdragged = !!(sdrag && sdrag.moved); sdrag = null; });
+  window.addEventListener('resize', () => { if (sceneDraw) sceneDraw(); });
+
+  function sceneViewer(sc, show) {
+    const view = el('div', { class: 'gview scene' });
+    view.innerHTML = sc.svg;
+    const svgEl = view.querySelector('svg');
+    svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    const size = () => ({ W: view.clientWidth || 1, H: view.clientHeight || 1 });
+    const widest = () => { const { W, H } = size(); return 1.1 * Math.max(sc.box.x1 - sc.box.x0, (sc.box.y1 - sc.box.y0) * W / H); };
+    // A box shown whole: centred across, its foot at the view's foot.
+    const frame = (b) => {
+      const { W, H } = size();
+      const w = Math.min(widest(), Math.max(b.x1 - b.x0, (b.y1 - b.y0) * W / H));
+      return { x: (b.x0 + b.x1) / 2 - w / 2, y: b.y1 - w * H / W, w };
+    };
+    const draw = () => {
+      if (!view.isConnected) return;
+      const { W, H } = size(), b = sc.box, c = sceneCam;
+      c.w = Math.max(12, Math.min(widest(), c.w));
+      const h = c.w * H / W;
+      // Across: inside the scene, or centred on it when wider. Up and down: never below the farm's floor, and the
+      // top no higher than the tree's unless the view is taller than the scene.
+      c.x = c.w >= b.x1 - b.x0 ? (b.x0 + b.x1 - c.w) / 2 : Math.max(b.x0, Math.min(b.x1 - c.w, c.x));
+      c.y = Math.max(Math.min(b.y0, b.y1 - h), Math.min(b.y1 - h, c.y));
+      svgEl.setAttribute('viewBox', [c.x, c.y, c.w, h].map((v) => Math.round(v * 100) / 100).join(' '));
+    };
+    const zoomAt = (k, px, py) => {               // k > 1 zooms in, about the point (px, py) of the view
+      const { W, H } = size(), c = sceneCam;
+      if (px == null) { px = W / 2; py = H / 2; }
+      const u = c.w / W, wx = c.x + px * u, wy = c.y + py * u;
+      c.w = Math.max(12, Math.min(widest(), c.w / k));
+      c.x = wx - px * c.w / W; c.y = wy - py * c.w / W;
+      draw();
+    };
+    const pan = (dx, dy) => { const u = sceneCam.w / size().W; sceneCam.x -= dx * u; sceneCam.y -= dy * u; draw(); };
+    const at = (ev) => { const r = view.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
+    view.addEventListener('wheel', (ev) => {
+      const px = ev.deltaMode === 1 ? 40 : ev.deltaMode === 2 ? 400 : 1;
+      if (ev.ctrlKey) { ev.preventDefault(); zoomAt(Math.exp(-ev.deltaY * px * 0.0025), ...at(ev)); }
+      else if (ev.shiftKey) { ev.preventDefault(); pan(-(ev.deltaX || ev.deltaY) * px, 0); }
+      else if (Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) { ev.preventDefault(); pan(-ev.deltaX * px, 0); }
+    }, { passive: false });
+    view.addEventListener('pointerdown', (ev) => {
+      if (ev.pointerType !== 'mouse' || ev.button !== 0) return;
+      sdrag = { x0: ev.clientX, y0: ev.clientY, x: ev.clientX, y: ev.clientY, moved: false, pan };
+    });
+    let pinch = null;                              // two fingers: their midpoint and spread on the last move
+    const fingers = (ev) => {
+      const r = view.getBoundingClientRect(), [a, b] = ev.touches;
+      return { x: (a.clientX + b.clientX) / 2 - r.left, y: (a.clientY + b.clientY) / 2 - r.top,
+        d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1 };
+    };
+    const touch = (ev) => {
+      if (ev.touches.length !== 2) { pinch = null; return; }
+      ev.preventDefault();
+      const p = fingers(ev);
+      if (pinch) { zoomAt(p.d / pinch.d, p.x, p.y); pan(p.x - pinch.x, p.y - pinch.y); }
+      pinch = p;
+    };
+    for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) view.addEventListener(t, touch, { passive: false });
+    svgEl.addEventListener('pointerover', (ev) => { if (ev.pointerType === 'mouse') show(ev.target.closest('[data-k]')); });
+    svgEl.addEventListener('click', (ev) => {
+      if (sdragged) { sdragged = false; return; }
+      show(ev.target.closest('[data-k]'), true);
+    });
+    const goto = (b) => { sceneCam = frame(b); draw(); };
+    const zoom = el('div', { class: 'gzoom' },
+      el('button', { class: 'ghost', title: 'zoom in', onclick: () => zoomAt(1.5) }, '+'),
+      el('button', { class: 'ghost', title: 'zoom out', onclick: () => zoomAt(1 / 1.5) }, '−'),
+      el('button', { class: 'ghost', title: 'the whole tree', onclick: () => goto(sc.tree) }, 'Whole tree'),
+      el('button', { class: 'ghost', title: 'back to the anthills and the trunk', onclick: () => goto(sc.home) }, 'Reset'));
+    // The view fills the screen below its top (at least 260 px); the camera starts on the anthills.
+    const start = () => {
+      const top = view.getBoundingClientRect().top + window.scrollY;
+      view.style.height = `${Math.max(260, Math.round(window.innerHeight - top - 10))}px`;
+      if (!sceneCam) sceneCam = frame(sc.home);
+      draw();
+    };
+    sceneDraw = start;
+    return { el: el('div', { class: 'gwrap' }, view, zoom), view, start };
+  }
+
+  async function showTree() {
     await useTree();
-    const [st, msgs] = await Promise.all([getJSON('state/status.json'),
-      tree.paths.has('state/messages.json') ? getJSON('state/messages.json').catch(() => null) : null,
+    const has = (p) => tree.paths.has(p);
+    const [st, msgs] = await Promise.all([has('state/status.json') ? getJSON('state/status.json').catch(() => null) : null,
+      has('state/messages.json') ? getJSON('state/messages.json').catch(() => null) : null,
       index.items.length ? null : refreshIndex(), loadMine()]);
     lastStatus = st;
-    const agents = st.agents || [];
-    const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, 'Hover or tap an anthome for its usage, the food inside it for its focus, a tunnel for its messages.'));
-    const view = el('div', { class: 'hview' });
-    const treePic = el('a', { class: 'htree gmini', href: '#/tree', title: 'Open the tree' });
+    const agents = (st && st.agents) || [];
     const state = growthState();
-    treePic.innerHTML = G.svg(state, { mini: true });
+    const redraw = () => showTree();
+    const hint = 'Tap or hover a branch, an animal, an anthome (its usage), the food in it (its focus) or a tunnel (its messages).';
+    const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, hint));
+    const names = safeGet('loop.tree.names') === '1';
+    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000 });
+    const L = sc.L;
+    // Hover or tap: the info line. Every segment of the same paper lights up. A tap pins it, so the mouse can cross
+    // the scene to its buttons; a tap on open ground unpins it.
+    let shown = null, pinned = false;
+    const show = (t, tapped) => {
+      if (pinned && !tapped) return;
+      if (!t && tapped) {                           // a tap on open ground clears the info line
+        shown = null; pinned = false;
+        viewer.view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
+        info.classList.remove('on');
+        info.replaceChildren(el('span', { class: 'who' }, hint));
+        return;
+      }
+      if (!t || (t === shown && !tapped)) return;
+      const k = t.dataset.k, i = t.dataset.i;
+      const tree_ = ['seg', 'branch', 'creature'].includes(k);
+      const body = tree_ ? growthInfo(state, k, i, t.dataset.b)
+        : k === 'path' ? pathInfo(L.paths[+i]) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L) : null;
+      if (!body) return;
+      shown = t; pinned = !!tapped;
+      viewer.view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
+      (k === 'seg' ? viewer.view.querySelectorAll(`[data-k="seg"][data-i="${CSS.escape(i)}"]`) : [t]).forEach((n) => n.classList.add('on'));
+      info.replaceChildren(body);
+      info.classList.add('on');
+    };
+    const viewer = sceneViewer(sc, show);
+    const box = el('input', { type: 'checkbox' });
+    box.checked = names;
+    box.addEventListener('change', () => { safeSet('loop.tree.names', box.checked ? '1' : null); redraw(); });
+    const stat = (k, v) => el('div', { class: 'gstat' }, el('b', {}, v), el('span', {}, k));
+    const moods = ['blocked', 'working', 'quiet'].map((m) => [m, agents.filter((a) => H.moodOf(a) === m).length]);
+    const head = el('section', { class: 'ghead' },
+      stat('stage', state.stage), stat('tall', metres(state.height)),
+      stat(`day${state.streak === 1 ? '' : 's'} in a row`, String(state.streak)),
+      stat('multiplier now', `${state.mult.toFixed(1)}x`),
+      stat('papers', String(state.papers.length)), stat('leaves', String(state.leaves.length)),
+      ...(agents.length ? moods.map(([m, n]) => stat(m === 'quiet' ? 'stalled' : m, String(n))) : []));
     const legend = el('div', { class: 'hlegend' },
       el('span', {}, el('b', {}, 'Lights'), ' ', ...H.ROLE_ORDER.filter((r) => r !== 'loop').map((r) =>
         el('span', { class: 'hlight' }, el('i', { style: `background:${H.LIGHTS[r]}` }), H.ROLE_TEXT[r]))),
       el('span', {}, el('b', {}, 'Size'), ' tokens since the weekly reset'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
       el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Dark'), ' stalled'),
-      el('span', {}, el('b', {}, 'Food'), ' LOOP on top; in a home, its focus'),
+      el('span', {}, el('b', {}, 'Fruit'), ' LOOP, at the tree\'s foot; in a home, its focus'),
       el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'));
-    const counts = ['blocked', 'working', 'quiet'].map((m) => [m, agents.filter((a) => H.moodOf(a) === m).length]);
-    main().replaceChildren(
-      el('section', { class: 'ghead' }, ...counts.map(([m, n]) => el('div', { class: 'gstat' }, el('b', {}, String(n)), el('span', {}, m === 'quiet' ? 'stalled' : m)))),
-      el('div', { class: 'hillsgrid' },
-        el('div', { class: 'hillscol' }, legend, view, info),
-        el('div', { class: 'treecol' }, el('div', { class: 'who' }, el('a', { href: '#/tree' }, 'Tree'), ` ${state.stage} · ${metres(state.height)}`), treePic)),
-      el('p', { class: 'foot' }, `Agents as of ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
-    // The whole meadow fits the screen below the view's top, with no scrolling: laid out for that box, drawn as large
-    // as fits in it, centred.
-    const top = view.getBoundingClientRect().top + window.scrollY;
-    const fit = { w: view.clientWidth, h: Math.max(220, window.innerHeight - top - 10) };
-    const L = H.layout(agents, { fit, messages: msgs });
-    view.innerHTML = H.svg(agents, { fit, messages: msgs, t: performance.now() / 1000 });
-    const svgEl = view.querySelector('svg');
-    if (svgEl) svgEl.style.width = `${Math.floor(L.width * Math.min(fit.w / L.width, fit.h / L.height))}px`;
-    if (!agents.length) view.replaceChildren(el('p', { class: 'empty' }, 'No agents in the status yet.'));
-    let shown = null;
-    const show = (t) => {
-      if (!t || t === shown) return;
-      shown = t;
-      view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
-      t.classList.add('on');
-      const k = t.dataset.k, i = +t.dataset.i;
-      info.replaceChildren(k === 'path' ? pathInfo(L.paths[i]) : k === 'food' ? focusInfo(L.hills[i]) : hillInfo(L.hills[i], L));
-    };
-    view.addEventListener('click', (ev) => show(ev.target.closest('[data-k]')));
-    view.addEventListener('pointerover', (ev) => { if (ev.pointerType === 'mouse') show(ev.target.closest('[data-k]')); });
-    animateAnts(view, L.hills, L.paths);
-    treePic.scrollTop = treePic.scrollHeight;
+    const log = el('ol', { class: 'glog' }, state.events.slice(0, 40).map(growthEvent));
+    const more = state.events.length > 40 ? el('button', { class: 'link', onclick: () => {
+      log.replaceChildren(...state.events.map(growthEvent)); more.remove();
+    } }, `Show all ${state.events.length}`) : null;
+    const animals = state.creatures.length
+      ? el('details', { class: 'pextra ganimals', open: state.creatures.some((c) => !c.name) ? true : null },
+        el('summary', {}, `Animals (${state.creatures.length})`), ...state.creatures.map((c) => creatureBox(c, redraw)))
+      : el('p', { class: 'who' }, 'Animals arrive when a Write entry is ticked Submitted.');
+    main().replaceChildren(head,
+      el('div', { class: 'row gtools' }, el('label', { class: 'wstate' }, box, 'Show branch names'), el('span', { class: 'grow' }),
+        el('span', { class: 'who' }, 'Drag to move, Ctrl+wheel or pinch to zoom (two fingers on a phone).')),
+      viewer.el, info, legend,
+      el('p', { class: 'who' }, 'A good day: a paper read and no deadline passed. Each good day in a row adds 0.2x, up to 2x.'),
+      animals,
+      el('section', { class: 'gloghead' }, el('h3', {}, 'Growth'), state.events.length ? log : el('p', { class: 'empty' }, 'Nothing has grown yet: tick a Read paper done.'), more),
+      st ? el('p', { class: 'foot' }, `Agents as of ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`) : null);
+    viewer.start();
+    animateAnts(viewer.view, L.hills, L.paths);
+    const key = () => [...tree.sha].filter(([x]) => x.startsWith('personal/') || ['state/citations.json', 'state/status.json', 'state/messages.json'].includes(x)).join();
+    const before = key();
     setPoll(async () => {
       await loadTree();
-      const fresh = await getJSON('state/status.json');
-      if (fresh.generated !== st.generated && location.hash.startsWith('#/hills') && !info.querySelector('details[open], .hmsg')) showHills();
+      if (key() !== before && location.hash.startsWith('#/tree') && !main().querySelector('.gcreature input:focus')
+        && !info.querySelector('details[open], .hmsg')) redraw();
     }, 60_000);
   }
 
@@ -1455,17 +1480,17 @@
     const hash = location.hash;
     const h = hash.replace(/^#\/?/, '').split('/');
     if (h[0] === 'mine') { location.replace(`#/manual${h[1] ? '/' + h[1] : ''}`); return; }   // the tab's old name
+    if (h[0] === 'hills') { location.replace('#/tree'); return; }                               // the farm is under the tree
     refreshItem = null;
     if (!quiet) justSent = null;
     treeWasCached = false;
     try {
-      const meta = ['status', 'manual', 'tree', 'hills'].includes(h[0]) ? h[0] : 'work';
+      const meta = ['status', 'manual', 'tree'].includes(h[0]) ? h[0] : 'work';
       document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'status') await showStatus();
       else if (h[0] === 'manual') await showMine(h[1]);
       else if (h[0] === 'tree') await showTree();
-      else if (h[0] === 'hills') await showHills();
       else if (h[0] === 'settings') showSettings();
       else await showList(h[0] === 'list' ? h[1] : null);
       if (!quiet) window.scrollTo(0, 0);

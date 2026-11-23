@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app_check import APP, CHROME, fake_github, make_fixture, serve  # noqa: E402
 
 TABS = [('Mine', '#/mine', '.mrow'), ('Work', '#/list', '.card'), ('Status', '#/status', '.status-card'),
-        ('Tree', '#/tree', '.gwrap svg'), ('Hills', '#/hills', '.hview svg'), ('Work', '#/list', '.card'),
+        ('Tree', '#/tree', '.gwrap svg'), ('Work', '#/list', '.card'),
         ('Mine', '#/mine', '.mrow'), ('Status', '#/status', '.status-card')]
 
 
