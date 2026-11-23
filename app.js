@@ -695,6 +695,14 @@
     return chip;
   }
 
+  // The line under a saved paper's heading (its key title, authorYEARFirstWord, set by the loop from the record):
+  // "journal · full title", either part left out when missing, the title when it is the heading already. null if empty.
+  function paperSub(e) {
+    const full = e.full_title && e.full_title !== e.title ? e.full_title : null;
+    const parts = [e.journal, full].filter(Boolean);
+    return parts.length ? el('div', { class: 'msub' }, parts.join(' · ')) : null;
+  }
+
   function fileLinks(e) {
     return (e.files || []).map((n) => el('a', { href: '#', class: 'flink', onclick: async (ev) => {
       ev.preventDefault();
@@ -729,6 +737,7 @@
       isWrite ? null : el('label', { class: 'mcheck' }, done),
       el('div', { class: 'mmain' },
         el('div', { class: 'mtitle' }, e.link ? el('a', { href: e.link, target: '_blank', rel: 'noopener' }, e.title || e.link) : (e.title || (e.files || [])[0] || 'note')),
+        paperSub(e),
         e.note ? el('div', { class: 'mnote', html: inline(e.note) }) : null,
         isWrite ? writeStates(e, redraw) : null,
         el('div', { class: 'mmeta' }, ...fileLinks(e), zb, extra || null, deadlineChip(e, redraw), prio),
@@ -986,7 +995,7 @@
     if (k === 'seg') {
       const p = state.papers.find((x) => x.id === id);
       if (!p) return null;
-      return el('div', {}, el('b', {}, p.title || 'untitled paper'),
+      return el('div', {}, el('b', {}, p.title || 'untitled paper'), paperSub(p),
         el('div', {}, `Collection: ${collName(p.branch)}`),
         b && b !== p.branch ? el('div', { class: 'who' }, b === 'trunk' ? 'This trunk segment is the rise it caused.' : `This segment is the length it added to ${b}, a collection above its own.`) : null,
         el('div', { class: 'who' }, `Read ${dayText(p.day)} · ${p.mult.toFixed(1)}x`));

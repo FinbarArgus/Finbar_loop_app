@@ -252,3 +252,10 @@ test('the seedling starts small: SEEDLING tall, rising in a line to the sapling 
   assert.ok(vb(bare)[3] >= G.MIN_FRAME, `frame ${vb(bare)[3]}`);
   assert.ok(G.MIN_FRAME > G.trunkHeight(G.SAPLING));
 });
+
+test('a paper carries its journal and full title, for the line under its key title', () => {
+  const s = G.derive([read('k1', '2026-12-01', { title: 'Smith2026Hopfit', journal: 'J Clin Monit Comput', full_title: 'HOPFIT' }),
+    read('k2', '2026-12-02', { title: 'Plain' })], {}, {}, NOW);
+  assert.deepEqual(s.papers.map((p) => [p.title, p.journal, p.full_title]),
+    [['Smith2026Hopfit', 'J Clin Monit Comput', 'HOPFIT'], ['Plain', null, null]]);
+});
