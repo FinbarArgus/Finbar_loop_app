@@ -411,10 +411,17 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .hillsgrid { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
 .hillscol { min-width: 0; }
 .hlegend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+.hlight { display: inline-flex; align-items: center; gap: 3px; margin-right: 7px; }
+.hlight i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 4px currentColor; }
+.husage { margin: 4px 0; }
+.hfocus { margin: 4px 0; }
+.anthills .glow { animation: hglow 2.6s ease-in-out infinite alternate; }
+@keyframes hglow { from { opacity: .45; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .anthills .glow { animation: none; } }
 .hview { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #f3f2ea; }
 .hview svg { display: block; width: 100%; max-width: 100%; height: auto; margin: 0 auto; }
 .hview .hits [data-k] { cursor: pointer; }
-.hview .hits .on { fill-opacity: .07; }
+.hview .hits .on { fill: #fff; fill-opacity: .14; }
 .treecol { min-width: 0; }
 .htree { display: block; max-height: 60vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: #fff; margin-top: 4px; }
 .htree svg { display: block; width: 100%; height: auto; }

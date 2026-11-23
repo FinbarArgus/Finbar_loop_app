@@ -1147,22 +1147,53 @@
     }, 60_000);
   }
 
-  // ------------------------------------------------------------ Hills: every agent as an anthill (anthills.js)
-  // From state/status.json: size by priority, a rock on a blocked hill, ants on a working one, grey when stalled.
-  // The growth tree stands beside the meadow. Ants move with requestAnimationFrame (about 20 frames a second,
+  // ------------------------------------------------------------ Hills: the ant farm (anthills.js)
+  // From state/status.json, a cross-section of the ground: LOOP the food on the surface, every other session an
+  // anthill with its own anthome below, sized by its tokens since the weekly reset and lit in its role's colour; a
+  // rock on a blocked anthill, ants on a working one, dark lights when stalled. Hover (tap on a phone) an anthome
+  // for its usage, the food inside it for its current focus, a tunnel for its messages. The growth tree stands beside. Ants move with requestAnimationFrame (about 20 frames a second,
   // only while the tab shows), and stand still for people who ask for reduced motion.
 
   const H = window.LoopHills;
   let lastStatus = null;
   const MOOD_TEXT = { working: 'working', blocked: 'blocked: waiting on you', quiet: 'stalled or stopped' };
 
-  function hillInfo(hl) {
+  const fmtTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n)));
+
+  // An agent's token usage since the weekly reset (status.json agents[].week_tokens, usage.week_start).
+  function usageInfo(hl, L) {
+    const u = hl.agent.week_tokens, since = (lastStatus && lastStatus.usage || {}).week_start;
+    const all = L.hills.reduce((s, h) => s + Number((h.agent.week_tokens || {}).total || 0), 0);
+    if (!u || !Number.isFinite(Number(u.total))) return el('div', { class: 'husage who' }, 'No token figures for this session yet.');
+    const parts = [['output', u.output], ['input', u.input], ['cache writes', u.cache_write], ['cache reads', u.cache_read]]
+      .filter(([, v]) => Number(v) > 0).map(([k, v]) => `${k} ${fmtTok(Number(v))}`);
+    return el('div', { class: 'husage' },
+      el('div', {}, el('b', {}, `${fmtTok(Number(u.total))} tokens`), ' since the weekly reset',
+        all > 0 ? el('span', { class: 'who' }, ` · ${Math.round(100 * Number(u.total) / all)}% of all sessions'`) : null),
+      parts.length ? el('div', { class: 'who' }, parts.join(' · ')) : null,
+      el('div', { class: 'who' }, [hl.agent.context_tokens ? `context now ${fmtTok(hl.agent.context_tokens)}` : null,
+        hl.agent.model ? `model ${hl.agent.model}` : null, since ? `reset ${new Date(since).toLocaleString()}` : null].filter(Boolean).join(' · ')));
+  }
+
+  // The food in an anthome: what the agent is focused on now.
+  function focusInfo(hl) {
+    const a = hl.agent;
+    const focus = a.working_on || a.detail || a.why;
+    return el('div', {},
+      el('div', { class: 'arow' }, el('b', {}, `${a.name}: current focus`), el('span', { class: `badge hmood ${hl.mood}` }, MOOD_TEXT[hl.mood])),
+      el('div', { class: 'adetail hfocus' }, focus || 'Nothing reported yet.'),
+      a.why && a.why !== focus ? el('div', { class: 'awhy' }, a.why) : null,
+      a.updated ? el('div', { class: 'who' }, `last active ${age(a.updated)} ago`) : null);
+  }
+
+  function hillInfo(hl, L) {
     const a = hl.agent;
     const titles = new Map(index.items.map((x) => [x.id, x.title]));
     const link = (id, title) => el('a', { href: `#/item/${id}`, class: 'alink' }, el('b', {}, id), title ? ` ${String(title).slice(0, 80)}` : '');
     return el('div', {},
       el('div', { class: 'arow' }, el('b', {}, a.name), el('span', { class: `badge hmood ${hl.mood}` }, MOOD_TEXT[hl.mood]),
-        el('span', { class: 'who' }, ` · ${hl.size === 'queen' ? 'the queen (LOOP)' : hl.size} hill`)),
+        el('span', { class: 'who' }, hl.kind === 'food' ? ' · the food source (LOOP)' : ` · ${H.ROLE_TEXT[hl.role]} anthome`)),
+      L ? usageInfo(hl, L) : null,
       a.items && a.items.length ? el('div', { class: 'alinks' }, hl.mood === 'blocked' ? 'Waiting on: ' : 'Will need: ',
         a.items.map((id) => link(id, titles.get(id)))) : null,
       a.why && !(a.items && a.items.length) ? el('div', { class: 'awhy' }, a.why) : null,
@@ -1216,16 +1247,18 @@
       index.items.length ? null : refreshIndex(), loadMine()]);
     lastStatus = st;
     const agents = st.agents || [];
-    const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, 'Tap a hill.'));
+    const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, 'Hover or tap an anthome for its usage, the food inside it for its focus, a tunnel for its messages.'));
     const view = el('div', { class: 'hview' });
     const treePic = el('a', { class: 'htree gmini', href: '#/tree', title: 'Open the tree' });
     const state = growthState();
     treePic.innerHTML = G.svg(state, { mini: true });
     const legend = el('div', { class: 'hlegend' },
-      el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
-      el('span', {}, el('b', {}, 'Grey'), ' stalled'), el('span', {}, el('b', {}, 'Size'), ' priority (crown: LOOP)'),
-      el('span', {}, el('b', {}, 'Rows'), ' LOOP at the back, managers, IMPLEMENT- in front'),
-      el('span', {}, el('b', {}, 'Paths'), ' messages between them (last 50; tap one to read them)'));
+      el('span', {}, el('b', {}, 'Lights'), ' ', ...['high', 'med', 'low', 'implement', 'other'].map((r) =>
+        el('span', { class: 'hlight' }, el('i', { style: `background:${H.LIGHTS[r]}` }), H.ROLE_TEXT[r]))),
+      el('span', {}, el('b', {}, 'Size'), ' tokens since the weekly reset'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
+      el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Dark'), ' stalled'),
+      el('span', {}, el('b', {}, 'Food'), ' LOOP on top; in a home, its focus'),
+      el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'));
     const counts = ['blocked', 'working', 'quiet'].map((m) => [m, agents.filter((a) => H.moodOf(a) === m).length]);
     main().replaceChildren(
       el('section', { class: 'ghead' }, ...counts.map(([m, n]) => el('div', { class: 'gstat' }, el('b', {}, String(n)), el('span', {}, m === 'quiet' ? 'stalled' : m)))),
@@ -1248,10 +1281,11 @@
       shown = t;
       view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
       t.classList.add('on');
-      info.replaceChildren(t.dataset.k === 'path' ? pathInfo(L.paths[+t.dataset.i]) : hillInfo(L.hills[+t.dataset.i]));
+      const k = t.dataset.k, i = +t.dataset.i;
+      info.replaceChildren(k === 'path' ? pathInfo(L.paths[i]) : k === 'food' ? focusInfo(L.hills[i]) : hillInfo(L.hills[i], L));
     };
     view.addEventListener('click', (ev) => show(ev.target.closest('[data-k]')));
-    view.addEventListener('pointerover', (ev) => { if (ev.pointerType === 'mouse') show(ev.target.closest('[data-k="path"]')); });
+    view.addEventListener('pointerover', (ev) => { if (ev.pointerType === 'mouse') show(ev.target.closest('[data-k]')); });
     animateAnts(view, L.hills, L.paths);
     treePic.scrollTop = treePic.scrollHeight;
     setPoll(async () => {

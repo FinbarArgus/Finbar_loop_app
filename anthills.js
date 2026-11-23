@@ -1,16 +1,14 @@
-// The anthills: every agent in state/status.json as an anthill, drawn in blocks in the growth tree's muted style.
-// A pure function of the agents (no clock, no network): the same agents give the same hills on every device.
+// The ant farm: every agent in state/status.json drawn as a cross-section of the ground (Finbar, 2026-11-24).
+// A pure function of the agents (no clock, no network): the same agents give the same farm on every device.
 // Loaded in the browser (window.LoopHills) and by Node (tests).
 //
-// The meadow has three layers, rows of depth back to front (Finbar): LOOP's hill alone at the back, the management
-// hills (HIGH-, MED-, LOW- and every other session that is not IMPLEMENT-) in the middle, the IMPLEMENT- hills in
-// front. Size is the agent's priority (its name's prefix): LOOP is the queen's mound, HIGH- and IMPLEMENT- large
-// (Finbar), MED- medium, LOW- small, the rest medium-small; back rows are drawn a little smaller and hazier. Its design (shape, soil, entrances, grass, twigs, flowers)
-// is drawn from a hash of its name, so each hill is recognisable and stays the same. Its state shows at a
-// glance: working hills have ants running along a trail, a blocked hill has a rock on top and an amber tint,
-// a stalled or stopped hill is grey and still. Dirt paths join agents that messaged each other (state/messages.json,
-// the last 50), wider and busier with ants the more messages went between them. Paths run along lanes between the
-// rows and through the gaps between hills, and end on the ground beside each hill, so no hill hides them.
+// LOOP is the food source on the surface, in the middle. Every other session is an anthill on the surface beside it,
+// whose shaft leads down to that session's own chamber, its anthome. Sessions that messaged each other
+// (state/messages.json, the last 50) are joined by a tunnel underground, through a gallery below the homes; messages
+// with LOOP go up the session's shaft and along the surface to the food. A rock on an anthill means that session
+// is blocked on Finbar. Each anthome's shape, contents and lights come from its name, so each looks different; the
+// colour of its lights is the session's role (HIGH, MED, LOW, IMPLEMENT or other), and the lights are off when the
+// session has stalled or stopped. Working sessions have ants walking from their home up to the surface.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -34,10 +32,10 @@
     };
   }
 
-  // ---------------------------------------------------------------- what each agent's hill is
+  // ---------------------------------------------------------------- what each agent is
 
-  // Width and height in blocks, and how many ants run from it while it works.
-  const SIZES = { queen: [30, 13], large: [24, 11], medium: [19, 8], 'medium-small': [15, 7], small: [11, 5] };
+  // An anthome's width and height in blocks by priority, and how many ants walk from it while it works.
+  const SIZES = { queen: [16, 7], large: [14, 9], medium: [12, 8], 'medium-small': [11, 7], small: [9, 6] };
   const ANTS = { queen: 6, large: 5, medium: 4, 'medium-small': 3, small: 2 };
   const SIZE_ORDER = ['queen', 'large', 'medium', 'medium-small', 'small'];
   const MOOD_ORDER = ['blocked', 'working', 'quiet'];
@@ -50,91 +48,87 @@
     if (/^LOW-/i.test(n)) return 'small';
     return 'medium-small';
   }
-  // The layer (row of depth) an agent's hill stands in.
-  const LAYERS = ['back', 'middle', 'front'];
-  const DEPTH = { back: 0.8, middle: 0.9, front: 1 };     // size factor
-  const HAZE = { back: 0.22, middle: 0.1, front: 0 };     // mixed towards the sky
-  function layerOf(agent) {
+  // The role, from the name's prefix: it sets the colour of the anthome's lights.
+  function roleOf(agent) {
     const n = String(agent.name || '');
-    if (agent.loop || n === 'LOOP') return 'back';
-    if (/^IMPLEMENT-/i.test(n)) return 'front';
-    return 'middle';
+    if (agent.loop || n === 'LOOP') return 'loop';
+    const m = /^(HIGH|MED|LOW|IMPLEMENT)-/i.exec(n);
+    return m ? m[1].toLowerCase() : 'other';
   }
-  // blocked: a rock on top. working (and running): ants. Anything else (stalled, stopped): quiet.
+  const LIGHTS = { high: '#e0482f', med: '#f0a92a', low: '#5fb04a', implement: '#3f8fe0', other: '#a46ad6', loop: '#f3d36b' };
+  const ROLE_TEXT = { high: 'HIGH', med: 'MED', low: 'LOW', implement: 'IMPLEMENT', other: 'other roles' };
+  // blocked: a rock on its anthill. working (and running): ants. Anything else (stalled, stopped): quiet.
   function moodOf(agent) {
     if (agent.state === 'blocked') return 'blocked';
     if (agent.state === 'working' && agent.running !== false) return 'working';
     return 'quiet';
   }
 
-  const SHAPES = ['dome', 'cone', 'flat', 'twin', 'lean'];
+  const SHAPES = ['oval', 'bean', 'twin', 'tall', 'wide'];
+  const CONTENTS = ['eggs', 'seeds', 'larvae', 'fungus', 'roots', 'crumbs'];
   const SOILS = [
     { name: 'sand', base: '#b59a6d', dark: '#8f7853', light: '#ccb88f' },
     { name: 'red earth', base: '#a8714f', dark: '#85583d', light: '#c38d6c' },
     { name: 'loam', base: '#836750', dark: '#634c39', light: '#9d8166' },
     { name: 'clay', base: '#a98a6a', dark: '#866b50', light: '#c2a687' },
   ];
-  const FLOWERS = ['#c9a3a8', '#d6c48c', '#a9b2cf', '#e2ded2', '#c7a6c4'];
-  const GRASS = ['#6f8a55', '#87a068'];
   const C = {
-    hole: '#3b2a1c', twig: '#5b4632', pebble: '#9c9a92', crown: '#b89b55', ant: '#2e2219',
-    rock: '#8a8c88', rockDark: '#686a66', rockLight: '#b0b2ad', ground: '#d9d1b7', groundDark: '#cbc2a4',
-    trail: '#b3a37a', path: '#d3c59f', pathDark: '#bfae84', crumb: '#87a068', bg: '#f3f2ea', label: '#4a4036', warn: '#c4a24e',
+    sky: '#f3f2ea', grass: '#6f8a55', grassLight: '#87a068', topsoil: '#7d5e42', soil: ['#6e5139', '#634832', '#57402d'],
+    pebble: '#8d8378', pebbleDark: '#6f675d', room: '#c9a77e', roomFloor: '#b99569', wall: '#9c7a57', tunnel: '#b8956b',
+    trail: '#a89068', ant: '#1f1610', egg: '#f2ece0', seed: '#d2b483', seedDark: '#a8885b', larva: '#efe3c7', fungus: '#d9dccb',
+    fungusDark: '#b5b9a3', root: '#3c2c1f', crumb: '#e2c46e', leaf: '#7f9a5c', crown: '#b89b55', off: '#6d665e',
+    rock: '#8a8c88', rockDark: '#686a66', rockLight: '#b0b2ad', label: '#4a4036', inkUnder: '#f4ecdc',
   };
 
-  // A hill's design, fixed by its name.
+  // An anthome's design, fixed by its name.
   function design(name) {
-    const r = rng('hill', name);
+    const r = rng('home', name);
+    const contents = [CONTENTS[Math.floor(r() * CONTENTS.length)]];
+    if (r() < 0.6) contents.push(CONTENTS[Math.floor(r() * CONTENTS.length)]);
     return {
       shape: SHAPES[Math.floor(r() * SHAPES.length)], soil: Math.floor(r() * SOILS.length),
-      speckle: 0.08 + 0.14 * r(), entrances: 1 + Math.floor(r() * 3), grass: 2 + Math.floor(r() * 4),
-      twigs: Math.floor(r() * 3), flowers: Math.floor(r() * 4), pebbles: Math.floor(r() * 3),
-      side: r() < 0.5 ? -1 : 1, seed: hash('hill', name),
+      contents: [...new Set(contents)], lights: 2 + Math.floor(r() * 3), dw: -Math.floor(r() * 2), dh: Math.floor(r() * 3) - 1,
+      wiggle: [r() * 2 - 1, r() * 2 - 1, r() * 2 - 1], lean: r() < 0.5 ? -1 : 1, seed: hash('home', name),
     };
   }
 
-  // Height of the mound (0-1) at u in [-1, 1] across it.
-  const dome = (u) => Math.sqrt(Math.max(0, 1 - u * u));
-  function profile(shape, u, side) {
-    if (shape === 'cone') return Math.pow(Math.max(0, 1 - Math.abs(u)), 0.85);
-    if (shape === 'flat') return Math.min(0.82, 1.3 * dome(u)) / 0.82;
-    if (shape === 'twin') return Math.max(dome((u + 0.38) / 0.62), 0.72 * dome((u - 0.45) / 0.55));
-    if (shape === 'lean') return Math.min(1, dome(u) * (1 + side * 0.4 * u) / 1.12);
-    return dome(u);
+  // Is (u, v) (each in [-1, 1] across the home's box) inside a home of this shape?
+  function inside(shape, u, v, lean) {
+    const e = (cu, cv, ru, rv) => ((u - cu) / ru) ** 2 + ((v - cv) / rv) ** 2 <= 1;
+    if (shape === 'bean') return e(0, 0, 1, 1) && !e(lean * 0.55, -1.05, 0.45, 0.5);
+    if (shape === 'twin') return e(-0.42, 0.12, 0.58, 0.88) || e(0.45, -0.08, 0.55, 0.92) || (Math.abs(u) < 0.4 && Math.abs(v - 0.3) < 0.35);
+    if (shape === 'tall') return e(0, 0, 0.78, 1);
+    if (shape === 'wide') return e(0, 0.12, 1, 0.82);
+    return e(0, 0, 1, 1);
   }
 
   // ---------------------------------------------------------------- layout
 
-  const GAP = 6;            // blocks between hills (the trails and paths run into it)
-  const TOP = 6;            // room above the tallest hill of a row (for a rock)
-  const LABEL = 5;          // room below a row for the names
-  const LANE = 5;           // the lane below a row's names, where paths run between rows
-  const MARGIN = 4;
+  const COL = 11;           // blocks between anthills on the surface
+  const HOME_W = [7, 16];   // an anthome's width in blocks, from the session that used the fewest tokens to the most
+  const HOME_H = 12;
+  const NO_TOKENS_W = 9;    // the width of a home whose session has no token figures        // the tallest an anthome can be
+  const SKY = 12;           // sky above the surface (anthills, rocks, the food pile)
+  const FOOD = 20;          // the food pile's room on the surface
+  const MARGIN = 3;
+  const MOUND = { queen: 0, large: 5, medium: 4, 'medium-small': 4, small: 3 };   // an anthill's height
+  const HOME_TOP = 5;       // soil between the surface and the shallow homes
+  const TIER = 18;          // from the shallow homes to the deep ones (a home and its name)
+  const GALLERY = 6;        // the band below the homes the tunnels run through
+  const LABEL = 3.4;        // from a home's floor to its name's baseline
 
-  // Rows (each {layer, hills}) for a meadow `width` blocks wide: each layer, back to front, fills rows of its own.
-  function pack(list, width) {
-    const rows = [];
-    for (const layer of LAYERS) {
-      let row = [], used = 0;
-      for (const hl of list.filter((x) => x.layer === layer)) {
-        const need = hl.w + (row.length ? GAP : 0);
-        if (row.length && used + need > width - 2 * MARGIN) { rows.push({ layer, hills: row }); row = []; used = 0; }
-        used += hl.w + (row.length ? GAP : 0);
-        row.push(hl);
-      }
-      if (row.length) rows.push({ layer, hills: row });
-    }
-    return rows;
-  }
-  const rowsHeight = (rows) => rows.reduce((y, r) => y + TOP + Math.max(...r.hills.map((x) => x.h)) + LABEL + LANE, 0) + 1;
-
-  // agents (status.json agents[]) -> {width, height, rows, hills, paths}: each hill with its agent, layer, size,
-  // mood, design, w, h, x0 (left), base (ground row), cx, row, ants (how many), rock, trail (the polyline its ants
-  // follow, in blocks). Each layer's hills are in priority order, blocked before working before quiet, then by name.
-  // opts.width: the meadow's width in blocks. opts.fit {w, h}: a box in pixels to fill instead; the width is the one
-  // that draws the meadow largest inside it, so the whole meadow shows without scrolling.
-  // opts.messages: state/messages.json ({messages: [{at, from, to}], pairs: [{a, b, count, last}]}); agents named
-  // there but missing from the status are drawn as stalled hills (ghost: true).
+  // agents (status.json agents[]) -> {width, height, surface, food, hills, paths}. hills[0] is LOOP (the food;
+  // kind: 'food') when it is in the status; each other hill (kind: 'home') has its agent, role, size, mood, design,
+  // x (its column), tier, mound {x0, w, h}, home {cx, cy, w, h, x0, y0} (a box), shaft (the polyline from the
+  // anthill down to the home), lights [{x, y}], rock, ants, and trail (the polyline its ants walk). Columns go
+  // right and left of the food in turn, by priority, then blocked before working before quiet, then by name;
+  // neighbouring homes sit at alternating depths. opts.messages: state/messages.json ({messages: [{at, from, to}],
+  // pairs: [{a, b, count, last}]}); agents named there but missing from the status are drawn as stalled homes
+  // (ghost: true). opts.fit is accepted for the app and does not change the layout.
+  // An anthome's size is the session's tokens since the weekly reset (agent.week_tokens.total): its width runs from
+  // HOME_W[0] to HOME_W[1] with the square root of its share of the largest session's tokens, so its area follows
+  // the tokens and a small session stays visible. Without token figures it is NO_TOKENS_W wide. hl.food is
+  // the food pile on its floor (a box), hl.tokens its tokens.
   function layout(agents, opts = {}) {
     const all = (agents || []).filter((a) => a && a.name);
     const known = new Set(all.map((a) => a.name));
@@ -144,108 +138,102 @@
       }
     }
     const list = all.map((agent) => {
-      const size = sizeOf(agent), layer = layerOf(agent), mood = moodOf(agent);
-      const [w, h] = SIZES[size].map((v) => Math.round(v * DEPTH[layer]));
-      return { name: agent.name, agent, layer, size, mood, design: design(agent.name), w, h,
+      const size = sizeOf(agent), mood = moodOf(agent), role = roleOf(agent);
+      return { name: agent.name, agent, size, role, mood, kind: role === 'loop' ? 'food' : 'home', design: design(agent.name),
         ants: mood === 'working' ? ANTS[size] : 0, rock: mood === 'blocked' };
-    }).sort((a, b) => LAYERS.indexOf(a.layer) - LAYERS.indexOf(b.layer) || SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size)
+    }).sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size)
       || MOOD_ORDER.indexOf(a.mood) - MOOD_ORDER.indexOf(b.mood) || a.name.localeCompare(b.name));
-    const least = Math.max(0, ...list.map((x) => x.w)) + 2 * MARGIN;
-    let width = Math.max(40, opts.width || 72, least);
-    if (opts.fit && opts.fit.w > 0 && opts.fit.h > 0 && list.length) {
-      const most = Math.max(least, ...LAYERS.map((ly) => list.filter((x) => x.layer === ly)
-        .reduce((s, x, i) => s + x.w + (i ? GAP : 0), 0) + 2 * MARGIN));
-      let best = -1;
-      for (let w = Math.max(30, least); w <= most; w++) {
-        const scale = Math.min(opts.fit.w / w, opts.fit.h / rowsHeight(pack(list, w)));
-        if (scale > best + 1e-9) { best = scale; width = w; }
-      }
+    const homes = list.filter((h) => h.kind === 'home');
+    const right = Math.ceil(homes.length / 2), left = homes.length - right;
+    const width = Math.max(48, FOOD + 2 * Math.max(right, left, 1) * COL + 2 * MARGIN);
+    const fx = width / 2, surface = SKY;
+    const top0 = surface + HOME_TOP;
+    const gallery = top0 + TIER + HOME_H + LABEL + 3;
+    const tok = (hl) => Number(((hl.agent || {}).week_tokens || {}).total);
+    const most = Math.max(0, ...homes.map(tok).filter(Number.isFinite));
+    const height = gallery + GALLERY + 2;
+    const food = { cx: fx, x0: fx - FOOD / 2 + 2, w: FOOD - 4 };
+    for (const hl of list.filter((h) => h.kind === 'food')) {
+      Object.assign(hl, { x: fx, mound: null, home: null, shaft: [], lights: [], food,
+        trail: [{ x: food.x0 - 1.5, y: surface - 0.5 }, { x: food.x0 + food.w + 1.5, y: surface - 0.5 }] });
     }
-    const rows = pack(list, width);
-    let y = 0;
-    rows.forEach((r, ri) => {
-      const tall = Math.max(...r.hills.map((x) => x.h));
-      const base = y + TOP + tall;
-      const span = r.hills.reduce((s, x) => s + x.w, 0) + GAP * (r.hills.length - 1);
-      let x = Math.floor((width - span) / 2);
-      for (const hl of r.hills) {
-        Object.assign(hl, { x0: x, base, cx: x + hl.w / 2, row: ri });
-        x += hl.w + GAP;
-        hl.trail = trailOf(hl, width);
+    homes.forEach((hl, i) => {
+      const side = i % 2 ? -1 : 1, k = Math.floor(i / 2);
+      const x = Math.round(fx + side * (FOOD / 2 + COL / 2 + k * COL));
+      const tier = k % 2;
+      const d = hl.design;
+      const t = tok(hl);
+      hl.tokens = Number.isFinite(t) ? t : null;
+      let w = most > 0 && hl.tokens != null ? Math.round(HOME_W[0] + (HOME_W[1] - HOME_W[0]) * Math.sqrt(Math.max(0, hl.tokens) / most))
+        : NO_TOKENS_W;
+      w = Math.max(HOME_W[0], Math.min(HOME_W[1], w));            // width follows the tokens alone; the shape varies
+      const h = Math.max(5, Math.min(HOME_H, Math.round(w * 0.6) + d.dh + (d.shape === 'tall' ? 1 : 0)));
+      const y0 = top0 + tier * TIER + (HOME_H - h);                // homes of one tier share their floor
+      const home = { cx: x, cy: y0 + h / 2, w, h, x0: x - w / 2, y0 };
+      const mh = MOUND[hl.size];
+      const shaft = [{ x, y: surface - 1 }];
+      const depth = y0 + 1 - surface;
+      d.wiggle.forEach((wg, j) => shaft.push({ x: x + 0.8 * wg, y: surface + depth * (j + 1) / 4 }));
+      shaft.push({ x, y: y0 + 1 });
+      const lights = [];
+      const lr = rng('lights', hl.name);
+      for (let j = 0; j < d.lights; j++) {
+        const a = Math.PI * (1.15 + 0.7 * (j + 0.5) / d.lights + 0.08 * (lr() - 0.5));   // along the ceiling
+        lights.push({ x: x + Math.cos(a) * (w / 2 - 1.6), y: home.cy + Math.sin(a) * (h / 2 - 1.4) });
       }
-      r.base = base;
-      r.lane = base + LABEL + LANE / 2;
-      r.gaps = [r.hills[0].x0 - GAP / 2, ...r.hills.map((hl) => hl.x0 + hl.w + GAP / 2)];
-      y = base + LABEL + LANE;
+      const floor = y0 + h - 1.5;
+      const fw = Math.max(2, Math.min(4, Math.round(w / 4)));
+      const fx0 = Math.round(x + d.lean * w * 0.18 - fw / 2);
+      Object.assign(hl, { x, tier, home, shaft, lights, mound: { x0: x - 3.5, w: 7, h: mh },
+        food: { x0: fx0, y0: Math.round(y0 + h) - 3, w: fw, h: 2 },
+        trail: [{ x: x - w * 0.3, y: floor }, { x, y: floor }, ...shaft.slice().reverse()] });
     });
-    const height = y + 1;
-    return { width, height, rows, hills: list, paths: pathsOf(list, rows, opts.messages, width) };
+    const L = { width, height, surface, gallery, food, hills: list };
+    L.paths = pathsOf(L, opts.messages);
+    return L;
   }
 
   // ---------------------------------------------------------------- message paths
 
-  // A path's width in blocks for n messages: 1 for one, growing as sqrt, at most 5.
-  const pathWidth = (n) => Math.min(5, 1 + 0.8 * Math.sqrt(Math.max(0, n - 1)));
+  // A tunnel's width in blocks for n messages: 1 for one, growing as sqrt, at most 3.
+  const pathWidth = (n) => Math.min(3, 1 + 0.5 * Math.sqrt(Math.max(0, n - 1)));
   const MAX_PATH_ANTS = 8;
 
-  // The ground in the gap beside a hill, on its side dir (+1 right, -1 left).
-  const gapOf = (hl, dir) => (dir > 0 ? hl.x0 + hl.w + GAP / 2 : hl.x0 - GAP / 2);
-
-  // A path's corners from hill U to hill D (U's row above D's, or the same). It starts on the ground in the gap
-  // beside U (the side facing D), drops to the lane below U's row, runs along the lanes and down through the gaps
-  // of the rows between (the gap nearest its goal), and enters the gap beside D down to D's ground. So a path never
-  // crosses a hill, and its ends show. `off` shifts it within the lanes, so paths sharing a lane stay apart.
-  function route(U, D, rows, off) {
-    const lane = (r) => rows[r].lane + off;
-    if (U.row === D.row) {
-      const dir = Math.sign(D.cx - U.cx) || 1;
-      const gu = gapOf(U, dir), gd = gapOf(D, -dir);
-      return [{ x: gu, y: U.base + 0.5 }, { x: gu, y: lane(U.row) }, { x: gd, y: lane(U.row) }, { x: gd, y: D.base + 0.5 }];
-    }
-    const gu = gapOf(U, Math.sign(D.cx - U.cx) || 1);
-    const gd = gapOf(D, Math.sign(gu - D.cx) || 1);
-    const pts = [{ x: gu, y: U.base + 0.5 }, { x: gu, y: lane(U.row) }];
-    for (let r = U.row + 1; r < D.row; r++) {
-      const g = rows[r].gaps.reduce((a, b) => (Math.abs(b - gd) < Math.abs(a - gd) ? b : a));
-      pts.push({ x: g, y: lane(r - 1) }, { x: g, y: lane(r) });
-    }
-    pts.push({ x: gd, y: lane(D.row - 1) }, { x: gd, y: D.base + 0.5 });
-    return pts;
-  }
-
-  // One path per pair that messaged, routed as above (from a to b).
-  function pathsOf(hills, rows, messages, width) {
-    const by = new Map(hills.map((h) => [h.name, h]));
+  // One path per pair that messaged, from a to b. Between two homes: down from one home's floor to the gallery
+  // below every home, along it, and up into the other home's floor; so a tunnel never cuts through a third home.
+  // Each pair keeps its own row in the gallery. With LOOP: up the session's own shaft and along the surface to the food.
+  function pathsOf(L, messages) {
+    const by = new Map(L.hills.map((h) => [h.name, h]));
     const msgs = (messages || {}).messages || [];
     return ((messages || {}).pairs || []).filter((pr) => by.has(pr.a) && by.has(pr.b) && pr.a !== pr.b && pr.count > 0).map((pr) => {
       const A = by.get(pr.a), B = by.get(pr.b);
-      const off = ((hash('lane', pr.a, pr.b) % 3) - 1) * 1.4;
-      const pts = A.row <= B.row ? route(A, B, rows, off) : route(B, A, rows, off).reverse();
-      const trail = pts.map((q) => ({ x: Math.max(0.5, Math.min(width - 0.5, q.x)), y: q.y }))
-        .filter((q, i, a) => !i || q.x !== a[i - 1].x || q.y !== a[i - 1].y);
+      let trail;
+      if (A.kind === 'food' || B.kind === 'food') {
+        const S = A.kind === 'food' ? B : A, F = A.kind === 'food' ? A : B;
+        if (S.kind === 'food') return null;
+        const edge = S.x > F.food.cx ? F.food.x0 + F.food.w : F.food.x0;
+        trail = [{ x: S.x, y: S.home.y0 + S.home.h - 1.5 }, ...S.shaft.slice().reverse(), { x: S.x, y: L.surface - 0.5 },
+          { x: edge, y: L.surface - 0.5 }];
+        if (A.kind === 'food') trail.reverse();
+      } else {
+        const gy = L.gallery + 1 + (hash('gallery', pr.a, pr.b) % (GALLERY - 2));
+        const fa = A.home.y0 + A.home.h - 1.5, fb = B.home.y0 + B.home.h - 1.5;
+        const off = (n) => (hash('tunnel', n, pr.a, pr.b) % 3 - 1) * 0.9;    // a little apart where tunnels share a home
+        const xa = A.x + off(A.name), xb = B.x + off(B.name);
+        trail = [{ x: xa, y: fa }, { x: xa, y: gy }, { x: xb, y: gy }, { x: xb, y: fb }];
+      }
       const between = msgs.filter((m) => (m.from === pr.a && m.to === pr.b) || (m.from === pr.b && m.to === pr.a));
-      return { a: pr.a, b: pr.b, count: pr.count, last: pr.last, w: pathWidth(pr.count), trail,
+      return { a: pr.a, b: pr.b, count: pr.count, last: pr.last, w: pathWidth(pr.count), trail, toFood: A.kind === 'food' || B.kind === 'food',
         ants: Math.min(MAX_PATH_ANTS, pr.count),
         ab: between.filter((m) => m.from === pr.a).length, ba: between.filter((m) => m.from === pr.b).length,
         msgs: [...between].sort((x, y) => String(y.at).localeCompare(String(x.at))) };   // newest first
-    });
+    }).filter(Boolean);
   }
 
-  const colHeight = (hl, i) => Math.round(hl.h * profile(hl.design.shape, ((i + 0.5) / hl.w) * 2 - 1, hl.design.side));
-
-  // The ants' path: out of the main entrance, down the mound's side, along the ground to a crumb.
-  function trailOf(hl, width) {
-    const s = hl.design.side;
-    const ei = Math.round((hl.w - 1) * (0.5 + s * 0.22));
-    const top = hl.base - colHeight(hl, ei);
-    const edge = s > 0 ? hl.x0 + hl.w + 0.5 : hl.x0 - 0.5;
-    const end = Math.max(1, Math.min(width - 1, edge + s * (GAP - 1.5)));
-    return [{ x: hl.x0 + ei + 0.5, y: top + 2.5 }, { x: edge, y: hl.base - 0.5 }, { x: end, y: hl.base - 0.5 }];
-  }
-
-  // Where ant k of a working hill is at time t (seconds): each ant walks the trail out and back, the ants
-  // evenly spaced in phase (offset a quarter step, so no two share a spot going out and back), SPEED blocks a second.
-  const SPEED = 3;
+  // Where ant k of a working hill (or a path) is at time t (seconds): each ant walks the trail out and back, the
+  // ants evenly spaced in phase (offset a quarter step, so no two share a spot going out and back), SPEED blocks a
+  // second. dir is +1 heading right, -1 left; ang (radians) is the heading.
+  const SPEED = 2.5;
   function antAt(hl, k, t) {
     const pts = hl.trail;
     const segs = pts.slice(1).map((p, i) => Math.hypot(p.x - pts[i].x, p.y - pts[i].y));
@@ -257,12 +245,12 @@
       if (d <= segs[i] || i === segs.length - 1) {
         const f = segs[i] ? Math.min(1, d / segs[i]) : 0;
         const a = pts[i], b = pts[i + 1];
-        const dir = Math.sign((b.x - a.x) * (out ? 1 : -1)) || 1;
-        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, dir };
+        const dx = (b.x - a.x) * (out ? 1 : -1), dy = (b.y - a.y) * (out ? 1 : -1);
+        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, dir: Math.sign(dx) || 1, ang: Math.atan2(dy, dx) };
       }
       d -= segs[i];
     }
-    return { x: pts[0].x, y: pts[0].y, dir: 1 };
+    return { x: pts[0].x, y: pts[0].y, dir: 1, ang: 0 };
   }
 
   // ---------------------------------------------------------------- drawing
@@ -275,88 +263,125 @@
     const l = 0.3 * r + 0.59 * g + 0.11 * b;
     return toHex([r, g, b].map((x) => x + (l * 1.04 - x) * t));
   }
-  // The colours a hill is drawn in, for its mood: blocked takes an amber tint, quiet is greyed.
-  function tone(hl) {
-    const m = hl.mood === 'quiet' ? (c) => grey(c, 0.85) : hl.mood === 'blocked' ? (c) => mix(c, C.warn, 0.28) : (c) => c;
-    const f = (c) => mix(m(c), C.bg, HAZE[hl.layer] || 0);
-    const soil = SOILS[hl.design.soil];
-    return { base: f(soil.base), dark: f(soil.dark), light: f(soil.light), grass: GRASS.map(f),
-      flower: (c) => mix(hl.mood === 'quiet' ? grey(c, 0.85) : c, C.bg, HAZE[hl.layer] || 0), twig: f(C.twig), hole: C.hole };
-  }
+  const toneOf = (hl) => (hl.mood === 'quiet' ? (c) => grey(c, 0.85) : (c) => c);
 
-  // One hill's blocks into px (Map "x,y" -> colour; later blocks paint over earlier ones). Its twigs, grass,
-  // pebbles and flowers leave the blocks in `keep` (the message paths) uncovered.
-  function paint(hl, px, keep = new Set()) {
-    const d = hl.design, t = tone(hl), r = rng('paint', hl.name);
-    const put = (x, y, c) => px.set(`${x},${y}`, c);
-    const set = (x, y, c) => { if (!keep.has(`${x},${y}`)) px.set(`${x},${y}`, c); };
-    const cols = [];
-    for (let i = 0; i < hl.w; i++) cols.push(colHeight(hl, i));
-    for (let i = 0; i < hl.w; i++) {
-      for (let j = 0; j < cols[i]; j++) {
-        const x = hl.x0 + i, y = hl.base - 1 - j;
-        const edge = j === cols[i] - 1 || i === 0 || i === hl.w - 1 || j >= Math.min(cols[i - 1] ?? 0, cols[i + 1] ?? 0);
-        const n = rng(d.seed, i, j)();
-        put(x, y, edge ? t.dark : n < d.speckle ? (n < d.speckle / 2 ? t.dark : t.light) : t.base);
-      }
-    }
-    // entrances: the main one where the trail starts, the others spread over the mound
-    const holes = [Math.round((hl.w - 1) * (0.5 + d.side * 0.22))];
-    for (let e = 1; e < d.entrances; e++) holes.push(Math.round((hl.w - 1) * (0.2 + 0.6 * r())));
-    for (const i of holes) {
-      if (cols[i] < 4) continue;
-      const y = hl.base - cols[i] + 2;
-      put(hl.x0 + i, y, t.hole);
-      if (i + 1 < hl.w && cols[i + 1] >= 4) put(hl.x0 + i + 1, y, t.hole);
-      if (hl.w >= 18) put(hl.x0 + i, y + 1, t.hole);
-    }
-    // twigs: lines of 3-5 blocks leaning out of the mound
-    for (let k = 0; k < d.twigs; k++) {
-      const i = Math.round((hl.w - 1) * (0.25 + 0.5 * r())), s = r() < 0.5 ? -1 : 1, n = 3 + Math.floor(r() * 3);
-      for (let m = 0; m < n; m++) set(hl.x0 + i + s * m, hl.base - cols[i] - m + 1, t.twig);
-    }
-    // grass tufts at the foot, and pebbles
-    for (let k = 0; k < d.grass; k++) {
-      const x = r() < 0.5 ? hl.x0 - 1 - Math.floor(r() * 2) : hl.x0 + hl.w + Math.floor(r() * 2);
-      const tall = 1 + Math.floor(r() * 3);
-      for (let m = 0; m < tall; m++) set(x, hl.base - 1 - m, t.grass[(k + m) % 2]);
-      if (tall > 1) set(x + (r() < 0.5 ? -1 : 1), hl.base - 1, t.grass[k % 2]);
-    }
-    for (let k = 0; k < d.pebbles; k++) set(hl.x0 + Math.floor(r() * hl.w), hl.base - 1, C.pebble);
-    // flowers: a stem and a plus-shaped head, at the foot or on the slope
-    const nf = d.flowers + (hl.size === 'queen' ? 4 : 0);
-    for (let k = 0; k < nf; k++) {
-      const onFoot = hl.size === 'queen' || r() < 0.6;
-      const i = onFoot ? (k % 2 ? -3 - Math.floor(r() * 2) : hl.w + 2 + Math.floor(r() * 2)) : Math.floor(hl.w * (0.2 + 0.6 * r()));
-      const ground = onFoot ? hl.base : hl.base - cols[Math.max(0, Math.min(hl.w - 1, i))];
-      const c = t.flower(FLOWERS[Math.floor(r() * FLOWERS.length)]);
-      const x = hl.x0 + i, y = ground - 3;
-      set(x, ground - 1, t.grass[0]); set(x, ground - 2, t.grass[0]);
-      set(x, y, t.flower(FLOWERS[1])); set(x - 1, y, c); set(x + 1, y, c); set(x, y - 1, c);
-    }
-    const peak = Math.max(...cols);
-    const pi = cols.indexOf(peak);
-    if (hl.size === 'queen') {             // the queen's mound wears a crown
-      const crown = ['# # #', '#####'];
-      crown.forEach((row, ry) => [...row].forEach((ch, rx) => {
-        if (ch === '#') set(hl.x0 + pi - 2 + rx, hl.base - peak - 2 + ry, hl.mood === 'quiet' ? grey(C.crown, 0.85) : C.crown);
-      }));
-    }
-    if (hl.rock) {                          // blocked: a rock sits on top
-      const rw = Math.max(6, Math.round(hl.w * 0.45)), rh = Math.max(4, Math.round(rw * 0.7));
-      const x0 = hl.x0 + pi - Math.floor(rw / 2), y1 = hl.base - peak + 2;
-      for (let j = 0; j < rh; j++) {
-        const f = (j + 0.5) / rh;             // rows from the bottom up: a boulder, widest a third of the way up
-        const half = (rw / 2) * Math.sqrt(Math.max(0, 1 - Math.pow((f - 0.3) / 0.75, 2)));
-        for (let i = 0; i < rw; i++) {
-          const dx = i + 0.5 - rw / 2;
-          if (Math.abs(dx) > half + 0.25) continue;
-          const rim = j === 0 || Math.abs(dx) > half - 0.75 || j === rh - 1;
-          const hi = !rim && dx < 0 && j >= rh / 2;
-          set(x0 + i, y1 - j, rim ? C.rockDark : hi ? C.rockLight : C.rock);
+  // Blocks along a polyline, `r` blocks either side of it.
+  function brush(pts, r, put) {
+    for (let k = 1; k < pts.length; k++) {
+      const a = pts[k - 1], b = pts[k], steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.3));
+      for (let m = 0; m <= steps; m++) {
+        const x = a.x + (b.x - a.x) * m / steps, y = a.y + (b.y - a.y) * m / steps;
+        for (let i = Math.floor(x - r); i <= Math.floor(x + r - 1e-9); i++) {
+          for (let j = Math.floor(y - r); j <= Math.floor(y + r - 1e-9); j++) {
+            if (Math.hypot(i + 0.5 - x, j + 0.5 - y) <= Math.max(0.75, r)) put(i, j);
+          }
         }
       }
     }
+  }
+
+  // An anthome: the room (floor bedding at the bottom), a packed wall round it, its contents and its light bulbs.
+  function paintHome(hl, px, carved) {
+    const { home: hm, design: d } = hl, t = toneOf(hl), r = rng('paint', hl.name);
+    const set = (x, y, c) => px.set(`${x},${y}`, c);
+    const cells = [];
+    for (let j = Math.floor(hm.y0); j < Math.ceil(hm.y0 + hm.h); j++) {
+      for (let i = Math.floor(hm.x0); i < Math.ceil(hm.x0 + hm.w); i++) {
+        const u = ((i + 0.5 - hm.x0) / hm.w) * 2 - 1, v = ((j + 0.5 - hm.y0) / hm.h) * 2 - 1;
+        if (inside(d.shape, u, v, d.lean)) cells.push([i, j]);
+      }
+    }
+    const room = new Set(cells.map(([i, j]) => `${i},${j}`));
+    for (const [i, j] of cells) { set(i, j, t(j >= hm.y0 + hm.h - 2 ? C.roomFloor : C.room)); carved.add(`${i},${j}`); }
+    for (const [i, j] of cells) {
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const k = `${i + di},${j + dj}`;
+        if (!room.has(k) && !carved.has(k)) set(i + di, j + dj, t(C.wall));
+      }
+    }
+    const floorCells = cells.filter(([i, j]) => !room.has(`${i},${j + 1}`));
+    const pick = () => floorCells[Math.floor(r() * floorCells.length)];
+    for (const what of d.contents) {
+      if (what === 'roots') {                   // roots hang through the ceiling
+        for (let k = 0; k < 2; k++) {
+          const i = Math.round(hm.cx + (r() - 0.5) * hm.w * 0.6);
+          const top = Math.min(...cells.filter(([ci]) => ci === i).map(([, cj]) => cj));
+          if (!Number.isFinite(top)) continue;
+          for (let j = top - 3; j < top + 2 + Math.floor(r() * 2); j++) set(i + (j > top ? (k ? 1 : -1) * (j - top > 1) : 0), j, t(C.root));
+        }
+        continue;
+      }
+      const n = what === 'fungus' ? 3 : 4 + Math.floor(r() * 3);
+      for (let k = 0; k < n; k++) {
+        const c = pick();
+        if (!c) break;
+        const [i, j] = c;
+        if (what === 'eggs') { set(i, j, t(C.egg)); if (room.has(`${i},${j - 1}`) && r() < 0.5) set(i, j - 1, t(C.egg)); }
+        else if (what === 'seeds') set(i, j, t(r() < 0.5 ? C.seed : C.seedDark));
+        else if (what === 'larvae') { set(i, j, t(C.larva)); if (room.has(`${i + 1},${j}`)) set(i + 1, j, t(C.larva)); }
+        else if (what === 'crumbs') set(i, j, t(r() < 0.6 ? C.crumb : C.leaf));
+        else if (what === 'fungus') {
+          for (const [di, dj] of [[0, 0], [1, 0], [-1, 0], [0, -1], [1, -1]]) {
+            if (room.has(`${i + di},${j + dj}`)) set(i + di, j + dj, t(dj ? C.fungus : C.fungusDark));
+          }
+        }
+      }
+    }
+    const fd = hl.food;                         // the home's food: a little pile on the floor
+    for (let i = 0; i < fd.w; i++) {
+      for (let j = 0; j < fd.h; j++) {
+        if (j === 0 && (i === 0 || i === fd.w - 1) && fd.w > 2) continue;
+        const n = hash('food', hl.name, i, j) % 4;
+        set(fd.x0 + i, fd.y0 + j, t([C.crumb, C.seed, C.seedDark, C.leaf][n]));
+      }
+    }
+    for (const l of hl.lights) set(Math.floor(l.x), Math.floor(l.y), hl.mood === 'quiet' ? C.off : LIGHTS[hl.role]);
+  }
+
+  // An anthill on the surface, with its entrance, and a rock on it when blocked.
+  function paintMound(hl, px, surface) {
+    const t = toneOf(hl), soil = SOILS[hl.design.soil], m = hl.mound;
+    const set = (x, y, c) => px.set(`${x},${y}`, c);
+    for (let i = 0; i < m.w; i++) {
+      const u = ((i + 0.5) / m.w) * 2 - 1, col = Math.round(m.h * Math.sqrt(Math.max(0, 1 - u * u)));
+      for (let j = 0; j < col; j++) {
+        const edge = j === col - 1 || i === 0 || i === m.w - 1;
+        set(Math.floor(m.x0) + i, surface - 1 - j, t(edge ? soil.dark : (hash(hl.name, i, j) % 5 ? soil.base : soil.light)));
+      }
+    }
+    set(Math.floor(hl.x), surface - m.h + 1, C.root);              // the entrance
+    if (hl.rock) paintRock(px, hl.x, surface - m.h + 1);
+  }
+  function paintRock(px, cx, y1) {
+    const rw = 6, rh = 4, x0 = Math.round(cx - rw / 2);
+    for (let j = 0; j < rh; j++) {
+      const f = (j + 0.5) / rh, half = (rw / 2) * Math.sqrt(Math.max(0, 1 - Math.pow((f - 0.3) / 0.75, 2)));
+      for (let i = 0; i < rw; i++) {
+        const dx = i + 0.5 - rw / 2;
+        if (Math.abs(dx) > half + 0.25) continue;
+        const rim = j === 0 || Math.abs(dx) > half - 0.75 || j === rh - 1;
+        px.set(`${x0 + i},${y1 - j}`, rim ? C.rockDark : (dx < 0 && j >= rh / 2) ? C.rockLight : C.rock);
+      }
+    }
+  }
+  // LOOP: a pile of seeds, crumbs and leaf bits on the surface, wearing a crown.
+  function paintFood(hl, L, px) {
+    const t = toneOf(hl), f = L.food, r = rng('food', hl.name);
+    const set = (x, y, c) => px.set(`${x},${y}`, t(c));
+    const H = 6;
+    let peak = 0;
+    for (let i = 0; i < f.w; i++) {
+      const u = ((i + 0.5) / f.w) * 2 - 1, col = Math.max(1, Math.round(H * (1 - Math.abs(u)) ** 0.8));
+      peak = Math.max(peak, col);
+      for (let j = 0; j < col; j++) {
+        const n = r();
+        set(Math.floor(f.x0) + i, L.surface - 1 - j, n < 0.4 ? C.seed : n < 0.65 ? C.crumb : n < 0.85 ? C.seedDark : C.leaf);
+      }
+    }
+    ['# # #', '#####'].forEach((row, ry) => [...row].forEach((ch, rx) => {
+      if (ch === '#') set(Math.floor(f.cx) - 2 + rx, L.surface - peak - 3 + ry, C.crown);
+    }));
+    if (hl.rock) paintRock(px, f.cx, L.surface - peak - 3);
   }
 
   // Map "x,y" -> colour -> SVG rects, one per horizontal run of one colour.
@@ -380,83 +405,101 @@
     return out;
   }
 
-  // An ant: body and head (facing +x), legs below; moved and flipped by its transform.
-  const ANT = `<rect x="-1" y="-0.7" width="1.3" height="0.8" fill="${C.ant}"/><rect x="0.3" y="-0.85" width="0.8" height="0.7" fill="${C.ant}"/>`
-    + `<rect x="-0.9" y="0.1" width="0.25" height="0.4" fill="${C.ant}"/><rect x="0" y="0.1" width="0.25" height="0.4" fill="${C.ant}"/>`;
-  const antPose = (p) => `translate(${f(p.x)} ${f(p.y)}) scale(${p.dir < 0 ? -1 : 1} 1)`;
+  // An ant, facing +x with its legs below, about 1.7 blocks long: abdomen, thorax and head, six legs, two antennae.
+  const ANT = `<g fill="${C.ant}" stroke="${C.ant}" stroke-width="0.09" stroke-linecap="round">`
+    + '<ellipse cx="-0.5" cy="0" rx="0.36" ry="0.24" stroke="none"/><ellipse cx="0.02" cy="0" rx="0.17" ry="0.12" stroke="none"/>'
+    + '<circle cx="0.36" cy="-0.02" r="0.16" stroke="none"/>'
+    + '<path fill="none" d="M-0.08 0.05 L-0.4 0.38 M0.02 0.08 L-0.02 0.42 M0.1 0.05 L0.38 0.38 M-0.08 -0.05 L-0.36 -0.32 M0.1 -0.05 L0.34 -0.32 M0.02 -0.08 L0 -0.36'
+    + ' M0.46 -0.1 L0.7 -0.4 M0.48 -0.04 L0.78 -0.2"/></g>';
+  const SCALE = 0.75;
+  // Ant transform: moved to p, turned to its heading, never upside down (mirrored when heading left).
+  function antPose(p) {
+    const f = (n) => (Math.round(n * 100) / 100 + 0).toString();
+    const ang = p.ang ?? (p.dir < 0 ? Math.PI : 0), dx = Math.cos(ang), dy = Math.sin(ang);
+    const left = dx < -1e-9;                    // mirrored, then turned so its head points along (dx, dy)
+    const deg = (left ? Math.atan2(-dy, -dx) : ang) * 180 / Math.PI;
+    return `translate(${f(p.x)} ${f(p.y)}) rotate(${f(deg)}) scale(${left ? -SCALE : SCALE} ${SCALE})`;
+  }
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const f = (n) => (Math.round(n * 100) / 100).toString();
-  // The name under a hill, shortened to fit its slot.
+  // The name under a home, shortened so it stays clear of its neighbours' shafts.
   function label(hl) {
-    const max = Math.max(6, Math.floor((hl.w + GAP - 1) / 1.32));
+    const max = Math.max(6, Math.floor((2 * COL - 4) / 1.1));
     return hl.name.length > max ? hl.name.slice(0, max - 1) + '…' : hl.name;
   }
 
-  // The meadow as an SVG string. opts: {width (blocks), t (seconds, for the ants), mini (no names, no tap
-  // targets)}. Ants are <rect class="ant" data-h=<hill index> data-a=<ant>>, for the app to move; tap targets
-  // are data-k="hill" with data-i = the hill's index in layout().hills.
+  // The farm as an SVG string. opts: {t (seconds, for the ants), mini (no names, no tap targets), messages}.
+  // Ants are <g class="ant" data-h=<hill index> | data-p=<path index> data-a=<ant>>, for the app to move; lights
+  // are <circle class="glow" data-role=<role>>; tap targets are data-k="hill" (a group per hill, data-i its index
+  // in layout().hills), data-k="food" (the food in an anthome: data-i its hill index) and data-k="path" (data-i its
+  // index in layout().paths).
   function svg(agents, opts = {}) {
     const L = layout(agents, opts);
-    const px = new Map();
-    for (const row of L.rows) for (let x = 0; x < L.width; x++) {
-      px.set(`${x},${row.base}`, mix(C.ground, C.bg, HAZE[row.layer]));
-      px.set(`${x},${row.base + 1}`, mix(C.groundDark, C.bg, HAZE[row.layer]));
+    const px = new Map(), carved = new Set();
+    const put = (c) => (i, j) => { if (j >= L.surface && i >= 0 && i < L.width && j < L.height) { px.set(`${i},${j}`, c); carved.add(`${i},${j}`); } };
+    const r = rng('soil');
+    for (let k = 0; k < L.width * L.height / 40; k++) {          // pebbles in the soil
+      const i = Math.floor(r() * L.width), j = L.surface + 2 + Math.floor(r() * (L.height - L.surface - 2));
+      px.set(`${i},${j}`, r() < 0.5 ? C.pebble : C.pebbleDark);
+      if (r() < 0.4) px.set(`${i + 1},${j}`, C.pebbleDark);
     }
-    const keep = new Set();
-    for (const pa of L.paths) {                 // dirt paths, under everything else
-      const r = pa.w / 2;
-      for (let k = 1; k < pa.trail.length; k++) {
-        const a = pa.trail[k - 1], b = pa.trail[k], steps = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.3);
-        for (let m = 0; m <= steps; m++) {
-          const x = a.x + (b.x - a.x) * m / steps, y = a.y + (b.y - a.y) * m / steps;
-          for (let i = Math.floor(x - r); i <= Math.floor(x + r - 1e-9); i++) {
-            for (let j = Math.floor(y - r); j <= Math.floor(y + r - 1e-9); j++) {
-              if (Math.hypot(i + 0.5 - x, j + 0.5 - y) <= Math.max(0.75, r)) {
-                px.set(`${i},${j}`, (hash('dirt', i, j) % 7) ? C.path : C.pathDark);
-                keep.add(`${i},${j}`);
-              }
-            }
-          }
-        }
-      }
+    for (let i = 0; i < L.width; i++) {                           // grass along the surface
+      px.set(`${i},${L.surface}`, C.topsoil);
+      if (hash('grass', i) % 4 === 0) px.set(`${i},${L.surface - 1}`, hash('g', i) % 2 ? C.grass : C.grassLight);
     }
-    for (const hl of L.hills) {
-      if (!hl.ants) continue;
-      const [, , end] = hl.trail;
-      const a = Math.min(hl.trail[1].x, end.x), b = Math.max(hl.trail[1].x, end.x);
-      for (let x = Math.floor(a); x <= Math.floor(b); x++) px.set(`${x},${hl.base}`, C.trail);
-      px.set(`${Math.floor(end.x)},${hl.base - 1}`, C.crumb);
-      px.set(`${Math.floor(end.x) + 1},${hl.base - 1}`, C.crumb);
+    const homes = L.hills.filter((h) => h.kind === 'home');
+    for (const hl of homes) brush(hl.shaft, 0.75, put(toneOf(hl)(C.tunnel)));
+    for (const pa of L.paths) {
+      if (pa.toFood) brush(pa.trail.slice(-2), 0.5, (i, j) => px.set(`${i},${j}`, C.trail));     // along the surface
+      else brush(pa.trail, pa.w / 2, put(C.tunnel));
     }
-    L.hills.forEach((hl) => paint(hl, px, keep));
-    let ants = '', labels = '', hits = '';
+    for (const hl of homes) paintHome(hl, px, carved);
+    for (const hl of homes) paintMound(hl, px, L.surface);
+    for (const hl of L.hills.filter((h) => h.kind === 'food')) paintFood(hl, L, px);
+    let ants = '', labels = '', hits = '', glow = '', foods = '';
     L.paths.forEach((pa, n) => {
-      for (let k = 0; k < pa.ants; k++) {
-        ants += `<g class="ant" data-p="${n}" data-a="${k}" transform="${antPose(antAt(pa, k, opts.t || 0))}">${ANT}</g>`;
-      }
+      for (let k = 0; k < pa.ants; k++) ants += `<g class="ant" data-p="${n}" data-a="${k}" transform="${antPose(antAt(pa, k, opts.t || 0))}">${ANT}</g>`;
       if (!opts.mini) {
         hits += `<polyline data-k="path" data-i="${n}" points="${pa.trail.map((q) => `${f(q.x)},${f(q.y)}`).join(' ')}"`
           + ` fill="none" stroke="#000" stroke-opacity="0" stroke-width="${f(Math.max(2.5, pa.w + 1))}"/>`;
       }
     });
     L.hills.forEach((hl, n) => {
-      for (let k = 0; k < hl.ants; k++) {
-        const p = antAt(hl, k, opts.t || 0);
-        ants += `<g class="ant" data-h="${n}" data-a="${k}" transform="${antPose(p)}">${ANT}</g>`;
+      for (let k = 0; k < hl.ants; k++) ants += `<g class="ant" data-h="${n}" data-a="${k}" transform="${antPose(antAt(hl, k, opts.t || 0))}">${ANT}</g>`;
+      if (hl.mood !== 'quiet') {
+        hl.lights.forEach((l, j) => {
+          glow += `<circle class="glow" data-role="${hl.role}" cx="${f(Math.floor(l.x) + 0.5)}" cy="${f(Math.floor(l.y) + 0.5)}" r="1.25"`
+            + ` fill="${LIGHTS[hl.role]}" style="animation-delay:${f(-((hash(hl.name, j) % 30) / 10))}s"/>`;
+        });
       }
       if (opts.mini) return;
-      labels += `<text x="${f(hl.cx)}" y="${f(hl.base + 3.6)}" font-size="2.2" font-family="ui-monospace, Menlo, Consolas, monospace"`
-        + ` text-anchor="middle" fill="${hl.mood === 'quiet' ? '#8d8a84' : C.label}" stroke="${C.bg}" stroke-width="0.7" paint-order="stroke">${esc(label(hl))}</text>`;
-      hits += `<rect data-k="hill" data-i="${n}" x="${hl.x0 - 2}" y="${hl.base - hl.h - TOP + 1}" width="${hl.w + 4}" height="${hl.h + TOP + LABEL - 1}"/>`;
+      const ink = hl.mood === 'quiet' ? '#b9b0a2' : C.inkUnder;
+      if (hl.kind === 'food') {
+        labels += `<text x="${f(L.food.cx)}" y="${f(L.surface - 9.6)}" font-size="2" font-weight="700" font-family="ui-monospace, Menlo, Consolas, monospace"`
+          + ` text-anchor="middle" fill="${C.label}" stroke="${C.sky}" stroke-width="0.6" paint-order="stroke">${esc(hl.name)}</text>`;
+        hits += `<g data-k="hill" data-i="${n}"><rect x="${f(L.food.x0 - 1)}" y="${f(L.surface - 11.5)}" width="${f(L.food.w + 2)}" height="12"/></g>`;
+        return;
+      }
+      const hm = hl.home;
+      labels += `<text x="${f(hm.cx)}" y="${f(hm.y0 + hm.h + LABEL - 0.6)}" font-size="1.8" font-family="ui-monospace, Menlo, Consolas, monospace"`
+        + ` text-anchor="middle" fill="${ink}" stroke="#3b2a1c" stroke-width="0.5" paint-order="stroke">${esc(label(hl))}</text>`;
+      hits += `<g data-k="hill" data-i="${n}"><rect x="${f(hl.mound.x0 - 1)}" y="${f(L.surface - hl.mound.h - 5)}" width="${f(hl.mound.w + 2)}" height="${f(hl.mound.h + 5)}"/>`
+        + `<rect x="${f(hm.x0 - 0.5)}" y="${f(hm.y0 - 0.5)}" width="${f(hm.w + 1)}" height="${f(hm.h + LABEL + 0.5)}"/></g>`;
+      foods += `<rect data-k="food" data-i="${n}" x="${f(hl.food.x0 - 0.6)}" y="${f(hl.food.y0 - 1)}" width="${f(hl.food.w + 1.2)}" height="${f(hl.food.h + 1.4)}"/>`;
     });
     const counts = MOOD_ORDER.map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L.width} ${L.height}" class="anthills" role="img" shape-rendering="crispEdges"`
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L.width} ${L.height}" class="anthills" role="img"`
       + ` aria-label="${L.hills.length} agents: ${counts}">`
-      + `<rect width="${L.width}" height="${L.height}" fill="${C.bg}"/>` + rects(px)
-      + `${labels}<g class="ants">${ants}</g>`
-      + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}</g>`) + '</svg>';
+      + `<rect width="${L.width}" height="${L.surface}" fill="${C.sky}"/>`
+      + `<rect y="${L.surface}" width="${L.width}" height="${f(L.height - L.surface)}" fill="${C.soil[0]}"/>`
+      + `<rect y="${L.surface + 10}" width="${L.width}" height="${f(L.height - L.surface - 10)}" fill="${C.soil[1]}"/>`
+      + `<rect y="${f(L.gallery - 2)}" width="${L.width}" height="${f(L.height - L.gallery + 2)}" fill="${C.soil[2]}"/>`
+      + `<g shape-rendering="crispEdges">${rects(px)}</g>`
+      + `<g class="glows" opacity="0.38">${glow}</g>${labels}<g class="ants">${ants}</g>`
+      + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}${foods}</g>`) + '</svg>';
   }
 
-  return { pathWidth, antPose, hash, rng, sizeOf, layerOf, LAYERS, DEPTH, moodOf, design, profile, layout, antAt, svg, label, SIZES, ANTS, SHAPES, SOILS, SPEED };
+  return { pathWidth, antPose, hash, rng, sizeOf, roleOf, moodOf, design, inside, layout, antAt, svg, label,
+    SIZES, ANTS, SHAPES, CONTENTS, SOILS, LIGHTS, ROLE_TEXT, SPEED, SCALE, COL };
 }));
