@@ -298,3 +298,16 @@ aside.callout.warn { border-left-color: var(--warnc); } aside.callout.warn .clab
 li.step, .sbody, details.section, aside.callout, .stepsblock, ol.steps { min-width: 0; max-width: 100%; }
 .pbox { min-width: 0; overflow-wrap: anywhere; }
 .katex.wide { display: inline-block; max-width: 100%; overflow-x: auto; overflow-y: hidden; vertical-align: middle; padding-bottom: 2px; }
+
+/* checklist details, content stages, maths that scrolls */
+.checklist li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.checklist li:last-child { border-bottom: 0; }
+.checklist label { align-items: flex-start; }
+.checklist input { margin-top: 4px; flex: none; }
+.ctext { display: grid; gap: 2px; }
+.cwhat { font-weight: 600; }
+.cdetail { font-size: 14px; color: var(--muted); line-height: 1.5; }
+.checklist li.done .cwhat { text-decoration: line-through; color: var(--muted); }
+.badge.stage.in-progress { background: color-mix(in srgb, var(--ask) 22%, transparent); color: var(--ask); font-weight: 600; }
+.badge.stage.ready { background: color-mix(in srgb, var(--check) 20%, transparent); color: var(--check); font-weight: 600; }
+.scrolls { box-shadow: inset -14px 0 10px -10px rgba(0, 0, 0, .35); border-radius: 6px; }

@@ -293,9 +293,13 @@
     const ticks = ctx.store.get('checklist') || {};
     return el('section', { class: 'checklist' }, el('h3', {}, b.title || 'Before you merge'),
       el('ul', {}, (b.items || []).map((t, k) => {
-        const cb = el('input', { type: 'checkbox', onchange: () => { ticks[k] = cb.checked; ctx.store.set('checklist', ticks); } });
+        const cb = el('input', { type: 'checkbox', onchange: () => { ticks[k] = cb.checked; ctx.store.set('checklist', ticks); li.classList.toggle('done', cb.checked); } });
         cb.checked = !!ticks[k];
-        return el('li', {}, el('label', {}, cb, el('span', { html: inline(t) })));
+        const item = typeof t === 'string' ? { text: t } : t;
+        const li = el('li', { class: cb.checked ? 'done' : '' }, el('label', {}, cb, el('span', { class: 'ctext' },
+          el('span', { class: 'cwhat', html: inline(item.text) }),
+          item.detail ? el('span', { class: 'cdetail', html: inline(item.detail) }) : null)));
+        return li;
       })));
   }
 
@@ -375,6 +379,9 @@
   // Inline maths wider than its text gets a sideways scroll instead of running off the screen. Run after a
   // render and whenever a section opens (closed sections have no width to measure).
   LoopRender.fitWide = function (root) {
+    (root || document).querySelectorAll('.mathscroll, .katex-display').forEach((m) => {
+      m.classList.toggle('scrolls', m.scrollWidth > m.clientWidth + 2);
+    });
     (root || document).querySelectorAll('.md .katex:not(.wide)').forEach((k) => {
       if (k.closest('.katex-display')) return;
       const box = k.parentElement;
