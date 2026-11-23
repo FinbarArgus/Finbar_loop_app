@@ -1215,6 +1215,7 @@
     const legend = el('div', { class: 'hlegend' },
       el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
       el('span', {}, el('b', {}, 'Grey'), ' stalled'), el('span', {}, el('b', {}, 'Size'), ' priority (crown: LOOP)'),
+      el('span', {}, el('b', {}, 'Rows'), ' LOOP at the back, managers, IMPLEMENT- in front'),
       el('span', {}, el('b', {}, 'Paths'), ' messages between them (last 50; tap one to read them)'));
     const counts = ['blocked', 'working', 'quiet'].map((m) => [m, agents.filter((a) => H.moodOf(a) === m).length]);
     main().replaceChildren(
@@ -1223,9 +1224,14 @@
         el('div', { class: 'hillscol' }, legend, view, info),
         el('div', { class: 'treecol' }, el('div', { class: 'who' }, el('a', { href: '#/tree' }, 'Tree'), ` ${state.stage} · ${metres(state.height)}`), treePic)),
       el('p', { class: 'foot' }, `Agents as of ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
-    const width = Math.max(48, Math.min(96, Math.round(view.clientWidth / 8)));
-    const L = H.layout(agents, { width, messages: msgs });
-    view.innerHTML = H.svg(agents, { width, messages: msgs, t: performance.now() / 1000 });
+    // The whole meadow fits the screen below the view's top, with no scrolling: laid out for that box, drawn as large
+    // as fits in it, centred.
+    const top = view.getBoundingClientRect().top + window.scrollY;
+    const fit = { w: view.clientWidth, h: Math.max(220, window.innerHeight - top - 10) };
+    const L = H.layout(agents, { fit, messages: msgs });
+    view.innerHTML = H.svg(agents, { fit, messages: msgs, t: performance.now() / 1000 });
+    const svgEl = view.querySelector('svg');
+    if (svgEl) svgEl.style.width = `${Math.floor(L.width * Math.min(fit.w / L.width, fit.h / L.height))}px`;
     if (!agents.length) view.replaceChildren(el('p', { class: 'empty' }, 'No agents in the status yet.'));
     let shown = null;
     const show = (t) => {

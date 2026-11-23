@@ -411,7 +411,7 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .hillscol { min-width: 0; }
 .hlegend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); margin: 0 0 6px; }
 .hview { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #f3f2ea; }
-.hview svg { display: block; width: 100%; height: auto; }
+.hview svg { display: block; width: 100%; max-width: 100%; height: auto; margin: 0 auto; }
 .hview .hits [data-k] { cursor: pointer; }
 .hview .hits .on { fill-opacity: .07; }
 .treecol { min-width: 0; }
