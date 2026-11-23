@@ -580,6 +580,52 @@ def run(loop_bin, graph, shots):
                       'Read: a paper with no bibliographic record shows the warning', failures)
                 if shots:
                     krow.screenshot(path=f'{shots}/{label}-read-key-title.png')
+
+                # Add to paper lib: a paper saved to Zotero (item key known) gets a picker of the _work paper libraries,
+                # its current ones ticked; saving writes one zotero_requests file; the loop's result updates the chips.
+                cols_f = repo / 'state/zotero_collections.json'
+                cols_f.write_text(json.dumps({'collections': json.loads(cols_f.read_text())['collections'] + [
+                    {'key': 'WORK0000', 'id': None, 'name': '_work'}, {'key': 'WPAP0000', 'id': None, 'name': '_work / papers'},
+                    {'key': 'WORKA000', 'id': None, 'name': '_work / papers / paper_a'},
+                    {'key': 'WORKJ000', 'id': None, 'name': '_work / my_papers / journal'},
+                    {'key': 'GRANT000', 'id': None, 'name': '_work / grants / amrf'}]}))
+                seed('read-lib', title='Lib paper', zotero={'collection': 'BBBB2222', 'name': 'ROM / OpInf'})
+                (repo / 'personal/read-lib/zotero.json').write_text(json.dumps({'status': 'saved', 'key': 'ITEM0001', 'work': ['WORKA000']}))
+                seed('read-desk', title='Desktop paper', zotero={'collection': 'BBBB2222', 'name': 'ROM / OpInf'})
+                (repo / 'personal/read-desk/zotero.json').write_text(json.dumps({'status': 'saved', 'via': 'desktop'}))
+                page.reload()
+                lrow = page.locator('.mrow', has_text='Lib paper')
+                lrow.locator('.plibbtn').wait_for()
+                check(page, lrow.locator('.badge.plib').all_inner_texts() == ['papers/paper_a'], 'Paper lib: chip for the library it is in', failures)
+                check(page, page.locator('.mrow', has_text='Desktop paper').locator('.plibbtn').count() == 0,
+                      'Paper lib: no button without a Zotero item key', failures)
+                lrow.locator('.plibbtn').click()
+                opts = lrow.locator('.plibopt')
+                check(page, opts.all_inner_texts() == ['my_papers / journal', 'papers / paper_a']
+                      and [o.locator('input').is_checked() for o in opts.all()] == [False, True],
+                      f'Paper lib: picker lists papers and my_papers libraries, current one ticked {opts.all_inner_texts()}', failures)
+                opts.nth(0).locator('input').check()
+                opts.nth(1).locator('input').uncheck()
+                lrow.locator('.plibpick input[type=text]').fill('Paper Three!')
+                lrow.locator('.plibpick button', has_text='New paper lib').click()
+                lrow.locator('.plibopt.new', has_text='papers / paper_three (new)').wait_for()
+                check(page, narrow(), 'Paper lib: picker has no sideways scroll', failures)
+                if shots:
+                    lrow.screenshot(path=f'{shots}/{label}-paper-lib-picker.png')
+                lrow.locator('.plibpick button.primary').click()
+                lrow.locator('.plibpick .status', has_text='within about a minute').wait_for()
+                reqs = [(f, json.loads(f.read_text())) for f in (repo / 'zotero_requests').glob('*.json')] if (repo / 'zotero_requests').exists() else []
+                reqs = [(f, r) for f, r in reqs if r.get('kind') == 'work']
+                check(page, [r for _, r in reqs] == [{'kind': 'work', 'entry': 'read-lib', 'add': ['WORKJ000'], 'remove': ['WORKA000'], 'new': ['paper_three']}],
+                      f'Paper lib: one request: add, remove, new (lower_snake_case) {[r for _, r in reqs]}', failures)
+                if reqs:
+                    reqs[0][0].with_suffix('.result.json').write_text(json.dumps({'status': 'done', 'entry': 'read-lib', 'work': ['WORKJ000', 'NEWC0001']}))
+                    (repo / 'personal/read-lib/zotero.json').write_text(json.dumps({'status': 'saved', 'key': 'ITEM0001', 'work': ['WORKJ000', 'NEWC0001']}))
+                    cols_f.write_text(json.dumps({'collections': json.loads(cols_f.read_text())['collections'] + [
+                        {'key': 'NEWC0001', 'id': None, 'name': '_work / papers / paper_three', 'pending': True}]}))
+                    page.locator('.mrow', has_text='Lib paper').locator('.badge.plib', has_text='paper_three').wait_for(timeout=15000)
+                    chips = page.locator('.mrow', has_text='Lib paper').locator('.badge.plib').all_inner_texts()
+                    check(page, chips == ['my_papers/journal', 'papers/paper_three'], f'Paper lib: chips follow the loop result {chips}', failures)
                 row = page.locator('.mrow', has_text='Unnoted paper')
                 row.locator('.mcheck input').click()       # the app un-ticks it and asks for a note
                 row.locator('.status.ask-note').wait_for()
