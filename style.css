@@ -315,3 +315,35 @@ li.step, .sbody, details.section, aside.callout, .stepsblock, ol.steps { min-wid
 .badge.soon { background: color-mix(in srgb, var(--ask) 22%, transparent); color: var(--ask); font-weight: 600; }
 .agent .alink { border-left: 3px solid var(--ask); }
 .agent.blocked .alink { border-left-color: var(--high); }
+
+/* Mine */
+.mine { display: grid; gap: 12px; }
+.mgroup { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--low); border-radius: 10px; padding: 10px 12px; }
+.mgroup.prio-high { border-left-color: var(--high); } .mgroup.prio-med { border-left-color: var(--med); }
+.mgroup h3 { margin: 0 0 8px; font-size: 16px; }
+.mgroup h3 .n, .status-card h3 .n { color: var(--muted); font-weight: 400; }
+.dropzone { border: 2px dashed var(--line); border-radius: 10px; padding: 14px; text-align: center; color: var(--muted); cursor: pointer; font-size: 14px; margin-bottom: 8px; }
+.dropzone.drag, .dropzone:hover { border-color: var(--accent); color: var(--accent); background: var(--soft); }
+.mrow { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
+.mrow.done .mtitle { text-decoration: line-through; color: var(--muted); }
+.mcheck input { width: 18px; height: 18px; margin-top: 2px; }
+.mmain { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.mtitle { font-weight: 600; overflow-wrap: anywhere; }
+.mnote { font-size: 14px; color: var(--muted); }
+.mmeta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
+.flink { font-size: 13px; overflow-wrap: anywhere; }
+.prio { font: inherit; font-size: 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--ink); padding: 1px 6px; }
+.due { font: inherit; font-size: 12px; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer; }
+.due.later { color: var(--ink); } .due.soon { background: color-mix(in srgb, var(--ask) 22%, transparent); color: var(--ask); border-color: transparent; font-weight: 600; }
+.due.over { background: var(--high); color: #fff; border-color: transparent; font-weight: 600; }
+.datein { font: inherit; font-size: 13px; }
+.badge.z.saved { color: var(--ok); } .badge.z.error { color: var(--bad); } .badge.z.waiting { color: var(--wait); }
+.newentry { background: var(--soft); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; margin: 6px 0; }
+.newentry h3 { margin: 0; font-size: 15px; }
+.newentry label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.newentry input, .newentry select, .newentry textarea { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.colsel { width: 100%; }
+.switch.wrap { flex-wrap: wrap; border-radius: 12px; }
+.deadlines .dline { display: block; text-decoration: none; color: var(--ink); padding: 6px 8px; border-radius: 6px; margin: 4px 0; background: var(--soft); border-left: 3px solid var(--line); }
+.deadlines .dline.over { border-left-color: var(--high); } .deadlines .dline.over b { color: var(--high); }
+.deadlines .dline.soon { border-left-color: var(--ask); }

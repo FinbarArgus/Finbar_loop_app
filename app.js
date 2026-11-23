@@ -46,10 +46,11 @@
     return blobCache.get(p);
   }
 
-  let tree = { paths: new Set(), at: 0 };
+  let tree = { paths: new Set(), sha: new Map(), at: 0 };
   async function loadTree() {
     const t = await (await gh(`/repos/${cfg.repo}/git/trees/${cfg.branch}?recursive=1`)).json();
-    tree = { paths: new Set(t.tree.filter((x) => x.type === 'blob').map((x) => x.path)), at: Date.now() };
+    const blobs = t.tree.filter((x) => x.type === 'blob');
+    tree = { paths: new Set(blobs.map((x) => x.path)), sha: new Map(blobs.map((x) => [x.path, x.sha])), at: Date.now() };
     return tree;
   }
   const filesIn = (dir) => [...tree.paths].filter((p) => p.startsWith(dir + '/') && p.endsWith('.json')
@@ -64,8 +65,8 @@
     await gh(`/repos/${cfg.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, content: b64(bytes), branch: cfg.branch }),
-    });
+      body: JSON.stringify({ message, content: b64(bytes), branch: cfg.branch, sha: tree.sha.get(path) }),
+    }).then((r) => r.json()).then((j) => { if (j && j.content && j.content.sha) tree.sha.set(path, j.content.sha); }).catch(() => {});
     tree.paths.add(path);
   }
   const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
@@ -606,9 +607,218 @@
             onSend: async (text, imgs) => { await send('messages', r.job, { kind: 'message', to: r.name, text }, imgs); },
           }))))
         : el('p', { class: 'empty' }, 'None.')));
-    main().replaceChildren(usage, ...sections,
+    await loadMine().catch(() => {});
+    main().replaceChildren(deadlinesCard(), usage, ...sections,
       el('p', { class: 'foot' }, `Updated ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
     setPoll(async () => { if (location.hash.startsWith('#/status')) await showStatus(); }, 60_000);
+  }
+
+  // ------------------------------------------------------------ Mine: Read, Write, Students, Other
+  // Finbar's own entries: personal/<id>/entry.json plus the files dropped with it. The app writes them;
+  // loop-cron saves papers to Zotero and writes personal/<id>/zotero.json.
+
+  const MINE_TABS = [['read', 'Read'], ['write', 'Write'], ['student', 'Students'], ['other', 'Other']];
+  const PRIOS = [['high', 'High'], ['med', 'Medium'], ['low', 'Low']];
+  let mine = { entries: [], zotero: {}, people: [], collections: [] };
+
+  const safeName = (n) => n.replace(/[^\w.\-]+/g, '_').slice(-80) || 'file';
+  const today = () => new Date(new Date().toDateString());
+  function dueInfo(d) {
+    if (!d) return null;
+    const days = Math.round((new Date(d + 'T00:00:00') - today()) / 864e5);
+    const when = new Date(d + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const rel = days < 0 ? `${-days} d overdue` : days === 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} d`;
+    return { days, text: `Due ${when} (${rel})`, level: days < 0 ? 'over' : days <= 3 ? 'soon' : 'later' };
+  }
+
+  async function loadMine() {
+    await loadTree();
+    const ids = [...tree.paths].filter((p) => /^personal\/[^/]+\/entry\.json$/.test(p)).map((p) => p.split('/')[1]);
+    const [entries, people, cols] = await Promise.all([
+      Promise.all(ids.map((id) => getJSON(`personal/${id}/entry.json`).catch(() => null))),
+      getJSON('state/people.json').catch(() => ({ students: [] })),
+      getJSON('state/zotero_collections.json').catch(() => ({ collections: [] })),
+    ]);
+    const zot = {};
+    await Promise.all(ids.filter((id) => tree.paths.has(`personal/${id}/zotero.json`)).map(async (id) => {
+      zot[id] = await getJSON(`personal/${id}/zotero.json`).catch(() => null);
+    }));
+    mine = { entries: entries.filter(Boolean), zotero: zot, people: people.students || [], collections: cols.collections || [] };
+    return mine;
+  }
+
+  async function saveEntry(e, message) {
+    e.updated = new Date().toISOString();
+    await put(`personal/${e.id}/entry.json`, new TextEncoder().encode(JSON.stringify(e, null, 1)), message || `${e.id}: update`);
+  }
+
+  async function createEntry(kind, fields, files) {
+    const id = `${kind}-${stamp()}`;
+    const names = [];
+    for (const f of files || []) {
+      const name = safeName(f.name);
+      await put(`personal/${id}/${name}`, new Uint8Array(await f.arrayBuffer()), `${id}: ${name}`);
+      names.push(name);
+    }
+    const e = { id, kind, priority: 'med', deadline: null, done: false, created: new Date().toISOString(), files: names, ...fields };
+    await saveEntry(e, `${id}: new ${kind}`);
+    return e;
+  }
+
+  // Drop zone: drag files onto it, or tap to pick (the phone's file picker).
+  function dropZone(label, onFiles, accept) {
+    const pick = el('input', { type: 'file', multiple: true, hidden: true, accept: accept || null });
+    const zone = el('div', { class: 'dropzone', tabindex: 0, onclick: () => pick.click() }, el('span', {}, label), pick);
+    pick.addEventListener('change', () => { if (pick.files.length) onFiles([...pick.files]); pick.value = ''; });
+    zone.addEventListener('dragover', (ev) => { ev.preventDefault(); zone.classList.add('drag'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+    zone.addEventListener('drop', (ev) => { ev.preventDefault(); zone.classList.remove('drag'); if (ev.dataTransfer.files.length) onFiles([...ev.dataTransfer.files]); });
+    return zone;
+  }
+
+  function deadlineChip(e, redraw) {
+    const info = dueInfo(e.deadline);
+    const input = el('input', { type: 'date', value: e.deadline || '', class: 'datein' });
+    const chip = el('button', { class: 'due ' + (info ? info.level : 'none'), onclick: (ev) => {
+      ev.stopPropagation(); chip.replaceWith(input); input.focus(); try { input.showPicker(); } catch (x) { /* older browsers */ }
+    } }, info ? info.text : '+ deadline');
+    input.addEventListener('change', async () => { e.deadline = input.value || null; await saveEntry(e, `${e.id}: deadline`); redraw(); });
+    input.addEventListener('blur', () => setTimeout(() => { if (input.isConnected && (input.value || null) === (e.deadline || null)) redraw(); }, 200));
+    return chip;
+  }
+
+  function fileLinks(e) {
+    return (e.files || []).map((n) => el('a', { href: '#', class: 'flink', onclick: async (ev) => {
+      ev.preventDefault();
+      const u = await fileUrl(`personal/${e.id}/${n}`);
+      window.open(u, '_blank');
+    } }, n));
+  }
+
+  function entryRow(e, redraw, extra) {
+    const done = el('input', { type: 'checkbox', title: 'done', onchange: async () => { e.done = done.checked; await saveEntry(e, `${e.id}: ${e.done ? 'done' : 'not done'}`); redraw(); } });
+    done.checked = !!e.done;
+    const prio = el('select', { class: 'prio', title: 'priority', onchange: async () => { e.priority = prio.value; await saveEntry(e, `${e.id}: priority`); redraw(); } },
+      PRIOS.map(([k, l]) => el('option', { value: k, selected: e.priority === k ? true : null }, l)));
+    const z = mine.zotero[e.id];
+    const zb = e.kind === 'read' && e.zotero ? el('span', { class: `badge z ${z ? z.status : 'waiting'}`, title: (z && z.why) || '' },
+      z && z.status === 'saved' ? `in Zotero: ${e.zotero.name || ''}` : z && z.status === 'error' ? 'Zotero: error' : `to Zotero: ${e.zotero.name || ''} (waiting)`) : null;
+    return el('div', { class: 'mrow' + (e.done ? ' done' : '') },
+      el('label', { class: 'mcheck' }, done),
+      el('div', { class: 'mmain' },
+        el('div', { class: 'mtitle' }, e.link ? el('a', { href: e.link, target: '_blank', rel: 'noopener' }, e.title || e.link) : (e.title || (e.files || [])[0] || 'note')),
+        e.note ? el('div', { class: 'mnote', html: inline(e.note) }) : null,
+        el('div', { class: 'mmeta' }, ...fileLinks(e), zb, extra || null, deadlineChip(e, redraw), prio)));
+  }
+
+  // The short form shown after a drop: title, Zotero collection (Read), deadline.
+  function newEntryForm(kind, files, preset, redraw) {
+    const title = el('input', { type: 'text', value: files.length === 1 ? files[0].name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') : '', placeholder: 'Title' });
+    const due = el('input', { type: 'date' });
+    let colSel = null;
+    const parts = [el('div', { class: 'who' }, files.map((f) => f.name).join(', ')), el('label', {}, 'Title', title)];
+    if (kind === 'read') {
+      const filter = el('input', { type: 'search', placeholder: `Filter ${mine.collections.length} Zotero collections…` });
+      colSel = el('select', { size: 6, class: 'colsel' }, mine.collections.map((c) => el('option', { value: c.key }, c.name)));
+      filter.addEventListener('input', () => {
+        const q = filter.value.toLowerCase();
+        [...colSel.options].forEach((o) => { o.hidden = q && !o.textContent.toLowerCase().includes(q); });
+      });
+      parts.push(el('label', {}, 'Save to Zotero collection', filter, colSel));
+    }
+    parts.push(el('label', {}, 'Deadline (optional)', due));
+    const status = el('div', { class: 'status' });
+    const box = el('div', { class: 'newentry' }, ...parts, el('div', { class: 'row' },
+      el('button', { class: 'ghost', onclick: () => box.remove() }, 'Cancel'), el('span', { class: 'grow' }),
+      el('button', { class: 'primary', onclick: async () => {
+        const c = colSel && mine.collections.find((x) => x.key === colSel.value);
+        if (kind === 'read' && !c) { status.textContent = 'Pick a Zotero collection.'; return; }
+        status.textContent = 'Saving…';
+        try {
+          await createEntry(kind, { title: title.value.trim(), deadline: due.value || null, ...preset,
+            ...(c ? { zotero: { collection: c.key, collection_id: c.id, name: c.name } } : {}) }, files);
+          redraw();
+        } catch (err) { status.textContent = `Not saved: ${err.message}`; }
+      } }, 'Save')), status);
+    return box;
+  }
+
+  async function showMine(tab) {
+    tab = MINE_TABS.some(([k]) => k === tab) ? tab : 'read';
+    await loadMine();
+    const redraw = () => showMine(tab);
+    const all = mine.entries.filter((e) => e.kind === tab);
+    const open = all.filter((e) => !e.done);
+    const byPrio = (list) => [...list].sort((a, b) => (dueInfo(a.deadline)?.days ?? 1e9) - (dueInfo(b.deadline)?.days ?? 1e9));
+    const tabs = el('nav', { class: 'tabs' }, MINE_TABS.map(([k, l]) => el('a', { href: `#/mine/${k}`, class: k === tab ? 'on' : '' },
+      l, el('span', { class: 'n' }, String(mine.entries.filter((e) => e.kind === k && !e.done).length)))));
+    const body = el('div', { class: 'mine' });
+    if (tab === 'student') {
+      const who = safeGet('loop.mine.student') || 'all';
+      body.append(el('div', { class: 'switch wrap' }, ['all', ...mine.people].map((p) => el('button', {
+        class: p === who ? 'on' : '', onclick: () => { safeSet('loop.mine.student', p); redraw(); } },
+      p === 'all' ? `All (${open.length})` : `${p} (${open.filter((e) => e.student === p).length})`))));
+      (who === 'all' ? mine.people : [who]).forEach((p) => {
+        const mineP = byPrio(open.filter((e) => e.student === p));
+        const card = el('section', { class: 'mgroup' }, el('h3', {}, p, el('span', { class: 'n' }, ` ${mineP.length}`)));
+        card.append(dropZone(`Drop files to review for ${p}`, (files) => card.insertBefore(newEntryForm('student', files, { student: p }, redraw), card.children[2] || null)));
+        mineP.forEach((e) => card.append(entryRow(e, redraw)));
+        body.append(card);
+      });
+    } else {
+      if (tab === 'write') {
+        const t = el('input', { type: 'text', placeholder: 'Title' });
+        const link = el('input', { type: 'url', placeholder: 'Overleaf link (paste)' });
+        const pr = el('select', {}, PRIOS.map(([k, l]) => el('option', { value: k, selected: k === 'med' ? true : null }, l)));
+        const due = el('input', { type: 'date' });
+        const status = el('div', { class: 'status' });
+        body.append(el('section', { class: 'newentry' }, el('h3', {}, 'Add writing'), el('label', {}, 'Title', t), el('label', {}, 'Overleaf link', link),
+          el('div', { class: 'row' }, el('label', {}, 'Priority', pr), el('label', {}, 'Deadline', due), el('span', { class: 'grow' }),
+            el('button', { class: 'primary', onclick: async () => {
+              if (!/^https?:\/\//.test(link.value.trim())) { status.textContent = 'Paste the Overleaf link.'; return; }
+              await createEntry('write', { title: t.value.trim() || link.value.trim(), link: link.value.trim(), priority: pr.value, deadline: due.value || null }, []);
+              redraw();
+            } }, 'Add')), status));
+      }
+      if (tab === 'other') {
+        const note = el('textarea', { rows: 2, placeholder: 'A note (optional), then Add, or drop files below' });
+        const pr = el('select', {}, PRIOS.map(([k, l]) => el('option', { value: k, selected: k === 'med' ? true : null }, l)));
+        body.append(el('section', { class: 'newentry' }, el('h3', {}, 'Add a note'), note, el('div', { class: 'row' }, el('label', {}, 'Priority', pr), el('span', { class: 'grow' }),
+          el('button', { class: 'primary', onclick: async () => {
+            if (!note.value.trim()) return;
+            await createEntry('other', { title: note.value.trim().split('\n')[0].slice(0, 80), note: note.value.trim(), priority: pr.value }, []);
+            redraw();
+          } }, 'Add'))));
+      }
+      PRIOS.forEach(([p, label]) => {
+        const list = byPrio(open.filter((e) => (e.priority || 'med') === p));
+        const card = el('section', { class: `mgroup prio-${p}` }, el('h3', {}, label, el('span', { class: 'n' }, ` ${list.length}`)));
+        if (tab === 'read') card.append(dropZone(`Drop papers (PDF) here: ${label.toLowerCase()} priority`, (files) => card.insertBefore(newEntryForm('read', files, { priority: p }, redraw), card.children[2] || null), '.pdf,application/pdf'));
+        if (tab === 'other') card.append(dropZone(`Drop files here: ${label.toLowerCase()} priority`, (files) => card.insertBefore(newEntryForm('other', files, { priority: p }, redraw), card.children[2] || null)));
+        list.forEach((e) => card.append(entryRow(e, redraw, tab === 'student' ? el('span', { class: 'badge' }, e.student) : null)));
+        body.append(card);
+      });
+    }
+    const done = all.filter((e) => e.done).sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
+    const hist = el('details', { class: 'history' }, el('summary', {}, `Done (${done.length})`), ...done.map((e) => entryRow(e, redraw)));
+    main().replaceChildren(tabs, body, hist);
+    setPoll(async () => {
+      const before = [...tree.paths].filter((x) => x.startsWith('personal/')).join();
+      await loadTree();
+      if ([...tree.paths].filter((x) => x.startsWith('personal/')).join() !== before && !main().querySelector('.newentry input:focus, .newentry textarea:focus, .datein')) redraw();
+    }, 30_000);
+  }
+
+  // Status: upcoming deadlines from Mine (open entries due within 14 days, or overdue).
+  function deadlinesCard() {
+    const soon = mine.entries.filter((e) => !e.done && e.deadline).map((e) => ({ e, d: dueInfo(e.deadline) }))
+      .filter((x) => x.d.days <= 14).sort((a, b) => a.d.days - b.d.days);
+    const label = Object.fromEntries(MINE_TABS);
+    return el('section', { class: 'status-card deadlines' }, el('h3', {}, 'Upcoming deadlines ', el('span', { class: 'n' }, String(soon.length))),
+      soon.length ? soon.map(({ e, d }) => el('a', { class: `dline ${d.level}`, href: `#/mine/${e.kind}` },
+        el('b', {}, d.text), ' ', e.title || (e.files || [])[0] || 'note',
+        el('span', { class: 'who' }, ` · ${label[e.kind]}${e.student ? ' · ' + e.student : ''}`)))
+        : el('p', { class: 'empty' }, 'Nothing due in the next 14 days.'));
   }
 
   function showSettings(msg) {
@@ -639,9 +849,11 @@
     refreshItem = null;
     justSent = null;
     try {
-      document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', (a.dataset.meta === 'status') === (h[0] === 'status')));
+      const meta = h[0] === 'status' ? 'status' : h[0] === 'mine' ? 'mine' : 'work';
+      document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'status') await showStatus();
+      else if (h[0] === 'mine') await showMine(h[1]);
       else if (h[0] === 'settings') showSettings();
       else await showList(h[0] === 'list' ? h[1] : null);
       window.scrollTo(0, 0);

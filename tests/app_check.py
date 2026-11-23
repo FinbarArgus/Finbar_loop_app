@@ -99,6 +99,9 @@ def make_fixture(loop_bin, tmp, graph):
         'name': 'HIGH-session-a', 'state': 'blocked', 'tempo': 'blocked', 'updatedAt': '2026-11-23T00:00:00Z',
         'detail': 'waiting on LOOP Q-0001 after drafting the run plan'}))
     loop(loop_bin, repo, 'status', '--force')
+    (repo / 'state/people.json').write_text(json.dumps({'students': ['Ana', 'Ben', 'Cal']}))
+    (repo / 'state/zotero_collections.json').write_text(json.dumps({'collections': [
+        {'key': 'AAAA1111', 'id': 1, 'name': 'ROM'}, {'key': 'BBBB2222', 'id': 2, 'name': 'ROM / OpInf'}]}))
     return repo
 
 
@@ -349,9 +352,62 @@ def run(loop_bin, graph, shots):
                 rq = [json.loads(f.read_text()) for f in (repo / 'requests/Q-0003').glob('*.json')]
                 check(page, any(r.get('kind') == 'revisit' and r['text'] == 'Was explicit right after all?' for r in rq),
                       'revisit request written for that item', failures)
+                # Mine: drop a paper under High, pick its Zotero collection, set a deadline, tick it done.
+                import datetime as _dt
+                page.goto(base + '#/mine/read')
+                page.wait_for_selector('.mgroup.prio-high .dropzone')
+                check(page, page.locator('.mgroup').count() == 3, 'Read: High / Medium / Low groups', failures)
+                page.locator('.mgroup.prio-high input[type=file]').set_input_files(str(tmp_l / 'fig.png'))
+                page.wait_for_selector('.newentry .colsel')
+                page.locator('.newentry input[type=search]').fill('opinf')
+                check(page, page.locator('.newentry .colsel option:not([hidden])').count() == 1, 'collection filter', failures)
+                page.locator('.newentry .colsel').select_option('BBBB2222')
+                page.locator('.newentry input[type=text]').fill('A paper to read')
+                page.locator('.newentry button.primary').click()
+                page.wait_for_selector('.mrow >> text=A paper to read')
+                ents = [json.loads(f.read_text()) for f in (repo / 'personal').glob('read-*/entry.json')]
+                check(page, ents and ents[0]['priority'] == 'high' and ents[0]['zotero']['collection_id'] == 2
+                      and ents[0]['files'] == ['fig.png'] and (repo / 'personal' / ents[0]['id'] / 'fig.png').exists(),
+                      f'Read entry written with its file and collection {ents[:1]}', failures)
+                check(page, 'to Zotero: ROM / OpInf' in page.locator('.mrow').first.inner_text(), 'Zotero badge', failures)
+                soon = (_dt.date.today() + _dt.timedelta(days=2)).isoformat()
+                page.locator('.mrow .due').first.click()
+                page.locator('.mrow .datein').fill(soon)
+                page.locator('.mrow .datein').dispatch_event('change')
+                page.wait_for_selector('.mrow .due.soon')
+                check(page, json.loads((repo / 'personal' / ents[0]['id'] / 'entry.json').read_text())['deadline'] == soon,
+                      'deadline saved', failures)
+                page.goto(base + '#/mine/write')
+                page.wait_for_selector('.newentry input[type=url]')
+                page.locator('.newentry input[type=text]').fill('Paper 1 draft')
+                page.locator('.newentry input[type=url]').fill('https://www.overleaf.com/project/abc')
+                page.locator('.newentry button.primary').click()
+                page.wait_for_selector('.mrow a[href="https://www.overleaf.com/project/abc"]')
+                check(page, True, 'Write: Overleaf link added', failures)
+                page.goto(base + '#/mine/student')
+                page.wait_for_selector('.switch button >> text=Ben')
+                page.locator('.switch button', has_text='Ben').click()
+                page.wait_for_selector('.switch button.on >> text=Ben')
+                page.wait_for_function("document.querySelectorAll('.mgroup').length === 1")
+                page.locator('.mgroup input[type=file]').set_input_files(str(tmp_l / 'fig.png'))
+                page.locator('.newentry button.primary').click()
+                page.wait_for_selector('.mrow')
+                st = [json.loads(f.read_text()) for f in (repo / 'personal').glob('student-*/entry.json')]
+                check(page, st and st[0]['student'] == 'Ben', 'Students: file filed under Ben', failures)
+                page.locator('.mrow input[type=checkbox]').first.check()
+                page.wait_for_selector('details.history >> text=Done (1)')
+                check(page, json.loads((repo / 'personal' / st[0]['id'] / 'entry.json').read_text())['done'], 'ticked done', failures)
+                check(page, narrow(), 'Mine: no sideways scroll', failures)
+                if shots:
+                    page.goto(base + '#/mine/read')
+                    page.wait_for_selector('.mrow')
+                    page.screenshot(path=f'{shots}/{label}-mine.png', full_page=True)
+
                 # Status: usage, each agent with what it does, its entries, and a message box.
                 page.goto(base + '#/status')
                 page.wait_for_selector('.status-card .ulimit')
+                check(page, 'A paper to read' in page.locator('.deadlines').inner_text()
+                      and page.locator('.deadlines .dline.soon').count() == 1, 'Status warns of the upcoming deadline', failures)
                 check(page, page.locator('.ulimit').count() == 3 and page.locator('.ufill.hi').count() == 1,
                       'usage bars (one near its limit)', failures)
                 agent = page.locator('.agent', has_text='HIGH-session-a')
