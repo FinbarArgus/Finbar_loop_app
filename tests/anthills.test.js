@@ -7,10 +7,12 @@ const ag = (name, state = 'working', extra = {}) => ({ name, state, running: tru
 const AGENTS = [ag('LOOP', 'working', { loop: true }), ag('HIGH-a'), ag('HIGH-b', 'blocked', { items: ['Q-0001'] }),
   ag('MED-c', 'stalled', { running: false }), ag('LOW-d'), ag('IMPLEMENT-e'), ag('cam-session'), ag('MED-f', 'working', { running: false })];
 
-test('size by priority: LOOP the queen, HIGH large, MED medium, LOW small, IMPLEMENT and others medium-small', () => {
-  assert.deepEqual(AGENTS.map((a) => H.sizeOf(a)), ['queen', 'large', 'large', 'medium', 'small', 'medium-small', 'medium-small', 'medium']);
+test('size by priority: LOOP the queen, HIGH and IMPLEMENT large, MED medium, LOW small, others medium-small', () => {
+  assert.deepEqual(AGENTS.map((a) => H.sizeOf(a)), ['queen', 'large', 'large', 'medium', 'small', 'large', 'medium-small', 'medium']);
   assert.equal(H.sizeOf({ name: 'LOOP' }), 'queen');
   assert.equal(H.sizeOf({ name: 'high-lower-case' }), 'large');
+  assert.equal(H.sizeOf({ name: 'IMPLEMENT-loop-app' }), 'large');
+  assert.equal(H.sizeOf({ name: 'IMPLEMENTER' }), 'medium-small');     // the prefix, with its dash
   const w = (s) => H.SIZES[s][0];
   assert.ok(w('queen') > w('large') && w('large') > w('medium') && w('medium') > w('medium-small') && w('medium-small') > w('small'));
 });

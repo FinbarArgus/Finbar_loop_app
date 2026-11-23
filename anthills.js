@@ -2,8 +2,8 @@
 // A pure function of the agents (no clock, no network): the same agents give the same hills on every device.
 // Loaded in the browser (window.LoopHills) and by Node (tests).
 //
-// Size is the agent's priority (its name's prefix): LOOP is the queen's mound, HIGH- large, MED- medium,
-// LOW- small, IMPLEMENT- and the rest medium-small. Its design (shape, soil, entrances, grass, twigs, flowers)
+// Size is the agent's priority (its name's prefix): LOOP is the queen's mound, HIGH- and IMPLEMENT- large (Finbar),
+// MED- medium, LOW- small, the rest medium-small. Its design (shape, soil, entrances, grass, twigs, flowers)
 // is drawn from a hash of its name, so each hill is recognisable and stays the same. Its state shows at a
 // glance: working hills have ants running along a trail, a blocked hill has a rock on top and an amber tint,
 // a stalled or stopped hill is grey and still. Dirt paths join agents that messaged each other (state/messages.json,
@@ -42,7 +42,7 @@
   function sizeOf(agent) {
     const n = String(agent.name || '');
     if (agent.loop || n === 'LOOP') return 'queen';
-    if (/^HIGH-/i.test(n)) return 'large';
+    if (/^(HIGH|IMPLEMENT)-/i.test(n)) return 'large';
     if (/^MED-/i.test(n)) return 'medium';
     if (/^LOW-/i.test(n)) return 'small';
     return 'medium-small';

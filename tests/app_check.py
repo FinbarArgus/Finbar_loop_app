@@ -589,7 +589,7 @@ def run(loop_bin, graph, shots):
                 check(page, page.locator('.meta a.on').inner_text() == 'Hills', 'Hills tab in the header', failures)
                 check(page, page.locator('.hview [data-k="hill"]').count() == 7, 'Hills: one hill per agent, and one for an agent only in the messages', failures)
                 n_ants = page.locator('.hview .ant[data-h]').count()
-                check(page, n_ants == 6 + 5 + 2 + 3, f'Hills: ants on the working hills only ({n_ants})', failures)
+                check(page, n_ants == 6 + 5 + 2 + 5, f'Hills: ants on the working hills only ({n_ants})', failures)   # LOOP, HIGH, LOW, IMPLEMENT (large)
                 check(page, page.locator('.hview [data-k="path"]').count() == 3 and page.locator('.hview .ant[data-p]').count() == 3 + 1 + 1,
                       'Hills: a path per pair that messaged, ants on them', failures)
                 page.locator('.hview [data-k="path"][data-i="0"]').dispatch_event('click')
