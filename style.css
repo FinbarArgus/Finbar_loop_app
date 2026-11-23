@@ -196,3 +196,29 @@ details.hentry > summary::-webkit-details-marker { display: none; }
 .ha { font-size: 14px; }
 .ha.none { color: var(--muted); font-style: italic; }
 details.revisit { margin: 4px 0 0; }
+
+/* Work / Status */
+.meta { display: flex; gap: 2px; margin-left: 10px; background: #2a3347; border-radius: 999px; padding: 2px; }
+.meta a { color: #c9d3ea; text-decoration: none; padding: 4px 12px; border-radius: 999px; font-size: 14px; }
+.meta a.on { background: #fff; color: #1d2433; font-weight: 600; }
+.status-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 12px 0; }
+.status-card h3 { margin: 0 0 8px; font-size: 16px; }
+.status-card h3 .n { color: var(--muted); font-weight: 400; }
+.ulimit { margin: 8px 0; }
+.urow { display: flex; gap: 6px; }
+.ubar { height: 10px; border-radius: 999px; background: var(--soft); overflow: hidden; margin: 4px 0; }
+.ufill { height: 100%; border-radius: 999px; }
+.ufill.lo { background: var(--ok); } .ufill.mid { background: var(--wait); } .ufill.hi { background: var(--bad); }
+.utips ul { padding-left: 1.1em; margin: 6px 0; font-size: 14px; }
+.agent { border-top: 1px solid var(--line); padding: 8px 0; }
+.agent:first-of-type { border-top: 0; }
+.arow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.dot.on { background: var(--ok); } .dot.off { background: var(--unclassified); }
+.alinks { font-size: 14px; display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+a.alink { text-decoration: none; padding: 4px 8px; border-radius: 6px; background: var(--soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent.blocked .alink { border-left: 3px solid var(--high); }
+.awhy { font-size: 14px; color: var(--wait); margin-top: 2px; }
+.adetail { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.md blockquote { padding: 4px 10px; background: var(--soft); border-left: 3px solid var(--accent); border-radius: 4px; color: var(--ink); }
+.md blockquote > :first-child { margin-top: 0; } .md blockquote > :last-child { margin-bottom: 0; }

@@ -27,9 +27,10 @@
 
   // ------------------------------------------------------------ markdown (a small, escaping subset)
 
+  let MACROS = {};
   function math(tex, display) {
     try {
-      return window.katex.renderToString(tex, { displayMode: display, throwOnError: false });
+      return window.katex.renderToString(tex, { displayMode: display, throwOnError: false, macros: { ...MACROS } });
     } catch (e) {
       return `<code>${esc(tex)}</code>`;
     }
@@ -92,7 +93,7 @@
       } else if (/^>\s?/.test(line)) {
         const buf = [];
         for (; i < lines.length && /^>\s?/.test(lines[i]); i++) buf.push(lines[i].replace(/^>\s?/, ''));
-        out.push(`<blockquote>${inline(buf.join(' '))}</blockquote>`);
+        out.push(`<blockquote>${md(buf.join('\n'))}</blockquote>`);
       } else if (!line.trim()) {
         i++;
       } else {
@@ -298,6 +299,7 @@
 
   const LoopRender = {
     esc, el, md, inline,
+    setMacros(m) { MACROS = m && typeof m === 'object' ? m : {}; },
     block(b, ctx) {
       switch (b.type) {
         case 'text': return el('div', { class: 'md', html: md(b.md) });

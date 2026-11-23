@@ -165,7 +165,7 @@
   let poller = null;
   let refreshItem = null;            // redraws the open item's thread and answers in place
   let justSent = null;               // id of the item whose answer was just sent (shows Next)
-  const SECTIONS = [['blocking', 'Blocking'], ['question', 'Questions'], ['review', 'To review']];
+  const SECTIONS = [['blocking', 'Blocking'], ['question', 'Questions'], ['content', 'Content'], ['pr', 'PR review']];
 
   function age(iso) {
     const h = (Date.now() - Date.parse(iso)) / 3.6e6;
@@ -215,7 +215,7 @@
     const list = el('div', { class: 'cards' });
     if (!groups[tab].length) list.append(el('p', { class: 'empty' }, 'Nothing here.'));
     groups[tab].forEach((it) => list.append(card(it)));
-    main().replaceChildren(tabs, list, historyBox(),
+    main().replaceChildren(tabs, list, historyBox(tab),
       el('p', { class: 'foot' }, `Updated ${new Date(index.generated).toLocaleString()}`));
     setPoll(async () => {
       const before = index.generated + tree.paths.size;
@@ -227,10 +227,11 @@
   // History: answered and closed items, newest first, grouped by day. Each entry loads its questions and
   // answers only when opened; "Revisit" sends a request about that one item, which LOOP passes to the
   // session that asked it (agents read only that item, never the history).
-  function historyBox() {
-    const past = index.items.filter(isHistory)
+  function historyBox(tab) {
+    const label = (SECTIONS.find(([k]) => k === tab) || [, ''])[1];
+    const past = index.items.filter((x) => isHistory(x) && (x.home || 'question') === tab)
       .sort((a, b) => (b.updated || b.created).localeCompare(a.updated || a.created));
-    const box = el('details', { class: 'history' }, el('summary', {}, `History (${past.length})`));
+    const box = el('details', { class: 'history' }, el('summary', {}, `${label} history (${past.length})`));
     let day = null;
     for (const it of past) {
       const d = new Date(it.updated || it.created).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -251,6 +252,7 @@
   async function fillHistory(body, row) {
     body.append(el('p', { class: 'empty' }, 'Loading…'));
     const it = await getJSON(`items/${row.id}/item.json`);
+    window.LoopRender.setMacros(it.macros);
     const qs = questionsOf(it);
     const answers = [];
     for (const name of filesIn(`answers/${it.id}`)) {
@@ -301,7 +303,7 @@
 
   // Open items in board order, for Next.
   function boardOrder() {
-    const order = ['blocking', 'question', 'review'];
+    const order = ['blocking', 'question', 'content', 'pr'];
     return index.items.filter((x) => order.includes(sectionOf(x)))
       .sort((a, b) => order.indexOf(sectionOf(a)) - order.indexOf(sectionOf(b)));
   }
@@ -318,6 +320,7 @@
 
   async function showItem(id) {
     const [it] = await Promise.all([getJSON(`items/${id}/item.json`), refreshIndex()]);
+    window.LoopRender.setMacros(it.macros);
     const st = store(id);
     const qs = questionsOf(it);
     const single = qs.length === 1 && qs[0].text === it.title;
@@ -474,7 +477,9 @@
     let reviewChoice = null;
     let extra = null;
     if (it.kind === 'review') {
-      const opts = el('div', { class: 'choices' }, ['Reviewed: fine', 'Needs changes', 'Not now'].map((label) => {
+      const labels = it.category === 'content' ? ['Understood', 'Have questions (in the comments)', 'Not now']
+        : ['Reviewed: fine', 'Needs changes', 'Not now'];
+      const opts = el('div', { class: 'choices' }, labels.map((label) => {
         const b = el('button', { class: 'choice-btn', onclick: () => {
           reviewChoice = reviewChoice === label ? null : label;
           [...opts.children].forEach((c) => c.classList.toggle('on', c === b && !!reviewChoice));
@@ -512,6 +517,47 @@
     box.replaceChildren(el('h3', {}, it.kind === 'review' ? 'Your review' : qs.length > 1 ? 'Send your answers' : 'Your answer'), ...shown, comp, sent);
   }
 
+  // ------------------------------------------------------------ Status: usage and each agent's state
+
+  function bar(pct) {
+    const level = pct >= 90 ? 'hi' : pct >= 70 ? 'mid' : 'lo';
+    return el('div', { class: 'ubar' }, el('div', { class: `ufill ${level}`, style: `width:${Math.min(100, pct)}%` }));
+  }
+
+  async function showStatus() {
+    const [st] = await Promise.all([getJSON('state/status.json'), index.items.length ? null : refreshIndex()]);
+    const titles = new Map(index.items.map((x) => [x.id, x.title]));
+    const u = st.usage || {};
+    const usage = el('section', { class: 'status-card' }, el('h3', {}, 'Claude usage'),
+      ...(u.limits || []).map((l) => el('div', { class: 'ulimit' },
+        el('div', { class: 'urow' }, el('b', {}, l.name), el('span', { class: 'grow' }), el('span', {}, `${l.pct}%`)),
+        bar(l.pct), el('div', { class: 'who' }, `resets ${l.resets}`))),
+      (u.tips || []).length ? el('details', { class: 'utips' }, el('summary', {}, 'What uses it'),
+        el('ul', {}, u.tips.map((t) => el('li', {}, el('b', {}, `${t.pct}% `), t.text, el('span', { class: 'who' }, ` · ${t.period}`))))) : null,
+      el('div', { class: 'who' }, `measured ${u.at ? age(u.at) + ' ago' : 'never'}`));
+    const groups = { blocked: [], working: [], stalled: [] };
+    (st.agents || []).forEach((r) => (groups[r.state] || groups.stalled).push(r));
+    const label = { blocked: 'Blocked', working: 'Working', stalled: 'Stalled' };
+    const sections = Object.keys(groups).map((k) => el('section', { class: 'status-card' },
+      el('h3', {}, `${label[k]} `, el('span', { class: 'n' }, String(groups[k].length))),
+      groups[k].length ? groups[k].map((r) => el('div', { class: `agent ${r.state}` },
+        el('div', { class: 'arow' },
+          el('span', { class: `dot ${r.running ? 'on' : 'off'}`, title: r.running ? 'running' : 'not running' }),
+          el('b', {}, r.name), r.loop ? el('span', { class: 'badge' }, 'LOOP') : null,
+          el('span', { class: 'grow' }),
+          r.context_tokens ? el('span', { class: 'who' }, `${Math.round(r.context_tokens / 1000)}k ctx`) : null,
+          r.model ? el('span', { class: 'who' }, ` · ${r.model}`) : null),
+        r.items && r.items.length ? el('div', { class: 'alinks' }, 'Waiting on: ', r.items.map((id) =>
+          el('a', { href: `#/item/${id}`, class: 'alink' }, el('b', {}, id), titles.has(id) ? ` ${titles.get(id).slice(0, 70)}` : ''))) : null,
+        r.why && !(r.items && r.items.length) ? el('div', { class: 'awhy' }, r.why) : null,
+        r.detail && r.state !== 'blocked' ? el('div', { class: 'who adetail' }, r.detail) : null,
+        el('div', { class: 'who' }, r.running ? '' : 'not running · ', r.updated ? `last active ${age(r.updated)} ago` : '')))
+        : el('p', { class: 'empty' }, 'None.')));
+    main().replaceChildren(usage, ...sections,
+      el('p', { class: 'foot' }, `Updated ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
+    setPoll(async () => { if (location.hash.startsWith('#/status')) await showStatus(); }, 60_000);
+  }
+
   function showSettings(msg) {
     clearInterval(poller);
     const token = el('input', { type: 'password', autocomplete: 'off', placeholder: 'github_pat_…', value: cfg.token });
@@ -540,7 +586,9 @@
     refreshItem = null;
     justSent = null;
     try {
+      document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', (a.dataset.meta === 'status') === (h[0] === 'status')));
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
+      else if (h[0] === 'status') await showStatus();
       else if (h[0] === 'settings') showSettings();
       else await showList(h[0] === 'list' ? h[1] : null);
       window.scrollTo(0, 0);
