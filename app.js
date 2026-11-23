@@ -549,7 +549,11 @@
         const body = { kind: 'answer', text };
         if (it.kind === 'review') body.choice = reviewChoice;
         else {
-          body.answers = qs.map((q, i) => ({ question: i, asked: q.text, choice: picks[i] || null, text: (notes[i] || '').trim() }));
+          // Only the questions answered get a row; text typed only in the general box answers a one-question item.
+          const rows = qs.map((q, i) => ({ question: i, asked: q.text, choice: picks[i] || null, text: (notes[i] || '').trim() }))
+            .filter((r) => r.choice || r.text);
+          if (!rows.length && qs.length === 1 && (text || '').trim()) rows.push({ question: 0, asked: qs[0].text, choice: null, text: text.trim() });
+          if (rows.length) body.answers = rows;
           if (qs.length === 1) body.choice = picks[0] || null;
         }
         await send('answers', it.id, body, imgs);
