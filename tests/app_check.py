@@ -782,6 +782,26 @@ def run(loop_bin, graph, shots):
                 dot = page.locator('.card .from .rdot').first.evaluate('(n) => getComputedStyle(n).backgroundColor')
                 want = {'HIGH': 'rgb(224, 72, 47)', 'IMPLEMENT': 'rgb(63, 143, 224)', 'MED': 'rgb(240, 169, 42)', 'LOW': 'rgb(95, 176, 74)'}
                 check(page, dot == want.get(who.split('-')[0], 'rgb(164, 106, 214)'), f'Agents: a card shows its session in its role colour {who!r} {dot}', failures)
+                # Board order: the poster's role first, then the item's importance. The index here is in importance order
+                # only (as an older ledger writes it), so the app's own sort is what puts IMPLEMENT below HIGH, above MED.
+                iid = loop(loop_bin, repo, 'post', 'question', 'An IMPLEMENT question', '--from', 'IMPLEMENT-app', '--importance', 'low')
+                mid = loop(loop_bin, repo, 'post', 'question', 'A MED question', '--from', 'MED-q', '--importance', 'high')
+                hid = loop(loop_bin, repo, 'post', 'question', 'A low HIGH question', '--from', 'HIGH-q', '--importance', 'low')
+                idx = json.loads((repo / 'index.json').read_text())
+                imp = {'high': 0, 'med': 1, 'low': 2}
+                idx['items'].sort(key=lambda r: imp.get(r.get('importance'), 1))
+                (repo / 'index.json').write_text(json.dumps(idx))
+                page.goto(base + '#/list/question')
+                page.reload()
+                page.locator('.switch button', has_text='All').click()
+                page.locator('.card', has_text=iid).wait_for()
+                rank = ['LOOP', 'HIGH', 'IMPLEMENT', 'MED', 'LOW']
+                froms = [t.split(' · ')[0].strip() for t in page.locator('.card .from').all_inner_texts()]
+                ranks = [rank.index(f.split('-')[0]) if f.split('-')[0] in rank else 5 for f in froms]
+                ids = [t.strip() for t in page.locator('.card .top .id').all_inner_texts()]
+                check(page, ranks == sorted(ranks) and ids.index(hid) < ids.index(iid) < ids.index(mid),
+                      f'Board: cards by role (LOOP, HIGH, IMPLEMENT, MED, LOW, other), IMPLEMENT below a low HIGH item, above a high MED one {froms}', failures)
+                check(page, page.locator('.card', has_text=iid).locator('.imp').text_content() == 'low', 'Board: the item keeps its own importance label', failures)
                 # The ant farm under the tree: #/hills opens the Tree tab, whose scene holds the farm.
                 page.goto(base + '#/hills')
                 page.wait_for_selector('.gview .farm .hits [data-k="hill"]')

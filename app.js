@@ -256,6 +256,7 @@
     await refreshIndex();
     const groups = Object.fromEntries(SECTIONS.map(([k]) => [k, []]));
     index.items.forEach((it) => { const s = sectionOf(it); if (groups[s]) groups[s].push(it); });
+    Object.values(groups).forEach((g) => g.sort(byRole));
     const nblock = (k) => groups[k].filter((x) => x.blocking_now).length;
     tab = SECTIONS.some(([k]) => k === tab) ? tab
       : SECTIONS.map(([k]) => k).find((k) => nblock(k)) || SECTIONS.map(([k]) => k).find((k) => groups[k].length) || 'question';
@@ -367,11 +368,14 @@
     return [];
   }
 
+  // Board order within a tab: the poster's role (LOOP, HIGH, IMPLEMENT, MED, LOW, other), then the index's order
+  // (the item's importance, blocking, ...). The sort is stable, so the index's order holds within a role.
+  const byRole = (a, b) => H.roleRank({ name: a.from && a.from.name }) - H.roleRank({ name: b.from && b.from.name });
   // Open items in board order, for Next.
   function boardOrder() {
     const order = ['question', 'content', 'pr'];
     return index.items.filter((x) => order.includes(sectionOf(x)))
-      .sort((a, b) => order.indexOf(sectionOf(a)) - order.indexOf(sectionOf(b)));
+      .sort((a, b) => order.indexOf(sectionOf(a)) - order.indexOf(sectionOf(b)) || byRole(a, b));
   }
   function nextAfter(id) {
     const list = boardOrder();
