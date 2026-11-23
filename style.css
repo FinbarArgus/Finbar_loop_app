@@ -329,6 +329,7 @@ li.step, .sbody, details.section, aside.callout, .stepsblock, ol.steps { min-wid
 .mcheck input { width: 18px; height: 18px; margin-top: 2px; }
 .mmain { flex: 1; min-width: 0; display: grid; gap: 4px; }
 .mtitle { font-weight: 600; overflow-wrap: anywhere; }
+.msub { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; margin-top: 1px; }
 .mnote { font-size: 14px; color: var(--muted); }
 .mmeta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
 .flink { font-size: 13px; overflow-wrap: anywhere; }

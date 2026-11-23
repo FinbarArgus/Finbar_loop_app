@@ -173,7 +173,8 @@
       const doneAt = e.done ? upTo(e.done_at || e.updated || e.created) : null;
       const doneDay = doneAt ? dayOf(doneAt) : null;
       if (e.kind === 'read' && doneDay) {
-        papers.push({ id: e.id, day: doneDay, at: doneAt, title: e.title || '', path: topicPath(e) });
+        papers.push({ id: e.id, day: doneDay, at: doneAt, title: e.title || '', journal: e.journal || null,
+          full_title: e.full_title || null, path: topicPath(e) });
       }
       if (e.deadline) {
         if (doneDay && doneDay <= e.deadline) leaves.push({ id: e.id, day: doneDay, at: doneAt, deadline: e.deadline, title: e.title || '' });

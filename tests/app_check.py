@@ -452,8 +452,26 @@ def run(loop_bin, graph, shots):
                          'created': '2026-01-01T00:00:00Z', 'files': [], **kw}
                     (repo / 'personal' / eid / 'entry.json').write_text(json.dumps(e))
                 seed('read-nonote', title='Unnoted paper', zotero={'name': 'ROM / OpInf'})
+                # A saved paper: its key title as the heading, "journal · full title" below it in smaller text.
+                seed('read-key', title='Smith2026Hopfit', title_from='record', key_title='Smith2026Hopfit', journal='J Clin Monit Comput',
+                     full_title='HOPFIT: A neuro-cardiovascular monitoring framework')
+                seed('read-typed', title='My own title', key_title='Smith2025Atlas', journal='Physiol Rep', full_title='An atlas')
                 page.goto(base + '#/mine/read')
                 page.reload()
+                krow = page.locator('.mrow', has_text='Smith2026Hopfit')
+                krow.wait_for()
+                sub = krow.locator('.msub')
+                small = page.evaluate("(r) => [parseFloat(getComputedStyle(r.querySelector('.mtitle')).fontSize), parseFloat(getComputedStyle(r.querySelector('.msub')).fontSize)]",
+                                      krow.element_handle())
+                check(page, krow.locator('.mtitle').inner_text() == 'Smith2026Hopfit'
+                      and sub.inner_text() == 'J Clin Monit Comput · HOPFIT: A neuro-cardiovascular monitoring framework' and small[1] < small[0],
+                      f'Read: key title as the heading, "journal · full title" below in smaller text {small}', failures)
+                trow = page.locator('.mrow', has_text='My own title')
+                check(page, trow.locator('.mtitle').inner_text() == 'My own title' and trow.locator('.msub').inner_text() == 'Physiol Rep · An atlas',
+                      'Read: a typed title stays the heading', failures)
+                check(page, page.locator('.mrow', has_text='Unnoted paper').locator('.msub').count() == 0, 'Read: no subtitle without a record', failures)
+                if shots:
+                    krow.screenshot(path=f'{shots}/{label}-read-key-title.png')
                 row = page.locator('.mrow', has_text='Unnoted paper')
                 row.locator('.mcheck input').click()       # the app un-ticks it and asks for a note
                 row.locator('.status.ask-note').wait_for()
