@@ -407,6 +407,7 @@
     const generalBox = !['open'].includes(it.status) ? revisitBox(id)
       : qs.length ? null : detailBox(id, {}, 'More detail before you review?');
     main().replaceChildren(head, body, ...cards, thread, generalBox || '', answerPanel);
+    requestAnimationFrame(() => window.LoopRender.fitWide(main()));
     let sig = JSON.stringify([it.details, it.forwarded]) + [...tree.paths].filter((p) => p.includes(`/${id}/`)).join();
     const check = async (force) => {
       if (!force) await loadTree();

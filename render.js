@@ -372,5 +372,17 @@
       for (const b of blocks || []) container.append(LoopRender.block(b, ctx));
     },
   };
+  // Inline maths wider than its text gets a sideways scroll instead of running off the screen. Run after a
+  // render and whenever a section opens (closed sections have no width to measure).
+  LoopRender.fitWide = function (root) {
+    (root || document).querySelectorAll('.md .katex:not(.wide)').forEach((k) => {
+      if (k.closest('.katex-display')) return;
+      const box = k.parentElement;
+      if (box && box.clientWidth && k.scrollWidth > box.clientWidth) k.classList.add('wide');
+    });
+  };
+  document.addEventListener('toggle', (e) => {
+    if (e.target.matches && e.target.matches('details') && e.target.open) LoopRender.fitWide(e.target);
+  }, true);
   window.LoopRender = LoopRender;
 })();
