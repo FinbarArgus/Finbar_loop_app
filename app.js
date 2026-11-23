@@ -229,8 +229,14 @@
         sent && !partial ? el('span', { class: 'badge ok' }, 'sent to LOOP') : null,
         el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
       el('div', { class: 'title', html: inline(it.title) }),
-      el('div', { class: 'from' }, it.from.name, it.holds_up ? ` · holds up: ${it.holds_up}` : ''));
+      el('div', { class: 'from' }, roleDot(it.from.name), it.from.name, it.holds_up ? ` · holds up: ${it.holds_up}` : ''));
   }
+
+  // A session's role colour (the anthome lights: HIGH red, IMPLEMENT blue, MED amber, LOW green, other purple).
+  const roleDot = (name) => {
+    const role = H.roleOf({ name });
+    return el('i', { class: 'rdot', style: `background:${H.LIGHTS[role]}`, title: role === 'loop' ? 'LOOP' : H.ROLE_TEXT[role] });
+  };
 
   async function showList(tab) {
     await refreshIndex();
@@ -388,7 +394,7 @@
         (it.versions || 1) > 1 ? el('span', { class: 'badge' }, `version ${it.versions}, updated ${age(it.updated)} ago`) : null,
         el('span', { class: 'badge' }, it.status), el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
       el('h2', { html: inline(it.title) }),
-      el('div', { class: 'from' }, `From ${it.from.name}`, it.source === 'harvested' ? ' (found by the sweep)' : ''),
+      el('div', { class: 'from' }, roleDot(it.from.name), `From ${it.from.name}`, it.source === 'harvested' ? ' (found by the sweep)' : ''),
       it.holds_up ? el('div', { class: 'holds' }, `Holds up: ${it.holds_up}`) : null,
       it.links && it.links.length ? el('div', { class: 'links' }, it.links.map((u) => el('a', { href: u, target: '_blank', rel: 'noopener' }, u.replace(/^https?:\/\//, '')))) : null);
     const body = el('div', { class: 'blocks' });
@@ -610,13 +616,14 @@
       el('div', { class: 'who' }, `measured ${u.at ? age(u.at) + ' ago' : 'never'}`));
     const groups = { blocked: [], working: [], stalled: [] };
     (st.agents || []).forEach((r) => (groups[r.state] || groups.stalled).push(r));
+    Object.values(groups).forEach((g) => g.sort((a, b) => H.roleRank(a) - H.roleRank(b)));   // LOOP, HIGH, IMPLEMENT, MED, LOW, other
     const label = { blocked: 'Blocked', working: 'Working', stalled: 'Stalled' };
     const sections = Object.keys(groups).map((k) => el('section', { class: 'status-card' },
       el('h3', {}, `${label[k]} `, el('span', { class: 'n' }, String(groups[k].length))),
       groups[k].length ? groups[k].map((r) => el('div', { class: `agent ${r.state}` },
         el('div', { class: 'arow' },
           el('span', { class: `dot ${r.running ? 'on' : 'off'}`, title: r.running ? 'running' : 'not running' }),
-          el('b', {}, r.name), r.loop ? el('span', { class: 'badge' }, 'LOOP') : null,
+          roleDot(r.name), el('b', {}, r.name), r.loop ? el('span', { class: 'badge' }, 'LOOP') : null,
           el('span', { class: 'grow' }),
           r.context_tokens ? el('span', { class: 'who' }, `${Math.round(r.context_tokens / 1000)}k ctx`) : null,
           r.model ? el('span', { class: 'who' }, ` · ${r.model}`) : null),
@@ -1283,7 +1290,7 @@
     const state = growthState();
     treePic.innerHTML = G.svg(state, { mini: true });
     const legend = el('div', { class: 'hlegend' },
-      el('span', {}, el('b', {}, 'Lights'), ' ', ...['high', 'med', 'low', 'implement', 'other'].map((r) =>
+      el('span', {}, el('b', {}, 'Lights'), ' ', ...H.ROLE_ORDER.filter((r) => r !== 'loop').map((r) =>
         el('span', { class: 'hlight' }, el('i', { style: `background:${H.LIGHTS[r]}` }), H.ROLE_TEXT[r]))),
       el('span', {}, el('b', {}, 'Size'), ' tokens since the weekly reset'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
       el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Dark'), ' stalled'),

@@ -55,7 +55,10 @@
     const m = /^(HIGH|MED|LOW|IMPLEMENT)-/i.exec(n);
     return m ? m[1].toLowerCase() : 'other';
   }
-  const LIGHTS = { high: '#e0482f', med: '#f0a92a', low: '#5fb04a', implement: '#3f8fe0', other: '#a46ad6', loop: '#f3d36b' };
+  // The role colours, used for the lights and wherever the app shows a session; IMPLEMENT ranks between HIGH and MED.
+  const LIGHTS = { high: '#e0482f', implement: '#3f8fe0', med: '#f0a92a', low: '#5fb04a', other: '#a46ad6', loop: '#f3d36b' };
+  const ROLE_ORDER = ['loop', 'high', 'implement', 'med', 'low', 'other'];
+  const roleRank = (agent) => ROLE_ORDER.indexOf(roleOf(agent));
   const ROLE_TEXT = { high: 'HIGH', med: 'MED', low: 'LOW', implement: 'IMPLEMENT', other: 'other roles' };
   // blocked: a rock on its anthill. working (and running): ants. Anything else (stalled, stopped): quiet.
   function moodOf(agent) {
@@ -142,7 +145,7 @@
       return { name: agent.name, agent, size, role, mood, kind: role === 'loop' ? 'food' : 'home', design: design(agent.name),
         ants: mood === 'working' ? ANTS[size] : 0, rock: mood === 'blocked' };
     }).sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size)
-      || MOOD_ORDER.indexOf(a.mood) - MOOD_ORDER.indexOf(b.mood) || a.name.localeCompare(b.name));
+      || ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || MOOD_ORDER.indexOf(a.mood) - MOOD_ORDER.indexOf(b.mood) || a.name.localeCompare(b.name));
     const homes = list.filter((h) => h.kind === 'home');
     const right = Math.ceil(homes.length / 2), left = homes.length - right;
     const width = Math.max(48, FOOD + 2 * Math.max(right, left, 1) * COL + 2 * MARGIN);
@@ -500,6 +503,6 @@
       + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}${foods}</g>`) + '</svg>';
   }
 
-  return { pathWidth, antPose, hash, rng, sizeOf, roleOf, moodOf, design, inside, layout, antAt, svg, label,
-    SIZES, ANTS, SHAPES, CONTENTS, SOILS, LIGHTS, ROLE_TEXT, SPEED, SCALE, COL };
+  return { pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, svg, label,
+    SIZES, ANTS, SHAPES, CONTENTS, SOILS, LIGHTS, ROLE_ORDER, ROLE_TEXT, SPEED, SCALE, COL };
 }));

@@ -32,6 +32,12 @@ test('roles set the lights: HIGH, MED, LOW, IMPLEMENT and other each their own c
   assert.equal(H.roleOf({ name: 'git-projects-2b' }), 'other');
   assert.equal(H.roleOf({ name: 'IMPLEMENTER' }), 'other');             // the prefix, with its dash
   assert.equal(new Set(['high', 'med', 'low', 'implement', 'other'].map((r) => H.LIGHTS[r])).size, 5);
+  // IMPLEMENT is blue and ranks between HIGH and MED.
+  assert.equal(H.LIGHTS.implement, '#3f8fe0');
+  assert.deepEqual(H.ROLE_ORDER, ['loop', 'high', 'implement', 'med', 'low', 'other']);
+  const big = H.layout([{ name: 'IMPLEMENT-a', state: 'working', running: true }, { name: 'HIGH-b', state: 'working', running: true },
+    { name: 'HIGH-c', state: 'blocked', running: true }, { name: 'IMPLEMENT-d', state: 'blocked', running: true }]);
+  assert.deepEqual(big.hills.map((h) => h.name), ['HIGH-c', 'HIGH-b', 'IMPLEMENT-d', 'IMPLEMENT-a']);   // by role, then mood
   const L = H.layout(AGENTS);
   assert.deepEqual(L.hills.filter((h) => h.kind === 'food').map((h) => h.name), ['LOOP']);
   const svg = H.svg(AGENTS);
