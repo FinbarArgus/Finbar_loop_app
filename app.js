@@ -643,7 +643,7 @@
     setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/status')) await showStatus(); }, 60_000);
   }
 
-  // ------------------------------------------------------------ Mine: Read, Write, Students, Other
+  // ------------------------------------------------------------ Manual: Read, Write, Students, Other
   // Finbar's own entries: personal/<id>/entry.json plus the files dropped with it. The app writes them;
   // loop-cron saves papers to Zotero and writes personal/<id>/zotero.json.
 
@@ -948,7 +948,7 @@
     const all = mine.entries.filter((e) => e.kind === tab);
     const open = all.filter((e) => !e.done);
     const byPrio = (list) => [...list].sort((a, b) => (dueInfo(a.deadline)?.days ?? 1e9) - (dueInfo(b.deadline)?.days ?? 1e9));
-    const tabs = el('nav', { class: 'tabs' }, MINE_TABS.map(([k, l]) => el('a', { href: `#/mine/${k}`, class: k === tab ? 'on' : '' },
+    const tabs = el('nav', { class: 'tabs' }, MINE_TABS.map(([k, l]) => el('a', { href: `#/manual/${k}`, class: k === tab ? 'on' : '' },
       l, el('span', { class: 'n' }, String(mine.entries.filter((e) => e.kind === k && !e.done).length)))));
     const body = el('div', { class: 'mine' });
     if (tab === 'student') {
@@ -1012,7 +1012,7 @@
 
   // ------------------------------------------------------------ Tree: the growth tree (growth.js)
   // Read papers ticked done grow their Zotero collection's branch, deadlines met grow leaves, submitted Write
-  // entries bring animals. The tree is derived from Mine every time; only names and animals are stored.
+  // entries bring animals. The tree is derived from Manual every time; only names and animals are stored.
 
   const G = window.LoopGrowth;
   const growthState = () => G.derive(mine.entries, growthDocs.tree, growthDocs.cites, new Date());
@@ -1348,13 +1348,13 @@
     pic.scrollTop = pic.scrollHeight;
   }
 
-  // Status: upcoming deadlines from Mine (open entries due within 14 days, or overdue).
+  // Status: upcoming deadlines from Manual (open entries due within 14 days, or overdue).
   function deadlinesCard() {
     const soon = mine.entries.filter((e) => !e.done && e.deadline).map((e) => ({ e, d: dueInfo(e.deadline) }))
       .filter((x) => x.d.days <= 14).sort((a, b) => a.d.days - b.d.days);
     const label = Object.fromEntries(MINE_TABS);
     return el('section', { class: 'status-card deadlines' }, el('h3', {}, 'Upcoming deadlines ', el('span', { class: 'n' }, String(soon.length))),
-      soon.length ? soon.map(({ e, d }) => el('a', { class: `dline ${d.level}`, href: `#/mine/${e.kind}` },
+      soon.length ? soon.map(({ e, d }) => el('a', { class: `dline ${d.level}`, href: `#/manual/${e.kind}` },
         el('b', {}, d.text), ' ', e.title || (e.files || [])[0] || 'note',
         el('span', { class: 'who' }, ` · ${label[e.kind]}${e.student ? ' · ' + e.student : ''}`)))
         : el('p', { class: 'empty' }, 'Nothing due in the next 14 days.'));
@@ -1388,15 +1388,16 @@
     const quiet = !!(opts && opts.quiet);
     const hash = location.hash;
     const h = hash.replace(/^#\/?/, '').split('/');
+    if (h[0] === 'mine') { location.replace(`#/manual${h[1] ? '/' + h[1] : ''}`); return; }   // the tab's old name
     refreshItem = null;
     if (!quiet) justSent = null;
     treeWasCached = false;
     try {
-      const meta = ['status', 'mine', 'tree', 'hills'].includes(h[0]) ? h[0] : 'work';
+      const meta = ['status', 'manual', 'tree', 'hills'].includes(h[0]) ? h[0] : 'work';
       document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'status') await showStatus();
-      else if (h[0] === 'mine') await showMine(h[1]);
+      else if (h[0] === 'manual') await showMine(h[1]);
       else if (h[0] === 'tree') await showTree();
       else if (h[0] === 'hills') await showHills();
       else if (h[0] === 'settings') showSettings();
