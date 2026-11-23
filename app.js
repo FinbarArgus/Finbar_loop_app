@@ -195,6 +195,7 @@
     return el('a', { class: `card imp-${it.importance}`, href: `#/item/${it.id}` },
       el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
         it.blocking_now ? el('span', { class: 'badge block' }, 'blocking') : null,
+        it.soon_blocking ? el('span', { class: 'badge soon' }, 'soon blocking') : null,
         it.stage ? el('span', { class: `badge stage ${it.stage}` }, it.stage === 'in-progress' ? 'in progress' : 'ready') : null,
         it.stage === 'in-progress' && it.versions > 1 ? el('span', { class: 'badge' }, `updated ${age(it.updated)} ago`) : null,
         it.n_questions > 1 ? el('span', { class: 'badge' }, `${it.n_questions} questions`) : null,
@@ -221,11 +222,12 @@
     // Filters inside a tab; an item can match several (a ready entry that blocks is under Blocking and Ready).
     const FILTERS = {
       blocking: ['Blocking', (x) => x.blocking_now],
+      soon: ['Soon blocking', (x) => x.soon_blocking],
       'in-progress': ['In progress', (x) => x.stage === 'in-progress'],
       ready: ['Ready', (x) => x.stage === 'ready'],
       all: ['All', () => true],
     };
-    const names = tab === 'content' ? ['blocking', 'in-progress', 'ready', 'all'] : ['blocking', 'all'];
+    const names = tab === 'content' ? ['blocking', 'soon', 'in-progress', 'ready', 'all'] : ['blocking', 'soon', 'all'];
     const filter = names.includes(filterOf(tab)) ? filterOf(tab) : 'all';
     const sw = el('div', { class: 'switch' }, names.map((f) =>
       el('button', { class: f === filter ? 'on' : '', onclick: () => { safeSet(`loop.filter.${tab}`, f); showList(tab); } },
@@ -355,7 +357,7 @@
         el('span', { class: 'grow' }), pos ? el('span', { class: 'pos' }, `${pos} of ${total}`) : null,
         nextLink(id, 'Next')),
       el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
-        row.blocking_now ? el('span', { class: 'badge block' }, 'blocking') : it.blocking ? el('span', { class: 'badge' }, 'not blocking yet: the agent is still working') : null,
+        row.blocking_now ? el('span', { class: 'badge block' }, 'blocking') : it.blocking ? el('span', { class: 'badge soon' }, 'soon blocking: the agent needs it before ' + (it.holds_up || 'a later step')) : null,
         qs.length > 1 ? el('span', { class: 'badge' }, `${qs.length} questions`) : null,
         row.stage ? el('span', { class: `badge stage ${row.stage}` }, row.stage === 'in-progress' ? 'in progress' : 'ready') : null,
         (it.versions || 1) > 1 ? el('span', { class: 'badge' }, `version ${it.versions}, updated ${age(it.updated)} ago`) : null,
@@ -587,7 +589,7 @@
           el('span', { class: 'grow' }),
           r.context_tokens ? el('span', { class: 'who' }, `${Math.round(r.context_tokens / 1000)}k ctx`) : null,
           r.model ? el('span', { class: 'who' }, ` · ${r.model}`) : null),
-        r.items && r.items.length ? el('div', { class: 'alinks' }, r.state === 'blocked' ? 'Waiting on: ' : 'Will need (not blocking yet): ', r.items.map((id) =>
+        r.items && r.items.length ? el('div', { class: 'alinks' }, r.state === 'blocked' ? 'Waiting on: ' : 'Will need (soon blocking): ', r.items.map((id) =>
           el('a', { href: `#/item/${id}`, class: 'alink' }, el('b', {}, id), titles.has(id) ? ` ${titles.get(id).slice(0, 70)}` : ''))) : null,
         r.why && !(r.items && r.items.length) ? el('div', { class: 'awhy' }, r.why) : null,
         r.working_on ? el('div', { class: 'adetail' }, el('span', { class: 'who' }, r.state === 'working' ? 'Working on: ' : 'Last: '), r.working_on) : null,

@@ -13,6 +13,7 @@ import argparse
 import base64
 import http.server
 import json
+import re
 import os
 import socketserver
 import subprocess
@@ -170,7 +171,7 @@ def run(loop_bin, graph, shots):
                 check(page, [t[:4] for t in tabs] == ['Ques', 'Cont', 'Revi'] and tabs[0].endswith('31'),
                       f'board tabs Questions/Content/Review, with the blocking count {tabs}', failures)
                 check(page, page.locator('.card .id').first.inner_text() == 'Q-0001', 'blocking question listed first', failures)
-                page.locator('.switch button', has_text='Blocking').click()
+                page.locator('.switch button', has_text=re.compile(r'^Blocking')).click()
                 page.wait_for_selector('.switch button.on >> text=Blocking')
                 check(page, page.locator('.card').count() == 1, 'Blocking switch shows only blocking items', failures)
                 page.locator('.switch button', has_text='All').click()
@@ -316,7 +317,7 @@ def run(loop_bin, graph, shots):
                 page.goto(base + '#/list/content')
                 page.wait_for_selector('.switch button >> text=In progress')
                 labels = page.locator('.switch button').all_inner_texts()
-                check(page, [x.split(' (')[0] for x in labels] == ['Blocking', 'In progress', 'Ready', 'All'],
+                check(page, [x.split(' (')[0] for x in labels] == ['Blocking', 'Soon blocking', 'In progress', 'Ready', 'All'],
                       f'content filters {labels}', failures)
                 page.locator('.switch button', has_text='In progress').click()
                 page.wait_for_selector('.switch button.on >> text=In progress')
