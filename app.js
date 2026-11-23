@@ -238,12 +238,59 @@
         it.stage === 'in-progress' && it.versions > 1 ? el('span', { class: 'badge' }, `updated ${age(it.updated)} ago`) : null,
         it.n_questions > 1 ? el('span', { class: 'badge' }, `${it.n_questions} questions`) : null,
         partial ? el('span', { class: 'badge wait' }, `${it.n_answered} of ${it.n_questions} answered`) : null,
+        isPermission(it) ? el('span', { class: 'badge perm' }, 'permission') : null,
         it.requests_open ? el('span', { class: 'badge wait' }, 'detail requested') : null,
         it.n_details ? el('span', { class: 'badge' }, `${it.n_details} detail`) : null,
         sent && !partial ? el('span', { class: 'badge ok' }, 'sent to LOOP') : null,
         el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
       el('div', { class: 'title', html: inline(it.title) }),
       el('div', { class: 'from' }, roleDot(it.from.name), it.from.name, it.holds_up ? ` · holds up: ${it.holds_up}` : ''));
+  }
+
+  // A permission prompt (posted by the PermissionRequest hook): Approve/Deny in one tap; the loop types it into
+  // the session's dialog within seconds.
+  const isPermission = (it) => (it.tags || []).includes('permission');
+
+  function permissionBar(it, refresh) {
+    const sent = filesIn(`answers/${it.id}`).length > 0;
+    const msg = el('div', { class: 'status' }, sent ? 'Sent: the loop types it into the session within seconds.' : '');
+    const pick = (choice) => async () => {
+      [...btns.children].forEach((b) => { b.disabled = true; });
+      msg.textContent = 'Sending…';
+      try {
+        await send('answers', it.id, { kind: 'answer', text: '', choice,
+          answers: [{ question: 0, asked: questionsOf(it)[0].text, choice, text: '' }] }, []);
+        justSent = it.id;
+        msg.textContent = `${choice === 'Approve' ? 'Approved' : 'Denied'}: the loop types it into the session within seconds.`;
+        await refresh();
+      } catch (e) {
+        msg.textContent = `Not sent: ${e.message || e}`;
+        [...btns.children].forEach((b) => { b.disabled = false; });
+      }
+    };
+    const btns = el('div', { class: 'permbtns' },
+      el('button', { class: 'perm-yes', disabled: sent || it.status !== 'open', onclick: pick('Approve') }, 'Approve'),
+      el('button', { class: 'perm-no', disabled: sent || it.status !== 'open', onclick: pick('Deny') }, 'Deny'));
+    return el('section', { class: 'permbar' }, btns, msg,
+      el('div', { class: 'who' }, 'Approve is the dialog\'s plain "Yes" (this once). Deny is its "No".'));
+  }
+
+  // Status: every permission decision, auto ones too, from state/permissions.json (newest first).
+  const PERM_LABEL = { allow: 'auto-approved', deny: 'auto-denied', asked: 'asked you', approved: 'you approved',
+    denied: 'you denied', gone: 'answered in the session' };
+  function permissionsCard(log) {
+    const rows = (log && log.entries) || [];
+    const row = (e) => el('div', { class: `permrow ${e.decision}` },
+      el('div', { class: 'arow' }, el('span', { class: `badge pd ${e.decision}` }, PERM_LABEL[e.decision] || e.decision),
+        roleDot(e.session), el('b', {}, e.session), el('span', { class: 'who' }, ` · ${e.tool}`),
+        el('span', { class: 'grow' }), el('span', { class: 'who' }, `${age(e.at)} ago`)),
+      el('code', { class: 'ptarget' }, e.target.length > 300 ? e.target.slice(0, 300) + '…' : e.target),
+      el('div', { class: 'who' }, e.reason, e.item ? ' · ' : '', e.item ? el('a', { href: `#/item/${e.item}` }, e.item) : ''));
+    const first = rows.slice(0, 12);
+    const rest = rows.slice(12);
+    return el('section', { class: 'status-card perms' }, el('h3', {}, 'Permissions ', el('span', { class: 'n' }, String(rows.length))),
+      rows.length ? first.map(row) : el('p', { class: 'empty' }, 'No permission prompts yet.'),
+      rest.length ? el('details', { class: 'pmore' }, el('summary', {}, `Older (${rest.length})`), rest.map(row)) : null);
   }
 
   // A session's role colour (the anthome lights: HIGH red, IMPLEMENT blue, MED amber, LOW green, other purple).
@@ -457,7 +504,7 @@
       window.LoopRender.blocks(qb, q.blocks || [], ctx);
       return el('section', { class: 'question' },
         single ? null : el('h3', { class: 'qtitle', html: `<span class="qn">${i + 1}</span> ` + inline(q.text) }),
-        qb, opts, note, thread,
+        qb, isPermission(it) ? null : opts, note, thread,
         detailBox(id, { question: i, open: qs.length === 1 }, qs.length === 1 ? 'More detail before you answer?' : 'More detail on this question'));
     });
     const thread = el('section', { class: 'thread' });
@@ -470,7 +517,8 @@
     await redraw();
     const generalBox = !['open'].includes(it.status) ? revisitBox(id)
       : qs.length ? null : detailBox(id, {}, 'More detail before you review?');
-    main().replaceChildren(head, body, ...cards, thread, generalBox || '', answerPanel);
+    const perm = isPermission(it) ? permissionBar(it, async () => { if (refreshItem) await refreshItem(); }) : null;
+    main().replaceChildren(head, body, ...(perm ? [cards[0], perm, ...cards.slice(1)] : cards), thread, generalBox || '', answerPanel);
     requestAnimationFrame(() => window.LoopRender.fitWide(main()));
     let sig = JSON.stringify([it.details, it.forwarded]) + [...tree.paths].filter((p) => p.includes(`/${id}/`)).join();
     const check = async (force) => {
@@ -621,7 +669,9 @@
 
   async function showStatus() {
     await useTree();
-    const [st] = await Promise.all([getJSON('state/status.json'), index.items.length ? null : refreshIndex()]);
+    const [st, plog] = await Promise.all([getJSON('state/status.json'),
+      tree.paths.has('state/permissions.json') ? getJSON('state/permissions.json').catch(() => null) : null,
+      index.items.length ? null : refreshIndex()]);
     lastStatus = st;
     const titles = new Map(index.items.map((x) => [x.id, x.title]));
     const u = st.usage || {};
@@ -663,7 +713,7 @@
           }))))
         : el('p', { class: 'empty' }, 'None.')));
     await loadMine().catch(() => {});
-    main().replaceChildren(deadlinesCard(), usage, ...sections,
+    main().replaceChildren(deadlinesCard(), usage, ...sections, permissionsCard(plog),
       el('p', { class: 'foot' }, `Updated ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
     setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/status')) await showStatus(); }, 60_000);
   }

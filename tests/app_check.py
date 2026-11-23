@@ -750,6 +750,56 @@ def run(loop_bin, graph, shots):
                 check(page, narrow(), 'status: no sideways scroll', failures)
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-status.png', full_page=True)
+                # Permission prompts: a `permission` item gets a badge and one-tap Approve/Deny; Status lists every decision.
+                pid = loop(loop_bin, repo, 'post', 'question', '--from', 'HIGH-session-a', '--blocking',
+                           'HIGH-session-a asks to run **Bash**. Flagged because: push to main/master.',
+                           '--option', 'Approve', '--option', 'Deny')
+                ip = repo / f'items/{pid}/item.json'
+                it = json.loads(ip.read_text())
+                it['title'] = 'Permission: Bash for HIGH-session-a: git push origin main'
+                it['tags'] = ['permission']
+                it['permission'] = {'request': 'r1', 'tool': 'Bash', 'target': 'git push origin main', 'cwd': '/w', 'reason': 'push to main/master'}
+                it['questions'][0]['blocks'] = [{'type': 'text', 'md': '```\ngit push origin main\n```'}]
+                ip.write_text(json.dumps(it))
+                idx = json.loads((repo / 'index.json').read_text())
+                for r in idx['items']:
+                    if r['id'] == pid:
+                        r['tags'], r['title'] = ['permission'], it['title']
+                (repo / 'index.json').write_text(json.dumps(idx))
+                (repo / 'state/permissions.json').write_text(json.dumps({'entries': [
+                    {'id': 'r1', 'at': '2026-11-24T01:00:00Z', 'session': 'HIGH-session-a', 'tool': 'Bash', 'target': 'git push origin main',
+                     'cwd': '/w', 'decision': 'asked', 'reason': 'push to main/master', 'by': 'rule'},
+                    {'id': 'r0', 'at': '2026-11-24T00:59:00Z', 'session': 'LOW-x', 'tool': 'Read', 'target': '/w/' + 'long/' * 80 + 'a.py',
+                     'cwd': '/w', 'decision': 'allow', 'reason': 'reads files', 'by': 'rule'}]
+                    + [{'id': f'o{k}', 'at': '2026-11-23T00:00:00Z', 'session': 'MED-y', 'tool': 'Read', 'target': f'/w/{k}.py',
+                        'cwd': '/w', 'decision': 'allow', 'reason': 'reads files', 'by': 'rule'} for k in range(12)]}))
+                page.goto(base + '#/list/question')
+                page.reload()
+                page.locator('.card', has_text=pid).wait_for()
+                check(page, page.locator('.card', has_text=pid).locator('.badge.perm').count() == 1, 'Permission: badge on its card', failures)
+                page.goto(base + f'#/item/{pid}')
+                page.wait_for_selector('.permbar .perm-yes')
+                check(page, 'git push origin main' in page.locator('.question pre').first.inner_text(), 'Permission: the exact command shown', failures)
+                page.locator('.permbar .perm-yes').dispatch_event('click')
+                page.wait_for_selector('.permbar .status >> text=Approved')
+                ans = [json.loads(f.read_text()) for f in (repo / f'answers/{pid}').glob('*.json')]
+                check(page, len(ans) == 1 and ans[0]['choice'] == 'Approve' and ans[0]['answers'][0]['choice'] == 'Approve',
+                      f'Permission: one tap writes the Approve answer {ans}', failures)
+                check(page, page.locator('.permbar .perm-no').is_disabled(), 'Permission: no second answer after sending', failures)
+                check(page, narrow(), 'permission item: no sideways scroll', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-permission.png', full_page=True)
+                page.goto(base + '#/status')
+                page.reload()
+                page.wait_for_selector('.perms .permrow')
+                rows = page.locator('.perms > .permrow')
+                check(page, rows.count() == 12 and page.locator('.perms details.pmore .permrow').count() == 2,
+                      f'Status: the latest 12 permission decisions, older folded ({rows.count()})', failures)
+                check(page, 'asked you' in rows.nth(0).inner_text() and 'git push origin main' in rows.nth(0).inner_text()
+                      and 'auto-approved' in rows.nth(1).inner_text(), 'Status: permission decisions newest first, labelled', failures)
+                check(page, narrow(), 'status with permissions: no sideways scroll', failures)
+                if shots:
+                    page.locator('.perms').screenshot(path=f'{shots}/{label}-permissions.png')
                 # The ant farm under the tree (LOOP the fruit pile at the trunk's foot, an anthome per session sized by
                 # tokens, lights by role, a rock when blocked, ants when working, tunnels for messages).
                 st = json.loads((repo / 'state/status.json').read_text())
