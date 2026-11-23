@@ -85,6 +85,8 @@ def make_fixture(loop_bin, tmp, graph):
     loop(loop_bin, repo, 'post', 'review', '--from', 'HIGH-session-b', '--importance', 'med', '--spec', str(tmp / 'r.json'),
          '--link', 'https://github.com/org/repo/pull/12')
     loop(loop_bin, repo, 'post', 'question', 'A low one', '--from', 'LOW-x')
+    loop(loop_bin, repo, 'post', 'review', 'Run under way', '--from', 'LOW-x', '--importance', 'low',
+         '--stage', 'in-progress', '--link', 'https://example.org/run')
     batch = {'title': 'Two set-up choices', 'questions': [
         {'text': 'Which mesh?', 'options': ['coarse', {'label': 'fine', 'detail': 'slower'}]},
         {'text': 'Which solver?', 'options': ['implicit', 'explicit'],
@@ -311,6 +313,21 @@ def run(loop_bin, graph, shots):
                 check(page, 'Questions history (2)' in page.locator('details.history > summary').inner_text(),
                       'answered questions move to the Questions history', failures)
                 check(page, page.locator('.tabs a').count() == 3, 'three tabs, history below', failures)
+                page.goto(base + '#/list/content')
+                page.wait_for_selector('.switch button >> text=In progress')
+                labels = page.locator('.switch button').all_inner_texts()
+                check(page, [x.split(' (')[0] for x in labels] == ['Blocking', 'In progress', 'Ready', 'All'],
+                      f'content filters {labels}', failures)
+                page.locator('.switch button', has_text='In progress').click()
+                page.wait_for_selector('.switch button.on >> text=In progress')
+                check(page, page.locator('.card').count() == 1 and 'in progress' in page.locator('.card').inner_text(),
+                      'In progress shows the in-progress entry', failures)
+                page.locator('.switch button', has_text='Ready').click()
+                page.wait_for_selector('.switch button.on >> text=Ready')
+                check(page, page.locator('.card').count() == 0, 'Ready excludes it', failures)
+                page.locator('.switch button', has_text='All').click()
+                page.goto(base + '#/list/question')
+                page.wait_for_selector('.switch button')
                 page.goto(base + '#/list/pr')
                 page.wait_for_selector('details.history > summary >> text=Review history')
                 check(page, 'Review history (1)' in page.locator('details.history > summary').inner_text(),

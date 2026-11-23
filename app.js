@@ -218,12 +218,21 @@
       href: `#/list/${k}`, class: k === tab ? 'on' : '',
     }, label, el('span', { class: 'n' }, String(groups[k].length)),
     nblock(k) ? el('span', { class: 'nb', title: 'blocking' }, String(nblock(k))) : null)));
-    const filter = filterOf(tab);
-    const sw = el('div', { class: 'switch' }, [['blocking', `Blocking (${nblock(tab)})`], ['all', `All (${groups[tab].length})`]].map(([f, label]) =>
-      el('button', { class: f === filter ? 'on' : '', onclick: () => { safeSet(`loop.filter.${tab}`, f); showList(tab); } }, label)));
-    const shown = filter === 'blocking' ? groups[tab].filter((x) => x.blocking_now) : groups[tab];
+    // Filters inside a tab; an item can match several (a ready entry that blocks is under Blocking and Ready).
+    const FILTERS = {
+      blocking: ['Blocking', (x) => x.blocking_now],
+      'in-progress': ['In progress', (x) => x.stage === 'in-progress'],
+      ready: ['Ready', (x) => x.stage === 'ready'],
+      all: ['All', () => true],
+    };
+    const names = tab === 'content' ? ['blocking', 'in-progress', 'ready', 'all'] : ['blocking', 'all'];
+    const filter = names.includes(filterOf(tab)) ? filterOf(tab) : 'all';
+    const sw = el('div', { class: 'switch' }, names.map((f) =>
+      el('button', { class: f === filter ? 'on' : '', onclick: () => { safeSet(`loop.filter.${tab}`, f); showList(tab); } },
+        `${FILTERS[f][0]} (${groups[tab].filter(FILTERS[f][1]).length})`)));
+    const shown = groups[tab].filter(FILTERS[filter][1]);
     const list = el('div', { class: 'cards' });
-    if (!shown.length) list.append(el('p', { class: 'empty' }, filter === 'blocking' ? 'Nothing blocking here.' : 'Nothing here.'));
+    if (!shown.length) list.append(el('p', { class: 'empty' }, filter === 'all' ? 'Nothing here.' : `Nothing ${FILTERS[filter][0].toLowerCase()} here.`));
     shown.forEach((it) => list.append(card(it)));
     main().replaceChildren(tabs, sw, list, historyBox(tab),
       el('p', { class: 'foot' }, `Updated ${new Date(index.generated).toLocaleString()}`));
