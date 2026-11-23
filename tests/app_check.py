@@ -179,8 +179,15 @@ def check_file_links(browser, base, repo, vp, label, failures):
         'created': '2026-01-01T00:00:00Z', 'files': ['paper.pdf']}))
     gh = fake_github(repo)
 
+    # A slow PDF download. While `hold` is set, PDF requests wait in `held` until the test fulfils them, so a check that the
+    # tap opened the tab before the download ended can't race it (a sleep here runs on the test's thread, inside click()).
+    held, hold = [], [False]
+
     def slow(route):
-        if route.request.url.endswith('.pdf'):
+        if urlparse(route.request.url).path.endswith('.pdf'):
+            if hold[0]:
+                held.append(route)
+                return None
             time.sleep(0.8)
         return gh(route)
 
@@ -205,10 +212,14 @@ def check_file_links(browser, base, repo, vp, label, failures):
         link = page.locator('.mrow', has_text='PDF paper').locator('a.flink')
         link.wait_for()
         if mode == 'tab':
+            hold[0] = True
             link.click()
             first = page.evaluate('window.__opens.slice()')
             check(page, len(first) == 1 and first[0]['u'] == '' and first[0]['href'] is None,
                   f'{label} PDF link: a tab opens in the tap, before the slow download ends {first}', failures)
+            hold[0] = False
+            while held:
+                gh(held.pop())
             href = poll(page, 'window.__opens[0] && window.__opens[0].href')
             typ = page.evaluate('(u) => fetch(u).then((r) => r.blob()).then((b) => [b.type, b.size])', href) if href else None
             check(page, href and href.startswith('blob:') and typ == ['application/pdf', len(PDF)],
@@ -676,14 +687,22 @@ def run(loop_bin, graph, shots):
                       f'Young tree: a marker with its height in cm {mk!r}', failures)
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-young-tree.png')
+                # Zoomed onto the whole tree: the tree's drawing (wood, height scale, animal) inside the view and filling it
+                # across or up, as far as it can be zoomed without cutting part of it off. Measured as a share of the view, since
+                # a phone's narrow view fits the drawing's width and a computer's its height. The frame's margins leave it ~80% of the
+                # view; before the tap it fills ~2%.
+                fill = """() => { const v = document.querySelector('.gview').getBoundingClientRect();
+                    const t = document.querySelector('.gview .tree').getBoundingClientRect();
+                    const r = [...document.querySelectorAll('.gview .tree .hits [data-k="seg"]')].map((n) => n.getBoundingClientRect());
+                    return { across: (t.right - t.left) / v.width, up: (t.bottom - t.top) / v.height, wood: r.length > 0,
+                      inside: [t, ...r].every((b) => b.left >= v.left - 1 && b.right <= v.right + 1 && b.top >= v.top - 1 && b.bottom <= v.bottom + 1) }; }"""
+                before = page.evaluate(fill)
                 page.locator('.gview .hits [data-k="sprout"]').dispatch_event('click')
                 vy = [float(x) for x in page.locator('.gview svg').first.get_attribute('viewBox').split()]
-                wood = page.evaluate("""() => { const v = document.querySelector('.gview').getBoundingClientRect();
-                    const r = [...document.querySelectorAll('.gview .tree .hits [data-k="seg"]')].map((n) => n.getBoundingClientRect());
-                    return r.length ? { h: Math.max(...r.map((b) => b.bottom)) - Math.min(...r.map((b) => b.top)),
-                      inside: r.every((b) => b.left >= v.left - 1 && b.right <= v.right + 1 && b.top >= v.top - 1 && b.bottom <= v.bottom + 1) } : null; }""")
-                check(page, vy[2] < 12 and wood and wood['h'] > 40 and wood['inside'],
-                      f'Young tree: tapping the marker zooms onto the whole tree {vy} {wood}', failures)
+                wood = page.evaluate(fill)
+                check(page, max(before['across'], before['up']) < 0.2 and vy[2] < 12 and wood['wood'] and wood['inside']
+                      and max(wood['across'], wood['up']) >= 0.6,
+                      f'Young tree: tapping the marker zooms onto the whole tree {vy} {before} {wood}', failures)
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-young-tree-zoom.png')
                 page.locator('.gzoom button', has_text='Reset').click()

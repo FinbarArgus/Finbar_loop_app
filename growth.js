@@ -452,6 +452,12 @@
       stamp(LEAF[l.big ? 1 : 0], i, j - (l.big ? 2 : 1), 1, leafInk, leafPaper);
     });
     const critCells = [];
+    // Corners (cells) of the labels' text, so the frame holds them: monospace glyphs ~0.6 of the font size wide.
+    const labelCells = [];
+    const textBox = (cx, base, size, text) => {
+      const half = Math.ceil(text.length * 0.6 * size / 2);
+      labelCells.push(`${Math.floor(cx - half)},${Math.floor(base)}`, `${Math.ceil(cx + half)},${Math.ceil(base + size)}`);
+    };
     let labels = '', critters = '';
     state.creatures.forEach((c) => {
       const { node } = walk(L.graph, state.seed, c.id, c.startHour, hour);
@@ -463,6 +469,7 @@
       critters += runs(fill, c.fill) + runs(ink, c.ink);
       if (opts.mini) return;
       hits.push(`<rect x="${f(b.i0 * CELL)}" y="${f(-(b.j0 + b.h) * CELL)}" width="${f(b.w * CELL)}" height="${f(b.h * CELL)}" data-k="creature" data-i="${esc(c.id)}" data-node="${esc(node)}"/>`);
+      textBox(b.i0 + b.w / 2, b.j0 + b.h + 0.6, 3.2, c.name || `${c.animal} (name me)`);
       labels += `<text x="${f((b.i0 + b.w / 2) * CELL)}" y="${f(-(b.j0 + b.h + 0.6) * CELL)}" font-size="${f(CELL * 3.2)}" font-family="ui-monospace, Menlo, Consolas, monospace" font-weight="700"`
         + ` text-anchor="middle" fill="${INK}" stroke="${PAPER}" stroke-width="${f(CELL * 0.9)}" paint-order="stroke">${esc(c.name || `${c.animal} (name me)`)}</text>`;
     });
@@ -470,12 +477,13 @@
       for (const c of state.chains) {
         if (!c.parent || !c.segs.length) continue;
         const g = c.segs[c.segs.length - 1];
+        textBox(g.x1 / CELL, g.y1 / CELL + 1, 2.2, c.id.split(' / ').pop());
         labels += `<text x="${f(g.x1)}" y="${f(-g.y1 - CELL)}" font-size="${f(CELL * 2.2)}" font-family="ui-monospace, Menlo, Consolas, monospace"`
           + ` text-anchor="middle" fill="#666" stroke="${PAPER}" stroke-width="${f(CELL * 0.6)}" paint-order="stroke">${esc(c.id.split(' / ').pop())}</text>`;
       }
     }
-    if (!(state.scale > 0) && state.scale != null) { wood.clear(); leafInk.clear(); leafPaper.clear(); critCells.length = 0; critters = ''; labels = ''; hits.length = 0; }
-    const all = [...wood, ...leafInk, ...leafPaper, ...critCells, '0,0'].map((c) => c.split(',').map(Number));
+    if (!(state.scale > 0) && state.scale != null) { wood.clear(); leafInk.clear(); leafPaper.clear(); critCells.length = 0; labelCells.length = 0; critters = ''; labels = ''; hits.length = 0; }
+    const all = [...wood, ...leafInk, ...leafPaper, ...critCells, ...labelCells, '0,0'].map((c) => c.split(',').map(Number));
     const is = all.map((c) => c[0]), js = all.map((c) => c[1]);
     const margin = opts.mini ? 2 : 4;
     // A full-size tree's frame is at least MIN_FRAME tall; a young one (drawn smaller) is framed to its own height.

@@ -287,3 +287,21 @@ test('a paper carries its journal and full title, for the line under its key tit
   assert.deepEqual(s.papers.map((p) => [p.title, p.journal, p.full_title]),
     [['Smith2026Hopfit', 'J Clin Monit Comput', 'HOPFIT'], ['Plain', null, null]]);
 });
+
+test("the frame holds every label: an animal's name wider than the animal, and branch names", () => {
+  // A young tree (one paper) with an unnamed animal: "bat (name me)" is far wider than the sprite and the stub of wood.
+  const es = [read('a', '2026-11-30', inZ('ROM / Beat maps')), { ...W, submitted: true, submitted_at: '2026-12-01T10:00:00' }];
+  for (const [animal, named] of [['bat', null], ['owl', 'A rather long animal name']]) {
+    const s = G.derive(es, { creatures: { w1: { animal, ...(named ? { name: named } : {}) } } }, {}, NOW);
+    for (const branchNames of [false, true]) {
+      const T = G.parts(s, { hour: 0, branchNames });
+      const k = s.scale == null ? 1 : s.scale;
+      for (const m of T.body.matchAll(/<text x="([-\d.]+)" y="([-\d.]+)" font-size="([\d.]+)"[^>]*text-anchor="middle"[^>]*>([^<]*)</g)) {
+        const [x, y, size, text] = [Number(m[1]) * k, Number(m[2]) * k, Number(m[3]) * k, m[4]];
+        const half = text.length * 0.6 * size / 2;
+        assert.ok(x - half >= T.x0 && x + half <= T.x0 + T.w, `${text}: ${x - half}..${x + half} across, frame ${T.x0}..${T.x0 + T.w}`);
+        assert.ok(y - size >= T.y0, `${text}: top ${y - size}, frame top ${T.y0}`);
+      }
+    }
+  }
+});
