@@ -4,8 +4,8 @@
 // Loaded in the browser (window.LoopGrowth) and by Node (tests, tools/tree_examples.js).
 //
 // The tree mirrors the Zotero collection tree: each topic collection (not `_work`) is a branch, its
-// subcollections branch from it, and every paper read grows its collection's branch by one segment. The trunk
-// rises with all the growth. Deadlines met grow leaves; submitted papers unlock animals that walk the tree.
+// subcollections branch from it, and every paper read grows its own collection's branch by one segment (no other
+// branch) and adds to the trunk's height and mass. Deadlines met grow leaves; submitted papers unlock animals that walk the tree.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -57,18 +57,17 @@
   const multOf = (streak) => (streak > 0 ? Math.min(MAX_MULT, 1 + STREAK_STEP * (streak - 1)) : 1);
   // Lengths, in tree units (drawn as metres on the height scale; a block is CELL units). A paper's segment is
   // SEG x its multiplier, shrinking along a long branch as 1/sqrt(1 + k/SEG_HALF) for its k-th paper, so one
-  // busy collection does not outgrow the whole tree. A collection with no paper of its own yet (a parent of
-  // the paper's collection) starts as a STUB. The trunk starts TRUNK_BASE tall and its height is
-  // TRUNK_BASE + TRUNK_K sqrt(growth so far); each paper adds the rise it causes as a trunk segment. In the same
-  // way every collection above the paper's own (its parent, grandparent, ...) lengthens by LIMB_K sqrt(growth
-  // in its subcollections), so a big topic is a long limb with its subtopics spread along it.
+  // busy collection does not outgrow the whole tree. Only the paper's own collection grows (Finbar, C-0006): a
+  // collection with no paper of its own (a parent of the paper's collection) is a STUB, one STUB longer for each
+  // further subcollection born on it, so its subtopics have room. The trunk starts TRUNK_BASE tall and its
+  // height is TRUNK_BASE + TRUNK_K sqrt(growth so far); each paper adds the rise it causes as a trunk segment,
+  // and its wood thickens the trunk (Leonardo's rule, below).
   const SEG = 1;
   const SEG_HALF = 20;
   const STUB = 1.5;
-  const TRUNK_BASE = 3;
-  const TRUNK_K = 2.6;
+  const TRUNK_BASE = 4;
+  const TRUNK_K = 4;
   const trunkHeight = (grown) => TRUNK_BASE + TRUNK_K * Math.sqrt(grown);
-  const LIMB_K = 1.6;
   // Shape: the branches of one parent leave it in the order they were born, oldest lowest, spread over
   // ATTACH (fractions of the parent's length), alternately left and right, 25-45 degrees off the trunk
   // (18-36 off a branch). Each segment turns BEND of the way towards LEAN off vertical on its side, so the
@@ -83,16 +82,16 @@
   const WIDTH_K = 0.12;
   const STAGES = [[0, 'seedling'], [20, 'sapling'], [150, 'young tree'], [600, 'tree'], [1500, 'old tree']];
   const stageOf = (units) => STAGES.filter(([m]) => units >= m).pop()[1];
-  // The animals, drawn in blocks: '#' ink, 'o' paper, ' ' clear.
+  // The animals, drawn in blocks: '#' its ink, 'o' its fill, ' ' clear; each in muted colours [ink, fill].
   const ANIMALS = [
-    ['owl', ['#      #', '########', '#oo##oo#', '#o#oo#o#', '#oo##oo#', ' #o##o# ', ' #oooo# ', ' ###### ', '  #  #  ']],
-    ['squirrel', ['  ##   ##', ' #oo# #oo#', ' #o#o##oo#', '#ooooo#oo#', ' ##ooo#oo# ', '  #ooo#o#', '  #o#o## ', '  ## ##  ']],
-    ['snail', ['#  #     ', '#  #  ###', ' ## ##ooo#', ' #o##o##o#', ' #oo#o#oo#', ' #oo#oo#o#', '##########']],
-    ['beetle', [' #    # ', '  #  #  ', '  ####  ', ' #o##o# ', '#oo##oo#', '#o#oo#o#', '#oo##oo#', ' ###### ', '#  ##  #']],
-    ['bird', ['   ###   ', '  #ooo#  ', '  #o#o###', ' #oooo#  ', '#ooooo#  ', '#o#ooo#  ', ' #####   ', '  #  #   ']],
-    ['monkey', ['  ####   ', ' #oooo#  ', '#o#oo#o# ', '#oooooo# ', ' #o##o#  ', '  ####  #', ' #oooo# #', ' #oooo## ', ' #o##o#  ', ' ##  ##  ']],
-    ['caterpillar', ['#  #         ', ' ###  ##  ## ', '#o#o##oo##oo#', '#ooo#oo##oo# ', ' ### #  #  # ']],
-    ['bat', ['#   #   #   #', '##  #####  ##', '###o#o#o#o###', ' ##########  ', '  ## ### ##  ', '   #  #  #   ']],
+    ['owl', ['#      #', '########', '#oo##oo#', '#o#oo#o#', '#oo##oo#', ' #o##o# ', ' #oooo# ', ' ###### ', '  #  #  '], ['#6b5a48', '#d8c8a8']],
+    ['squirrel', ['  ##   ##', ' #oo# #oo#', ' #o#o##oo#', '#ooooo#oo#', ' ##ooo#oo# ', '  #ooo#o#', '  #o#o## ', '  ## ##  '], ['#8a5a3e', '#dcc0a4']],
+    ['snail', ['#  #     ', '#  #  ###', ' ## ##ooo#', ' #o##o##o#', ' #oo#o#oo#', ' #oo#oo#o#', '##########'], ['#5e6870', '#d3cbb0']],
+    ['beetle', [' #    # ', '  #  #  ', '  ####  ', ' #o##o# ', '#oo##oo#', '#o#oo#o#', '#oo##oo#', ' ###### ', '#  ##  #'], ['#4e5e4c', '#a9b89c']],
+    ['bird', ['   ###   ', '  #ooo#  ', '  #o#o###', ' #oooo#  ', '#ooooo#  ', '#o#ooo#  ', ' #####   ', '  #  #   '], ['#55697e', '#bccad6']],
+    ['monkey', ['  ####   ', ' #oooo#  ', '#o#oo#o# ', '#oooooo# ', ' #o##o#  ', '  ####  #', ' #oooo# #', ' #oooo## ', ' #o##o#  ', ' ##  ##  '], ['#765a46', '#d4bca2']],
+    ['caterpillar', ['#  #         ', ' ###  ##  ## ', '#o#o##oo##oo#', '#ooo#oo##oo# ', ' ### #  #  # '], ['#62774a', '#c6d2a2']],
+    ['bat', ['#   #   #   #', '##  #####  ##', '###o#o#o#o###', ' ##########  ', '  ## ### ##  ', '   #  #  #   '], ['#5b5368', '#bbb3c8']],
   ];
   const CELL = 0.5;                               // one drawn block, in tree units
   const DEFAULT_SEED = 'loop-tree';
@@ -207,20 +206,14 @@
       for (const name of p.path) {
         let c = chains.get(name);
         if (!c) {
+          if (host !== trunk && host.kids > 0) seg(host, STUB, r, null, 0, p.day);   // room for another subtopic
           c = { id: name, parent: host.id, rank: host.kids++, segs: [], papers: 0, kids: 0, born: p.day,
-            off: r(), at: r(), below: 0 };
+            off: r(), at: r() };
           chains.set(name, c);
           order.push(c);
           if (name !== p.path[p.path.length - 1]) seg(c, STUB, r, null, 0, p.day);
         }
         host = c;
-      }
-      // Every ancestor collection of the paper's own lengthens by the rise its growth below causes.
-      for (const name of p.path.slice(0, -1)) {
-        const c = chains.get(name);
-        const rise2 = LIMB_K * (Math.sqrt(c.below + p.mult) - Math.sqrt(c.below));
-        c.below += p.mult;
-        seg(c, rise2, r, p.id, 0, p.day);
       }
       if (host === trunk) {
         seg(trunk, rise, null, p.id, p.mult, p.day);             // an unsorted paper's wood stays in the trunk
@@ -276,6 +269,7 @@
       const a = ANIMALS.find(([k]) => k === own.animal) || ANIMALS[hash(seed, 'animal', c.id) % ANIMALS.length];
       c.animal = a[0];
       c.sprite = a[1];
+      [c.ink, c.fill] = a[2];
       c.name = own.name || null;
       const n = c.doi ? ((cites.dois || {})[String(c.doi).toLowerCase()] || {}).count : undefined;
       c.citations = Number.isFinite(n) ? n : null;
@@ -353,11 +347,13 @@
     return { node, path };
   }
 
-  // ---------------------------------------------------------------- SVG: black-and-white pixel blocks
+  // ---------------------------------------------------------------- SVG: pixel blocks in muted colours
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const f = (n) => (Math.round(n * 100) / 100).toString();
-  const INK = '#111', PAPER = '#fff', SCALE = '#b8b8b8';
+  // Colours (Finbar, C-0006): brown wood, muted green leaves, each animal its own muted ink and fill.
+  const WOOD = '#6e4b2e', GROUND = '#4f3a26', LEAF_INK = '#5d7748', LEAF_FILL = '#cbd9b4';
+  const INK = '#3b2a1c', PAPER = '#fff', SCALE = '#b8b8b8';
   // Leaves: a diamond outline of cells, 3 wide (5 at a 1.6x multiplier or more).
   const LEAF = [[' # ', '#o#', ' # '], ['  #  ', ' #o# ', '#ooo#', ' #o# ', '  #  ']];
 
@@ -430,13 +426,16 @@
       const [i, j] = cell(l.x, l.y).split(',').map(Number);
       stamp(LEAF[l.big ? 1 : 0], i, j - (l.big ? 2 : 1), 1, leafInk, leafPaper);
     });
-    const critInk = new Set(), critPaper = new Set();
-    let labels = '';
+    const critCells = [];
+    let labels = '', critters = '';
     state.creatures.forEach((c) => {
       const { node } = walk(L.graph, state.seed, c.id, c.startHour, hour);
       const p = L.graph.nodes.get(node);
       const [i, j] = cell(p.x, p.y).split(',').map(Number);
-      const b = stamp(c.sprite, i, j + 1, c.size, critInk, critPaper);
+      const ink = new Set(), fill = new Set();
+      const b = stamp(c.sprite, i, j + 1, c.size, ink, fill);
+      critCells.push(...ink, ...fill);
+      critters += runs(fill, c.fill) + runs(ink, c.ink);
       if (opts.mini) return;
       hits.push(`<rect x="${f(b.i0 * CELL)}" y="${f(-(b.j0 + b.h) * CELL)}" width="${f(b.w * CELL)}" height="${f(b.h * CELL)}" data-k="creature" data-i="${esc(c.id)}" data-node="${esc(node)}"/>`);
       labels += `<text x="${f((b.i0 + b.w / 2) * CELL)}" y="${f(-(b.j0 + b.h + 0.6) * CELL)}" font-size="${f(CELL * 3.2)}" font-family="ui-monospace, Menlo, Consolas, monospace" font-weight="700"`
@@ -450,7 +449,7 @@
           + ` text-anchor="middle" fill="#666" stroke="${PAPER}" stroke-width="${f(CELL * 0.6)}" paint-order="stroke">${esc(c.id.split(' / ').pop())}</text>`;
       }
     }
-    const all = [...wood, ...leafInk, ...leafPaper, ...critInk, ...critPaper].map((c) => c.split(',').map(Number));
+    const all = [...wood, ...leafInk, ...leafPaper, ...critCells].map((c) => c.split(',').map(Number));
     const is = all.map((c) => c[0]), js = all.map((c) => c[1]);
     const margin = opts.mini ? 2 : 4;
     const top = Math.max(...js) + 1;
@@ -477,12 +476,12 @@
       + ` aria-label="${esc(state.stage)}: ${state.papers.length} papers, ${state.leaves.length} leaves, ${f(state.height)} m tall">`
       + `<rect x="${f(x0)}" y="${f(y0)}" width="${f(w)}" height="${f(h)}" fill="${PAPER}"/>`
       + `<g class="scale">${runs(rule, SCALE)}${scaleText}</g>`
-      + runs(ground, INK) + runs(wood, INK) + runs(leafPaper, PAPER) + runs(leafInk, INK)
-      + runs(critPaper, PAPER) + runs(critInk, INK) + labels
+      + runs(ground, GROUND) + runs(wood, WOOD) + runs(leafPaper, LEAF_FILL) + runs(leafInk, LEAF_INK)
+      + critters + labels
       + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits.join('')}</g>`) + '</svg>';
   }
 
   return { hash, rng, dayOf, addDays, hourOf, topicPath, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
-    STREAK_STEP, MAX_MULT, LIMB_K, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
+    STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
     derive, layout, walk, svg };
 }));

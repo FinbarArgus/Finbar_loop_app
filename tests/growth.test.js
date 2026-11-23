@@ -83,9 +83,9 @@ test("each paper grows one segment on its collection's branch, which hangs from 
   assert.equal(ch.get('physiology / cardiac').parent, 'physiology');
   assert.equal(ch.get('physiology').parent, 'trunk');
   assert.deepEqual(ch.get('physiology / cardiac / valves').segs.map((g) => g.paper), ['a', 'b']);
-  // A parent collection starts as a stub and lengthens with each paper below it; that wood is the paper's own.
-  assert.deepEqual(ch.get('physiology').segs.map((g) => [g.paper, g.weight]), [[null, 0], ['a', 0], ['b', 0]]);
-  assert.ok(Math.abs(ch.get('physiology').segs[1].len - G.LIMB_K) < 1e-12);
+  // Only the paper's own collection grows (C-0006): its parents stay stubs.
+  assert.deepEqual(ch.get('physiology').segs.map((g) => [g.paper, g.weight, g.len]), [[null, 0, G.STUB]]);
+  assert.deepEqual(ch.get('physiology / cardiac').segs.map((g) => [g.paper, g.weight, g.len]), [[null, 0, G.STUB]]);
   assert.deepEqual(s.papers.map((p) => p.branch), ['physiology / cardiac / valves', 'physiology / cardiac / valves', 'inference', 'trunk', 'trunk']);
   // The segment's length is set by the multiplier (b's day is the 2nd good day in a row: 1.2x).
   const [ga, gb] = ch.get('physiology / cardiac / valves').segs;
@@ -204,4 +204,36 @@ test("branches leave the trunk spread over its height, by length, oldest lowest"
   assert.ok(ys[0] < 0.25, `lowest at ${ys[0]}`);
   assert.ok(ys.at(-1) > 0.75, `highest at ${ys.at(-1)}`);
   assert.deepEqual(ys, [...ys].sort((a, b) => a - b));
+});
+
+test('only its own branch grows; a parent is one stub longer per further subcollection; every paper thickens the trunk', () => {
+  const es = [read('a', '2026-12-01', inZ('physiology / cardiac')), read('b', '2026-12-02', inZ('physiology / renal')),
+    read('c', '2026-12-03', inZ('physiology / cardiac')), read('d', '2026-12-04', inZ('inference'))];
+  const s = G.derive(es, {}, {}, NOW);
+  const ch = new Map(s.chains.map((c) => [c.id, c]));
+  assert.deepEqual(ch.get('physiology').segs.map((g) => [g.paper, g.len]), [[null, G.STUB], [null, G.STUB]]);
+  assert.deepEqual(ch.get('physiology / cardiac').segs.map((g) => g.paper), ['a', 'c']);
+  assert.deepEqual(ch.get('physiology / renal').segs.map((g) => g.paper), ['b']);
+  assert.deepEqual(ch.get('inference').segs.map((g) => g.paper), ['d']);
+  // The trunk rises with each paper and is thicker at its foot after each one.
+  const foot = (n) => G.derive(es.slice(0, n), {}, {}, NOW).chains[0].segs[0].w0;
+  for (let n = 1; n < es.length; n++) assert.ok(foot(n + 1) > foot(n));
+  assert.equal(ch.get('trunk').segs.filter((g) => g.paper).length, 4);
+});
+
+test('colours: brown wood, green leaves, each animal in its own muted colours', () => {
+  const es = [read('a', '2026-12-01', { ...inZ('physiology'), deadline: '2026-12-02' }),
+    { ...W, submitted: true, submitted_at: '2026-12-01T10:00:00' }];
+  const s = G.derive(es, { creatures: { w1: { animal: 'bird' } } }, {}, NOW);
+  const svg = G.svg(s, { hour: 0 });
+  assert.match(svg, /fill="#6e4b2e"/);
+  assert.doesNotMatch(svg, /fill="#111"/);
+  assert.match(svg, /fill="#5d7748"/);
+  const [, , [ink, fill]] = G.ANIMALS.find(([k]) => k === 'bird');
+  assert.ok(svg.includes(`fill="${ink}"`) && svg.includes(`fill="${fill}"`));
+  // muted: no channel at full brightness or saturation
+  for (const [, , cs] of G.ANIMALS) for (const c of cs) {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+    assert.ok(Math.max(r, g, b) - Math.min(r, g, b) < 80 && Math.max(r, g, b) < 230, c);
+  }
 });
