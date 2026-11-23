@@ -346,7 +346,7 @@
         el('span', { class: 'grow' }), pos ? el('span', { class: 'pos' }, `${pos} of ${total}`) : null,
         nextLink(id, 'Next')),
       el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
-        row.blocking_now ? el('span', { class: 'badge block' }, 'blocking') : it.blocking ? el('span', { class: 'badge' }, 'blocks when the agent stops') : null,
+        row.blocking_now ? el('span', { class: 'badge block' }, 'blocking') : it.blocking ? el('span', { class: 'badge' }, 'not blocking yet: the agent is still working') : null,
         qs.length > 1 ? el('span', { class: 'badge' }, `${qs.length} questions`) : null,
         row.stage ? el('span', { class: `badge stage ${row.stage}` }, row.stage === 'in-progress' ? 'in progress' : 'ready') : null,
         (it.versions || 1) > 1 ? el('span', { class: 'badge' }, `version ${it.versions}, updated ${age(it.updated)} ago`) : null,
@@ -578,7 +578,7 @@
           el('span', { class: 'grow' }),
           r.context_tokens ? el('span', { class: 'who' }, `${Math.round(r.context_tokens / 1000)}k ctx`) : null,
           r.model ? el('span', { class: 'who' }, ` · ${r.model}`) : null),
-        r.items && r.items.length ? el('div', { class: 'alinks' }, 'Waiting on: ', r.items.map((id) =>
+        r.items && r.items.length ? el('div', { class: 'alinks' }, r.state === 'blocked' ? 'Waiting on: ' : 'Will need (not blocking yet): ', r.items.map((id) =>
           el('a', { href: `#/item/${id}`, class: 'alink' }, el('b', {}, id), titles.has(id) ? ` ${titles.get(id).slice(0, 70)}` : ''))) : null,
         r.why && !(r.items && r.items.length) ? el('div', { class: 'awhy' }, r.why) : null,
         r.working_on ? el('div', { class: 'adetail' }, el('span', { class: 'who' }, r.state === 'working' ? 'Working on: ' : 'Last: '), r.working_on) : null,
