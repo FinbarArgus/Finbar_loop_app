@@ -178,3 +178,16 @@ test('names are escaped and shortened; the mini farm has no text or tap targets'
   assert.doesNotMatch(H.svg(AGENTS, { mini: true }), /<text|data-k="hill"/);
   assert.match(H.svg([], {}), /<svg/);
 });
+
+test('opts.gap leaves open surface to the right of the food: the right-hand anthills move over, the farm widens', () => {
+  const a = H.layout(AGENTS), b = H.layout(AGENTS, { gap: 14 });
+  assert.equal(a.gap, null);
+  assert.equal(b.width, a.width + 14);
+  assert.deepEqual(b.food, a.food);
+  const xs = (L) => Object.fromEntries(L.hills.filter((h) => h.kind === 'home').map((h) => [h.name, h.x]));
+  const [xa, xb] = [xs(a), xs(b)];
+  for (const n of Object.keys(xa)) assert.equal(xb[n], xa[n] + (xa[n] > a.food.cx ? 14 : 0), n);
+  assert.deepEqual(b.gap, { x0: a.food.cx + 10, x1: a.food.cx + 24, cx: a.food.cx + 17 });
+  const right = Math.min(...b.hills.filter((h) => h.kind === 'home' && h.x > b.food.cx).map((h) => h.mound.x0));
+  assert.ok(b.gap.x0 >= b.food.x0 + b.food.w && b.gap.x1 <= right, 'the gap is open surface');
+});

@@ -1039,12 +1039,15 @@
         } }, 'Add')), st));
   }
 
-  // The short form shown after a drop: title, Zotero collection (Read), deadline.
+  // The short form shown after a drop: title, Zotero collection (Read), deadline. A paper has no title box: the
+  // loop titles it from its record (DOI/CrossRef, arXiv or its summary); its file's name stands in until then.
   function newEntryForm(kind, files, preset, redraw) {
     const title = el('input', { type: 'text', value: files.length === 1 ? files[0].name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') : '', placeholder: 'Title' });
     const due = el('input', { type: 'date' });
     let colSel = null;
-    const parts = [el('div', { class: 'who' }, files.map((f) => f.name).join(', ')), el('label', {}, 'Title', title)];
+    const parts = [el('div', { class: 'who' }, files.map((f) => f.name).join(', ')),
+      kind === 'read' ? el('div', { class: 'who autotitle' }, 'Title: set by the loop from the paper\'s record (DOI, arXiv or its summary).')
+        : el('label', {}, 'Title', title)];
     if (kind === 'read') {
       const filter = el('input', { type: 'search', placeholder: `Filter ${mine.collections.length} Zotero collections…` });
       colSel = el('select', { size: 6, class: 'colsel' }, mine.collections.map((c) => el('option', { value: c.key }, c.name)));
@@ -1304,8 +1307,8 @@
   }
 
   // ------------------------------------------------------------ Tree: the growth tree on the ant farm (scene.js)
-  // One drawing: the tree stands in LOOP's fruit pile in the middle of the surface, the sessions' anthills around its
-  // foot, their shafts down to the anthomes. The view is a camera over it (sceneCam, in farm blocks; kept across
+  // One drawing: the tree stands in a gap on the surface between LOOP's fruit pile and the first anthill to its right,
+  // the sessions' anthills around them, their shafts down to the anthomes. The view is a camera over it (sceneCam, in farm blocks; kept across
   // redraws until Reset): Ctrl+wheel or a trackpad pinch zooms toward the pointer, a mouse drag pans, Shift+wheel
   // (or a sideways swipe) pans sideways; on a phone two fingers pinch and pan, and one finger scrolls the page.
   // It opens on the anthills and the trunk's foot; the tree is above, a drag (or "Whole tree") away.

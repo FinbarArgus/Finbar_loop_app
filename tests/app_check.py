@@ -460,9 +460,12 @@ def run(loop_bin, graph, shots):
                 page.goto(base + '#/manual/read')
                 page.wait_for_selector('.mgroup.prio-high .dropzone')
                 check(page, page.locator('.mgroup').count() == 3, 'Read: High / Medium / Low groups', failures)
-                page.locator('.mgroup.prio-high input[type=file]').set_input_files(str(tmp_l / 'fig.png'))
+                (tmp_l / 'A_paper_to_read.png').write_bytes(PNG)
+                page.locator('.mgroup.prio-high input[type=file]').set_input_files(str(tmp_l / 'A_paper_to_read.png'))
                 form = page.locator('.mgroup > .newentry')
                 form.locator('.colsel').wait_for()
+                check(page, form.locator(':scope > label > input[type=text]').count() == 0 and form.locator('.autotitle').count() == 1,
+                      'Read: no title box for a paper (the loop titles it from its record)', failures)
                 form.locator('input[type=search]').fill('opinf')
                 check(page, form.locator('.colsel option:not([hidden])').count() == 1, 'collection filter', failures)
                 # a new collection from the form: requested, then selected once the loop has made it
@@ -483,12 +486,12 @@ def run(loop_bin, graph, shots):
                 nc.locator('.status >> text=/^Made "ROM \\/ Beat maps" in Zotero/').wait_for(timeout=15000)
                 check(page, form.locator('.colsel').input_value() == 'NEWC0001', 'new collection selected', failures)
                 form.locator('.colsel').select_option('BBBB2222')
-                form.locator(':scope > label > input[type=text]').fill('A paper to read')
                 form.locator(':scope > .row button.primary').click()
                 page.wait_for_selector('.mrow >> text=A paper to read')
                 ents = [json.loads(f.read_text()) for f in (repo / 'personal').glob('read-*/entry.json')]
                 check(page, ents and ents[0]['priority'] == 'high' and ents[0]['zotero']['collection_id'] == 2
-                      and ents[0]['files'] == ['fig.png'] and (repo / 'personal' / ents[0]['id'] / 'fig.png').exists(),
+                      and ents[0]['title'] == 'A paper to read'
+                      and ents[0]['files'] == ['A_paper_to_read.png'] and (repo / 'personal' / ents[0]['id'] / 'A_paper_to_read.png').exists(),
                       f'Read entry written with its file and collection {ents[:1]}', failures)
                 check(page, 'to Zotero: ROM / OpInf' in page.locator('.mrow').first.inner_text(), 'Zotero badge', failures)
                 soon = (_dt.date.today() + _dt.timedelta(days=2)).isoformat()
@@ -800,14 +803,17 @@ def run(loop_bin, graph, shots):
                     page.screenshot(path=f'{shots}/{label}-scene-screen.png')
                 ys = page.evaluate(f"Object.fromEntries([...document.querySelectorAll('{F} text')].map((t) => [t.textContent, t.getBoundingClientRect().top]))")
                 check(page, all(ys['LOOP'] < y for n, y in ys.items() if n != 'LOOP'), f'Farm: LOOP the food on the surface, the homes below {ys}', failures)
-                # The tree stands in LOOP's fruit pile: the trunk's foot at the middle of LOOP's hill, on the surface.
+                # The tree stands beside LOOP's fruit pile, in the gap before the first anthill to its right, on the surface.
                 foot = page.evaluate("""() => {
                     const segs = [...document.querySelectorAll('.gview .tree .hits [data-k="branch"], .gview .tree .hits [data-k="seg"]')].map((n) => n.getBoundingClientRect());
                     const low = segs.reduce((a, r) => (r.bottom > a.bottom ? r : a));
                     const loop = document.querySelector('.gview .farm .hits g[data-k="hill"][data-i="0"] rect').getBoundingClientRect();
-                    return { x: (low.left + low.right) / 2, y: low.bottom, l: loop.left, r: loop.right, cx: (loop.left + loop.right) / 2, b: loop.bottom, h: loop.height }; }""")
-                check(page, abs(foot['x'] - foot['cx']) < 0.1 * (foot['r'] - foot['l']) and abs(foot['y'] - foot['b']) < 0.15 * foot['h'],
-                      f'Scene: the trunk stands in the middle of the fruit pile {foot}', failures)
+                    const next = Math.min(...[...document.querySelectorAll('.gview .farm .hits g[data-k="hill"]:not([data-i="0"])')]
+                      .map((g) => g.getBoundingClientRect().left).filter((x) => x > loop.right));
+                    return { x: (low.left + low.right) / 2, y: low.bottom, l: loop.left, r: loop.right, next, b: loop.bottom, h: loop.height }; }""")
+                clear = 0.15 * (foot['r'] - foot['l'])
+                check(page, foot['r'] + clear < foot['x'] < foot['next'] - clear and abs(foot['y'] - foot['b']) < 0.15 * foot['h'],
+                      f'Scene: the trunk stands beside the fruit pile, before the next anthill {foot}', failures)
                 glows = page.evaluate(f"[...document.querySelectorAll('{F} .glow')].map((c) => [c.dataset.role, c.getAttribute('fill')])")
                 roles = {r: c for r, c in glows}
                 check(page, roles.get('high') == '#e0482f' and roles.get('implement') == '#3f8fe0' and roles.get('low') == '#5fb04a' and 'med' not in roles,
@@ -863,13 +869,18 @@ def run(loop_bin, graph, shots):
                 page.wait_for_timeout(400)
                 check(page, page.locator(f'{F} .ant').first.get_attribute('transform') != t0, 'Farm: the ants move', failures)
                 # Zoom and pan. The page itself never zooms: the view takes Ctrl+wheel (a trackpad pinch) and two fingers.
-                v0 = vb()
                 box = page.locator('.gview').bounding_box()
+                wheel = lambda x, y: page.evaluate(f"""() => {{ const v = document.querySelector('.gview');
+                    const ev = new WheelEvent('wheel', {{ deltaY: -200, ctrlKey: true, clientX: {x}, clientY: {y}, bubbles: true, cancelable: true }});
+                    v.dispatchEvent(ev); return ev.defaultPrevented; }}""")
+                # First zoom until the view is shorter than the scene: a view taller than the scene keeps its foot on the
+                # farm's floor, so a zoom there moves the view up and down by design.
+                vh = vb()                                                                     # the opening view
+                wheel(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+                v0 = vb()
                 cx, cy = box['x'] + box['width'] * 0.3, box['y'] + box['height'] * 0.8      # a point in the farm
                 world = lambda v: (v[0] + (cx - box['x']) * v[2] / box['width'], v[1] + (cy - box['y']) * v[2] / box['width'])
-                took = page.evaluate(f"""() => {{ const v = document.querySelector('.gview');
-                    const ev = new WheelEvent('wheel', {{ deltaY: -200, ctrlKey: true, clientX: {cx}, clientY: {cy}, bubbles: true, cancelable: true }});
-                    v.dispatchEvent(ev); return ev.defaultPrevented; }}""")
+                took = wheel(cx, cy)
                 v1 = vb()
                 w0, w1 = world(v0), world(v1)
                 check(page, took and v1[2] < v0[2] * 0.8 and abs(w0[0] - w1[0]) < 0.3 and abs(w0[1] - w1[1]) < 0.3,
@@ -904,7 +915,7 @@ def run(loop_bin, graph, shots):
                 vt = vb()
                 check(page, vt[1] < v0[1], f'Scene: "Whole tree" frames the tree above the farm {v0} -> {vt}', failures)
                 page.locator('.gzoom button', has_text='Reset').click()
-                check(page, all(abs(a - b) < 0.05 for a, b in zip(vb(), v0)), f'Scene: Reset goes back to the farm {vb()}', failures)
+                check(page, all(abs(a - b) < 0.05 for a, b in zip(vb(), vh)), f'Scene: Reset goes back to the farm {vb()}', failures)
                 blocked = page.evaluate(f"[...document.querySelectorAll('{F} text')].findIndex((t) => t.textContent.startsWith('HIGH-session'))")
                 page.locator(f'{F} [data-k="hill"][data-i="{blocked}"]').dispatch_event('click')
                 info = page.locator('.hinfo').inner_text()
