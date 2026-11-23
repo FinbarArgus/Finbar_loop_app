@@ -620,6 +620,9 @@
   const MINE_TABS = [['read', 'Read'], ['write', 'Write'], ['student', 'Students'], ['other', 'Other']];
   const PRIOS = [['high', 'High'], ['med', 'Medium'], ['low', 'Low']];
   let mine = { entries: [], zotero: {}, people: [], collections: [] };
+  let mineLoaded = false;
+  // personal/tree.json ({seed, creatures: {<write entry id>: {name, animal}}}) and state/citations.json.
+  let growthDocs = { tree: {}, cites: {} };
 
   const safeName = (n) => n.replace(/[^\w.\-]+/g, '_').slice(-80) || 'file';
   const today = () => new Date(new Date().toDateString());
@@ -634,11 +637,15 @@
   async function loadMine() {
     await loadTree();
     const ids = [...tree.paths].filter((p) => /^personal\/[^/]+\/entry\.json$/.test(p)).map((p) => p.split('/')[1]);
-    const [entries, people, cols] = await Promise.all([
+    const [entries, people, cols, treeDoc, cites] = await Promise.all([
       Promise.all(ids.map((id) => getJSON(`personal/${id}/entry.json`).catch(() => null))),
       getJSON('state/people.json').catch(() => ({ students: [] })),
       getJSON('state/zotero_collections.json').catch(() => ({ collections: [] })),
+      tree.paths.has('personal/tree.json') ? getJSON('personal/tree.json').catch(() => ({})) : {},
+      tree.paths.has('state/citations.json') ? getJSON('state/citations.json').catch(() => ({})) : {},
     ]);
+    growthDocs = { tree: treeDoc || {}, cites: cites || {} };
+    mineLoaded = true;
     const zot = {};
     await Promise.all(ids.filter((id) => tree.paths.has(`personal/${id}/zotero.json`)).map(async (id) => {
       zot[id] = await getJSON(`personal/${id}/zotero.json`).catch(() => null);
@@ -695,21 +702,72 @@
     } }, n));
   }
 
+  // `done_at` dates the tick for the growth tree. A Read entry needs a note before it is ticked done: ticking
+  // it without one opens its Notes and asks for one instead.
   function entryRow(e, redraw, extra) {
-    const done = el('input', { type: 'checkbox', title: 'done', onchange: async () => { e.done = done.checked; await saveEntry(e, `${e.id}: ${e.done ? 'done' : 'not done'}`); redraw(); } });
+    const pex = e.kind === 'read' ? paperExtras(e) : null;
+    const done = el('input', { type: 'checkbox', title: 'done', onchange: async () => {
+      if (done.checked && pex && !(await pex.hasNote())) {
+        done.checked = false;
+        pex.askNote();
+        return;
+      }
+      e.done = done.checked;
+      e.done_at = e.done ? new Date().toISOString() : null;
+      await saveEntry(e, `${e.id}: ${e.done ? 'done' : 'not done'}`);
+      redraw();
+    } });
     done.checked = !!e.done;
     const prio = el('select', { class: 'prio', title: 'priority', onchange: async () => { e.priority = prio.value; await saveEntry(e, `${e.id}: priority`); redraw(); } },
       PRIOS.map(([k, l]) => el('option', { value: k, selected: e.priority === k ? true : null }, l)));
     const z = mine.zotero[e.id];
     const zb = e.kind === 'read' && e.zotero ? el('span', { class: `badge z ${z ? z.status : 'waiting'}`, title: (z && z.why) || '' },
       z && z.status === 'saved' ? `in Zotero: ${e.zotero.name || ''}` : z && z.status === 'error' ? 'Zotero: error' : `to Zotero: ${e.zotero.name || ''} (waiting)`) : null;
+    const isWrite = e.kind === 'write';
     return el('div', { class: 'mrow' + (e.done ? ' done' : '') },
-      el('label', { class: 'mcheck' }, done),
+      isWrite ? null : el('label', { class: 'mcheck' }, done),
       el('div', { class: 'mmain' },
         el('div', { class: 'mtitle' }, e.link ? el('a', { href: e.link, target: '_blank', rel: 'noopener' }, e.title || e.link) : (e.title || (e.files || [])[0] || 'note')),
         e.note ? el('div', { class: 'mnote', html: inline(e.note) }) : null,
+        isWrite ? writeStates(e, redraw) : null,
         el('div', { class: 'mmeta' }, ...fileLinks(e), zb, extra || null, deadlineChip(e, redraw), prio),
-        e.kind === 'read' ? paperExtras(e) : null));
+        pex ? pex.el : null));
+  }
+
+  // A Write entry's states (Q-0027), in place of one done tick: a draft version (▲ steps v1, v2, …), submitted
+  // (the tree's animal arrives) and published (also done, so it moves to Done), and its DOI. The loop looks up
+  // citations once it is published or has a DOI.
+  function writeStates(e, redraw) {
+    const now = () => new Date().toISOString();
+    const save = async (what) => { await saveEntry(e, `${e.id}: ${what}`); redraw(); };
+    const box = (label, checked, onchange, title) => {
+      const c = el('input', { type: 'checkbox', title: title || label });
+      c.checked = !!checked;
+      c.addEventListener('change', () => onchange(c.checked));
+      return el('label', { class: 'wstate' }, c, label);
+    };
+    const draft = box('Draft', e.draft, (on) => { e.draft = on ? (e.draft || 1) : null; save(on ? `draft v${e.draft}` : 'no draft'); }, 'a draft exists');
+    const ver = el('span', { class: 'wver' }, e.draft ? `v${e.draft}` : '');
+    const up = el('button', { class: 'ghost wup', title: 'next draft version', onclick: () => { e.draft = (e.draft || 0) + 1; save(`draft v${e.draft}`); } }, '▲');
+    const sub = box('Submitted', e.submitted, (on) => {
+      e.submitted = on; e.submitted_at = on ? now() : null;
+      if (!on) { e.published = false; e.published_at = null; e.done = false; e.done_at = null; }
+      save(on ? 'submitted' : 'not submitted');
+    });
+    const pub = box('Published', e.published, (on) => {
+      const t = now();
+      e.published = on; e.published_at = on ? t : null; e.done = on; e.done_at = on ? t : null;
+      if (on && !e.submitted) { e.submitted = true; e.submitted_at = t; }   // published implies submitted
+      save(on ? 'published' : 'not published');
+    });
+    const doi = el('input', { type: 'text', class: 'wdoi', placeholder: 'DOI', value: e.doi || '' });
+    doi.addEventListener('change', () => {
+      e.doi = doi.value.trim().replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').replace(/^doi:\s*/i, '') || null;
+      save(e.doi ? 'DOI' : 'no DOI');
+    });
+    const n = e.doi ? ((growthDocs.cites.dois || {})[e.doi.toLowerCase()] || {}).count : undefined;
+    return el('div', { class: 'wstates' }, draft, ver, up, sub, pub, doi,
+      Number.isFinite(n) ? el('span', { class: 'badge', title: 'citations (OpenAlex)' }, `${n} citation${n === 1 ? '' : 's'}`) : null);
   }
 
   // A paper's Notes (saved as you type; the loop writes them into the notes repo under the paper's \\cite,
@@ -723,11 +781,12 @@
     const leaf = where.split(' / ').pop();
     const notes = el('details', { class: 'pextra' }, el('summary', {}, 'Notes'),
       el('div', { class: 'who' }, `Goes to ${where.split(' / ').join('/')}/${leaf}.tex in your notes repo`), ta, st);
-    notes.addEventListener('toggle', async () => {
-      if (!notes.open || loaded) return;
+    const load = async () => {
+      if (loaded) return;
       loaded = true;
       if (tree.paths.has(notesPath)) ta.value = await (await gh(repoPath(notesPath), { raw: true })).text();
-    });
+    };
+    notes.addEventListener('toggle', () => { if (notes.open) load(); });
     ta.addEventListener('input', () => {
       clearTimeout(timer);
       st.textContent = 'Not saved yet…';
@@ -747,7 +806,16 @@
       window.LoopRender.blocks(sbody, s.blocks || [], { store: store(e.id), fileUrl: (n) => fileUrl(`personal/${e.id}/${n}`) });
       sbody.append(el('div', { class: 'who' }, `by ${s.by || 'paper_summary'}, ${age(s.at)} ago`));
     });
-    return el('div', { class: 'pextras' }, summary, notes);
+    return {
+      el: el('div', { class: 'pextras' }, summary, notes),
+      hasNote: async () => { await load(); return !!ta.value.trim(); },
+      askNote: () => {
+        notes.open = true;
+        st.textContent = 'Add a note first (what you took from it), then tick it done.';
+        st.classList.add('ask-note');
+        ta.focus();
+      },
+    };
   }
 
   // A new Zotero collection: written as zotero_requests/<t>.json; the loop creates it (web API) and adds it
@@ -894,11 +962,201 @@
     const done = all.filter((e) => e.done).sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
     const hist = el('details', { class: 'history' }, el('summary', {}, `Done (${done.length})`), ...done.map((e) => entryRow(e, redraw)));
     main().replaceChildren(tabs, body, hist);
+    drawSide().catch(() => {});
     setPoll(async () => {
       const before = [...tree.paths].filter((x) => x.startsWith('personal/')).join();
       await loadTree();
       if ([...tree.paths].filter((x) => x.startsWith('personal/')).join() !== before && !main().querySelector('.newentry input:focus, .newentry textarea:focus, .datein')) redraw();
     }, 30_000);
+  }
+
+  // ------------------------------------------------------------ Tree: the growth tree (growth.js)
+  // Read papers ticked done grow their Zotero collection's branch, deadlines met grow leaves, submitted Write
+  // entries bring animals. The tree is derived from Mine every time; only names and animals are stored.
+
+  const G = window.LoopGrowth;
+  const growthState = () => G.derive(mine.entries, growthDocs.tree, growthDocs.cites, new Date());
+  const dayText = (d) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const collName = (b) => (b === 'trunk' ? 'no collection (the trunk)' : b);
+  const metres = (h) => `${h < 10 ? h.toFixed(1) : Math.round(h)} m`;
+
+  // What a tapped or hovered part of the tree is: a paper's segment, a collection's stub, or an animal.
+  function growthInfo(state, k, id, b) {
+    if (k === 'seg') {
+      const p = state.papers.find((x) => x.id === id);
+      if (!p) return null;
+      return el('div', {}, el('b', {}, p.title || 'untitled paper'),
+        el('div', {}, `Collection: ${collName(p.branch)}`),
+        b && b !== p.branch ? el('div', { class: 'who' }, b === 'trunk' ? 'This trunk segment is the rise it caused.' : `This segment is the length it added to ${b}, a collection above its own.`) : null,
+        el('div', { class: 'who' }, `Read ${dayText(p.day)} · ${p.mult.toFixed(1)}x`));
+    }
+    if (k === 'branch') return el('div', {}, el('b', {}, id), el('div', { class: 'who' }, 'A collection with papers only in its subcollections so far.'));
+    if (k === 'creature') {
+      const c = state.creatures.find((x) => x.id === id);
+      if (!c) return null;
+      return el('div', {}, el('b', {}, `${c.name || `An unnamed ${c.animal}`}`, el('span', { class: 'who' }, ` · ${c.animal}`)),
+        el('div', {}, c.title || 'untitled'),
+        el('div', { class: 'who' }, `Submitted ${dayText(c.day)}`, c.published ? ' · published' : '',
+          c.doi ? ` · doi ${c.doi}` : '', c.citations != null ? ` · ${c.citations} citation${c.citations === 1 ? '' : 's'}` : c.doi ? ' · citations not counted yet' : ''));
+    }
+    return null;
+  }
+
+  function growthEvent(ev) {
+    const t = `“${ev.title || 'untitled'}”`;
+    const text = ev.kind === 'paper' ? `Read ${t}: ${collName(ev.branch)} grew${ev.mult > 1 ? ` (${ev.mult.toFixed(1)}x)` : ''}`
+      : ev.kind === 'leaf' ? `${t} done by its deadline: a leaf${ev.mult > 1 ? ` (${ev.mult.toFixed(1)}x)` : ''}`
+        : ev.kind === 'passed' ? `${t}'s deadline passed: the streak breaks`
+          : `${t} submitted: a ${ev.animal} arrived`;
+    return el('li', { class: `gev ${ev.kind}` }, text);
+  }
+
+  async function saveTreeDoc() {
+    const doc = { seed: growthDocs.tree.seed || G.DEFAULT_SEED, creatures: growthDocs.tree.creatures || {} };
+    growthDocs.tree = doc;
+    await put('personal/tree.json', new TextEncoder().encode(JSON.stringify(doc, null, 1)), 'tree: creature names');
+  }
+
+  function creatureBox(c, redraw) {
+    const name = el('input', { type: 'text', placeholder: `Name the ${c.animal}`, value: c.name || '' });
+    const animal = el('select', {}, G.ANIMALS.map(([a]) => el('option', { value: a, selected: a === c.animal ? true : null }, a)));
+    const st = el('div', { class: 'status' });
+    return el('div', { class: 'gcreature', 'data-i': c.id },
+      el('div', { class: 'who' }, c.title || 'untitled'),
+      el('div', { class: 'row' }, name, animal, el('button', { class: 'primary', onclick: async () => {
+        const cs = { ...(growthDocs.tree.creatures || {}) };
+        cs[c.id] = { name: name.value.trim() || null, animal: animal.value };
+        growthDocs.tree = { ...growthDocs.tree, creatures: cs };
+        st.textContent = 'Saving…';
+        try { await saveTreeDoc(); redraw(); } catch (err) { st.textContent = `Not saved: ${err.message}`; }
+      } }, 'Save')), st);
+  }
+
+  // A mouse drag on the tree view pans it (one pair of window listeners for every view drawn).
+  let gdrag = null, gdragged = false;
+  window.addEventListener('pointermove', (ev) => {
+    if (!gdrag) return;
+    if (Math.abs(ev.clientX - gdrag.x) + Math.abs(ev.clientY - gdrag.y) > 4) gdrag.moved = true;
+    gdrag.view.scrollLeft = gdrag.l - (ev.clientX - gdrag.x);
+    gdrag.view.scrollTop = gdrag.t - (ev.clientY - gdrag.y);
+  });
+  window.addEventListener('pointerup', () => { gdragged = !!(gdrag && gdrag.moved); gdrag = null; });
+
+  // The tree in a scrolling view: + and − zoom (and Ctrl+wheel), drag pans with a mouse, touch scrolls.
+  // It opens fitted to the view and scrolled to the bottom, where the tree starts.
+  function growthViewer(state, info) {
+    const names = safeGet('loop.tree.names') === '1';
+    const view = el('div', { class: 'gview' });
+    view.innerHTML = G.svg(state, { branchNames: names });
+    const svgEl = view.querySelector('svg');
+    const vb = svgEl.viewBox.baseVal;
+    let z = 1, fit = 1;
+    const apply = (nz, cx, cy) => {
+      const W = view.clientWidth, H = view.clientHeight;
+      const fx = (view.scrollLeft + (cx ?? W / 2)) / (svgEl.clientWidth || 1);
+      const fy = (view.scrollTop + (cy ?? H / 2)) / (svgEl.clientHeight || 1);
+      z = Math.max(fit, Math.min(12, nz));
+      svgEl.style.width = `${z * 100}%`;
+      view.scrollLeft = fx * svgEl.clientWidth - (cx ?? W / 2);
+      view.scrollTop = fy * svgEl.clientHeight - (cy ?? H / 2);
+    };
+    const start = () => {
+      const W = view.clientWidth, H = view.clientHeight;
+      fit = Math.min(1, (H * vb.width / vb.height) / W);
+      z = fit;
+      svgEl.style.width = `${z * 100}%`;
+      view.scrollTop = view.scrollHeight;
+    };
+    view.addEventListener('wheel', (ev) => {
+      if (!ev.ctrlKey) return;
+      ev.preventDefault();
+      const r = view.getBoundingClientRect();
+      apply(z * (ev.deltaY < 0 ? 1.15 : 1 / 1.15), ev.clientX - r.left, ev.clientY - r.top);
+    }, { passive: false });
+    view.addEventListener('pointerdown', (ev) => {
+      if (ev.pointerType !== 'mouse') return;
+      gdrag = { view, x: ev.clientX, y: ev.clientY, l: view.scrollLeft, t: view.scrollTop, moved: false };
+    });
+    // Tap or hover: the info line; every segment of the same paper lights up.
+    const show = (target) => {
+      view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
+      const k = target && target.dataset ? target.dataset.k : null;
+      const body = k ? growthInfo(state, k, target.dataset.i, target.dataset.b) : null;
+      if (!body) return false;
+      const sel = k === 'seg' ? `[data-k="seg"][data-i="${CSS.escape(target.dataset.i)}"]` : null;
+      (sel ? view.querySelectorAll(sel) : [target]).forEach((n) => n.classList.add('on'));
+      info.replaceChildren(body);
+      info.classList.add('on');
+      return true;
+    };
+    svgEl.addEventListener('pointerover', (ev) => { if (ev.pointerType === 'mouse') show(ev.target); });
+    svgEl.addEventListener('click', (ev) => {
+      if (gdragged) { gdragged = false; return; }
+      if (!show(ev.target)) { info.classList.remove('on'); info.replaceChildren(el('span', { class: 'who' }, 'Tap a branch or an animal.')); }
+    });
+    const zoom = el('div', { class: 'gzoom' },
+      el('button', { class: 'ghost', title: 'zoom in', onclick: () => apply(z * 1.5) }, '+'),
+      el('button', { class: 'ghost', title: 'zoom out', onclick: () => apply(z / 1.5) }, '−'),
+      el('button', { class: 'ghost', title: 'whole tree', onclick: start }, 'Fit'));
+    return { el: el('div', { class: 'gwrap' }, view, zoom), start };
+  }
+
+  async function showTree() {
+    await loadMine();
+    const state = growthState();
+    const redraw = () => showTree();
+    const info = el('div', { class: 'ginfo' }, el('span', { class: 'who' }, 'Tap a branch or an animal.'));
+    const viewer = growthViewer(state, info);
+    const names = el('input', { type: 'checkbox' });
+    names.checked = safeGet('loop.tree.names') === '1';
+    names.addEventListener('change', () => { safeSet('loop.tree.names', names.checked ? '1' : null); redraw(); });
+    const stat = (k, v) => el('div', { class: 'gstat' }, el('b', {}, v), el('span', {}, k));
+    const head = el('section', { class: 'ghead' },
+      stat('stage', state.stage), stat('tall', metres(state.height)),
+      stat(`day${state.streak === 1 ? '' : 's'} in a row`, String(state.streak)),
+      stat('multiplier now', `${state.mult.toFixed(1)}x`),
+      stat('papers', String(state.papers.length)), stat('leaves', String(state.leaves.length)));
+    const log = el('ol', { class: 'glog' }, state.events.slice(0, 40).map(growthEvent));
+    const more = state.events.length > 40 ? el('button', { class: 'link', onclick: () => {
+      log.replaceChildren(...state.events.map(growthEvent)); more.remove();
+    } }, `Show all ${state.events.length}`) : null;
+    const animals = state.creatures.length
+      ? el('details', { class: 'pextra ganimals', open: state.creatures.some((c) => !c.name) ? true : null },
+        el('summary', {}, `Animals (${state.creatures.length})`), ...state.creatures.map((c) => creatureBox(c, redraw)))
+      : el('p', { class: 'who' }, 'Animals arrive when a Write entry is ticked Submitted.');
+    main().replaceChildren(head,
+      el('div', { class: 'row gtools' }, el('label', { class: 'wstate' }, names, 'Show branch names'), el('span', { class: 'grow' }),
+        el('span', { class: 'who' }, 'A good day: a paper read and no deadline passed. Each good day in a row adds 0.2x, up to 2x.')),
+      viewer.el, info, animals,
+      el('section', { class: 'gloghead' }, el('h3', {}, 'Growth'), state.events.length ? log : el('p', { class: 'empty' }, 'Nothing has grown yet: tick a Read paper done.'), more));
+    requestAnimationFrame(viewer.start);
+    setPoll(async () => {
+      const before = [...tree.paths].filter((x) => x.startsWith('personal/') || x === 'state/citations.json').join();
+      await loadTree();
+      if ([...tree.paths].filter((x) => x.startsWith('personal/') || x === 'state/citations.json').join() !== before && !main().querySelector('.gcreature input:focus')) redraw();
+    }, 60_000);
+  }
+
+  // Wide screens: the tree, small, in a right-hand panel on every page, scrolled to its foot.
+  const wide = () => matchMedia('(min-width: 1100px)').matches;
+  async function drawSide() {
+    const side = $('#gside');
+    if (!wide() || !cfg.token || location.hash.startsWith('#/tree') || location.hash.startsWith('#/settings')) {
+      side.hidden = true;
+      document.body.classList.remove('with-side');
+      return;
+    }
+    if (!mineLoaded) await loadMine();
+    const state = growthState();
+    const pic = el('a', { class: 'gmini', href: '#/tree', title: 'Open the tree' });
+    pic.innerHTML = G.svg(state, { mini: true });
+    side.replaceChildren(el('div', { class: 'gsidehead' }, el('a', { href: '#/tree' }, 'Tree'),
+      el('span', { class: 'who' }, ` ${state.stage} · ${metres(state.height)}`,
+        state.streak ? ` · ${state.streak} d · ${state.mult.toFixed(1)}x` : '')), pic);
+    side.style.top = `${$('header.bar').offsetHeight}px`;
+    side.hidden = false;
+    document.body.classList.add('with-side');
+    pic.scrollTop = pic.scrollHeight;
   }
 
   // Status: upcoming deadlines from Mine (open entries due within 14 days, or overdue).
@@ -941,14 +1199,16 @@
     refreshItem = null;
     justSent = null;
     try {
-      const meta = h[0] === 'status' ? 'status' : h[0] === 'mine' ? 'mine' : 'work';
+      const meta = ['status', 'mine', 'tree'].includes(h[0]) ? h[0] : 'work';
       document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'status') await showStatus();
       else if (h[0] === 'mine') await showMine(h[1]);
+      else if (h[0] === 'tree') await showTree();
       else if (h[0] === 'settings') showSettings();
       else await showList(h[0] === 'list' ? h[1] : null);
       window.scrollTo(0, 0);
+      drawSide().catch(() => {});
     } catch (e) {
       if (e.status === 401 || e.status === 403 || e.status === 404) showSettings(`GitHub said ${e.message}. Check the token and repository.`);
       else main().replaceChildren(el('p', { class: 'warn' }, `Could not load: ${e.message}`), el('button', { class: 'ghost', onclick: route }, 'Try again'));
@@ -956,6 +1216,8 @@
   }
 
   window.addEventListener('hashchange', route);
+  let resizeTimer = null;
+  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => drawSide().catch(() => {}), 300); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && tree.at && Date.now() - tree.at > 20_000) route(); });
   $('#refresh').addEventListener('click', route);
   route();

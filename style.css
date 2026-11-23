@@ -357,3 +357,50 @@ details.pextra .blocks { font-size: 15px; }
 details.addlink { margin: 4px 0 8px; }
 details.addlink > summary { cursor: pointer; font-size: 14px; color: var(--accent); }
 details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+
+/* Mine: a Write entry's states */
+.wstates { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 14px; margin: 4px 0; }
+.wstate { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+.wstate input { width: 16px; height: 16px; margin: 0; }
+.wver { font: 600 13px ui-monospace, monospace; min-width: 1.6em; }
+.wup { padding: 0 8px; font-size: 12px; line-height: 20px; }
+.wdoi { font: 13px ui-monospace, monospace; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); width: 15em; max-width: 100%; }
+.status.ask-note { color: var(--wait); font-weight: 600; }
+
+/* Tree */
+.ghead { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 4px 0 8px; }
+.gstat { display: grid; line-height: 1.2; }
+.gstat b { font-size: 20px; }
+.gstat span { font-size: 12px; color: var(--muted); }
+.gtools { margin: 4px 0 8px; gap: 8px; flex-wrap: wrap; }
+.gwrap { position: relative; }
+.gview { height: min(68vh, 680px); overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: #fff; overscroll-behavior: contain; cursor: grab; }
+.gview svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.gview .hits [data-k] { cursor: pointer; }
+.gview .hits .on { fill-opacity: .16; }
+.gzoom { position: absolute; right: 8px; top: 8px; display: flex; gap: 4px; }
+.gzoom button { background: rgba(255, 255, 255, .92); color: #111; border-color: #bbb; min-width: 34px; }
+.ginfo { min-height: 3.2em; margin: 8px 0; padding: 8px 12px; border-radius: 10px; background: var(--soft); font-size: 15px; }
+.gcreature { border-top: 1px solid var(--line); padding: 8px 0; }
+.gcreature .row { gap: 6px; flex-wrap: wrap; }
+.gcreature input, .gcreature select { font: inherit; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.gcreature input { flex: 1 1 10em; min-width: 0; }
+.glog { padding-left: 1.2em; font-size: 14px; }
+.glog li { margin: 2px 0; }
+.glog .passed { color: var(--bad); }
+.gside { display: none; }
+@media (min-width: 1100px) {
+  body.with-side { padding-right: 250px; }
+  body.with-side .bar { margin-right: -250px; }
+  .gside:not([hidden]) { display: flex; flex-direction: column; position: fixed; right: 0; top: 58px; bottom: 0; width: 240px; border-left: 1px solid var(--line); background: var(--panel); }
+  .gsidehead { padding: 8px 10px; font-size: 14px; border-bottom: 1px solid var(--line); }
+  .gsidehead a { font-weight: 700; }
+  .gmini { flex: 1; overflow-y: auto; display: block; background: #fff; }
+  .gmini svg { display: block; width: 100%; height: auto; }
+}
+@media (max-width: 480px) {
+  .bar { gap: 6px; padding-left: 10px; padding-right: 10px; }
+  .bar .ghost { padding: 6px 9px; }
+  .meta { margin-left: 2px; }
+  .meta a { padding: 4px 8px; }
+}
