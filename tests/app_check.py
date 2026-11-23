@@ -30,9 +30,19 @@ PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAEAAAAAgCAIAAAAt/+nTAAAAJklEQVR4
 CHROME = os.environ.get('CHROME', '/usr/bin/google-chrome')
 
 
+USAGE = """Current session: 43% used · resets Nov 23, 1:19pm (Pacific/Auckland)
+Current week (all models): 57% used · resets Nov 26, 7am (Pacific/Auckland)
+Current week (Fable): 92% used · resets Nov 26, 7am (Pacific/Auckland)
+
+Last 24h · 663 requests · 17 sessions
+  77%  Start fresh when you switch tasks · run /clear
+"""
+
+
 def loop(loop_bin, repo, *args):
     env = dict(os.environ, LOOP_REPO=str(repo), LOOP_NO_GIT='1', LOOP_JOBS_DIR=str(repo / 'nojobs'),
-               LOOP_QUEUE=str(repo / 'noqueue.json'))
+               LOOP_QUEUE=str(repo / 'noqueue.json'), LOOP_PROJECTS_DIR=str(repo / 'noprojects'),
+               LOOP_FAKE_USAGE=USAGE)
     r = subprocess.run([sys.executable, str(loop_bin), *args], env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
@@ -72,7 +82,7 @@ def make_fixture(loop_bin, tmp, graph):
                quiz,
                {'type': 'checklist', 'items': ['merge #1 first', 'CI green']}]
     (tmp / 'r.json').write_text(json.dumps({'title': 'PR 12 review guide', 'page': 'result', 'blocks': blocks}))
-    loop(loop_bin, repo, 'post', 'review', '--from', 'HIGH-session-b', '--spec', str(tmp / 'r.json'),
+    loop(loop_bin, repo, 'post', 'review', '--from', 'HIGH-session-b', '--importance', 'med', '--spec', str(tmp / 'r.json'),
          '--link', 'https://github.com/org/repo/pull/12')
     loop(loop_bin, repo, 'post', 'question', 'A low one', '--from', 'LOW-x')
     batch = {'title': 'Two set-up choices', 'questions': [
@@ -81,6 +91,11 @@ def make_fixture(loop_bin, tmp, graph):
          'blocks': [{'type': 'figure', 'src': 'fig.png', 'caption': 'cost'}]}]}
     (tmp / 'batch.json').write_text(json.dumps(batch))
     loop(loop_bin, repo, 'post', 'question', '--from', 'MED-y', '--spec', str(tmp / 'batch.json'))
+    (repo / 'nojobs/aaaa0001').mkdir(parents=True)
+    (repo / 'nojobs/aaaa0001/state.json').write_text(json.dumps({
+        'name': 'HIGH-session-a', 'state': 'blocked', 'tempo': 'blocked', 'updatedAt': '2026-11-23T00:00:00Z',
+        'detail': 'waiting on LOOP Q-001 after drafting the run plan'}))
+    loop(loop_bin, repo, 'status', '--force')
     return repo
 
 
@@ -150,8 +165,14 @@ def run(loop_bin, graph, shots):
                 page.goto(base + '#/list')
                 page.wait_for_selector('.card')
                 tabs = page.locator('.tabs a').all_inner_texts()
-                check(page, tabs[0].startswith('Blocking') and tabs[0].endswith('1'), f'board tabs {tabs}', failures)
+                check(page, [t[:4] for t in tabs] == ['Ques', 'Cont', 'Revi'] and tabs[0].endswith('31'),
+                      f'board tabs Questions/Content/Review, with the blocking count {tabs}', failures)
                 check(page, page.locator('.card .id').first.inner_text() == 'Q-001', 'blocking question listed first', failures)
+                page.locator('.switch button', has_text='Blocking').click()
+                page.wait_for_selector('.switch button.on >> text=Blocking')
+                check(page, page.locator('.card').count() == 1, 'Blocking switch shows only blocking items', failures)
+                page.locator('.switch button', has_text='All').click()
+                page.wait_for_selector('.switch button.on >> text=All')
                 check(page, narrow(), 'board: no sideways scroll', failures)
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-board.png', full_page=True)
@@ -287,9 +308,15 @@ def run(loop_bin, graph, shots):
                 loop(loop_bin, repo, 'pull')
                 page.goto(base + '#/list')
                 page.wait_for_selector('details.history')
-                check(page, 'History (3)' in page.locator('details.history > summary').inner_text(),
-                      'answered items move to History', failures)
+                check(page, 'Questions history (2)' in page.locator('details.history > summary').inner_text(),
+                      'answered questions move to the Questions history', failures)
                 check(page, page.locator('.tabs a').count() == 3, 'three tabs, history below', failures)
+                page.goto(base + '#/list/pr')
+                page.wait_for_selector('details.history > summary >> text=Review history')
+                check(page, 'Review history (1)' in page.locator('details.history > summary').inner_text(),
+                      'each tab has only its own history', failures)
+                page.goto(base + '#/list/question')
+                page.wait_for_selector('details.history')
                 page.locator('details.history > summary').click()
                 page.locator('details.hentry', has_text='Q-003').locator('summary').click()
                 page.wait_for_selector('details.hentry[open] .hq')
@@ -304,6 +331,28 @@ def run(loop_bin, graph, shots):
                 rq = [json.loads(f.read_text()) for f in (repo / 'requests/Q-003').glob('*.json')]
                 check(page, any(r.get('kind') == 'revisit' and r['text'] == 'Was explicit right after all?' for r in rq),
                       'revisit request written for that item', failures)
+                # Status: usage, each agent with what it does, its entries, and a message box.
+                page.goto(base + '#/status')
+                page.wait_for_selector('.status-card .ulimit')
+                check(page, page.locator('.ulimit').count() == 3 and page.locator('.ufill.hi').count() == 1,
+                      'usage bars (one near its limit)', failures)
+                agent = page.locator('.agent', has_text='HIGH-session-a')
+                check(page, 'Blocked' in page.locator('.status-card', has=agent).locator('h3').inner_text(),
+                      'blocked agent under Blocked', failures)
+                check(page, agent.locator('.alinks a', has_text='Q-001').count() >= 1, 'blocked agent links its question', failures)
+                check(page, 'drafting the run plan' in agent.inner_text(), 'what the agent is doing', failures)
+                agent.locator('details.arecent summary').click()
+                check(page, agent.locator('details.arecent a', has_text='Q-001').count() == 1, "the agent's entries", failures)
+                agent.locator('details.amsg summary').click()
+                agent.locator('details.amsg textarea').fill('Do test 15 first.')
+                agent.locator('details.amsg button.primary').click()
+                page.wait_for_selector('details.amsg .status >> text=Sent')
+                msgs = [json.loads(f.read_text()) for f in (repo / 'messages/aaaa0001').glob('*.json')]
+                check(page, msgs and msgs[0]['text'] == 'Do test 15 first.' and msgs[0]['to'] == 'HIGH-session-a',
+                      'message to the agent written', failures)
+                check(page, narrow(), 'status: no sideways scroll', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-status.png', full_page=True)
                 check(page, not errors, f'no console errors {errors}', failures)
                 ctx.close()
 

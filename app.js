@@ -165,7 +165,8 @@
   let poller = null;
   let refreshItem = null;            // redraws the open item's thread and answers in place
   let justSent = null;               // id of the item whose answer was just sent (shows Next)
-  const SECTIONS = [['blocking', 'Blocking'], ['question', 'Questions'], ['content', 'Content'], ['pr', 'PR review']];
+  const SECTIONS = [['question', 'Questions'], ['content', 'Content'], ['pr', 'Review']];
+  const filterOf = (tab) => safeGet(`loop.filter.${tab}`) || 'all';
 
   function age(iso) {
     const h = (Date.now() - Date.parse(iso)) / 3.6e6;
@@ -193,7 +194,7 @@
     const partial = it.n_questions > 1 && it.n_answered > 0 && it.n_answered < it.n_questions;
     return el('a', { class: `card imp-${it.importance}`, href: `#/item/${it.id}` },
       el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
-        it.blocking ? el('span', { class: 'badge block' }, 'blocking') : null,
+        it.blocking_now ? el('span', { class: 'badge block' }, 'blocking') : null,
         it.n_questions > 1 ? el('span', { class: 'badge' }, `${it.n_questions} questions`) : null,
         partial ? el('span', { class: 'badge wait' }, `${it.n_answered} of ${it.n_questions} answered`) : null,
         it.requests_open ? el('span', { class: 'badge wait' }, 'detail requested') : null,
@@ -208,14 +209,21 @@
     await refreshIndex();
     const groups = Object.fromEntries(SECTIONS.map(([k]) => [k, []]));
     index.items.forEach((it) => { const s = sectionOf(it); if (groups[s]) groups[s].push(it); });
-    tab = SECTIONS.some(([k]) => k === tab) ? tab : SECTIONS.map(([k]) => k).find((k) => groups[k].length) || 'blocking';
+    const nblock = (k) => groups[k].filter((x) => x.blocking_now).length;
+    tab = SECTIONS.some(([k]) => k === tab) ? tab
+      : SECTIONS.map(([k]) => k).find((k) => nblock(k)) || SECTIONS.map(([k]) => k).find((k) => groups[k].length) || 'question';
     const tabs = el('nav', { class: 'tabs' }, SECTIONS.map(([k, label]) => el('a', {
       href: `#/list/${k}`, class: k === tab ? 'on' : '',
-    }, label, el('span', { class: 'n' }, String(groups[k].length)))));
+    }, label, el('span', { class: 'n' }, String(groups[k].length)),
+    nblock(k) ? el('span', { class: 'nb', title: 'blocking' }, String(nblock(k))) : null)));
+    const filter = filterOf(tab);
+    const sw = el('div', { class: 'switch' }, [['blocking', `Blocking (${nblock(tab)})`], ['all', `All (${groups[tab].length})`]].map(([f, label]) =>
+      el('button', { class: f === filter ? 'on' : '', onclick: () => { safeSet(`loop.filter.${tab}`, f); showList(tab); } }, label)));
+    const shown = filter === 'blocking' ? groups[tab].filter((x) => x.blocking_now) : groups[tab];
     const list = el('div', { class: 'cards' });
-    if (!groups[tab].length) list.append(el('p', { class: 'empty' }, 'Nothing here.'));
-    groups[tab].forEach((it) => list.append(card(it)));
-    main().replaceChildren(tabs, list, historyBox(tab),
+    if (!shown.length) list.append(el('p', { class: 'empty' }, filter === 'blocking' ? 'Nothing blocking here.' : 'Nothing here.'));
+    shown.forEach((it) => list.append(card(it)));
+    main().replaceChildren(tabs, sw, list, historyBox(tab),
       el('p', { class: 'foot' }, `Updated ${new Date(index.generated).toLocaleString()}`));
     setPoll(async () => {
       const before = index.generated + tree.paths.size;
@@ -303,7 +311,7 @@
 
   // Open items in board order, for Next.
   function boardOrder() {
-    const order = ['blocking', 'question', 'content', 'pr'];
+    const order = ['question', 'content', 'pr'];
     return index.items.filter((x) => order.includes(sectionOf(x)))
       .sort((a, b) => order.indexOf(sectionOf(a)) - order.indexOf(sectionOf(b)));
   }
@@ -330,12 +338,13 @@
       detailBox: ({ quiz, label }) => detailBox(id, { quiz }, label),
     };
     const { pos, total } = nextAfter(id);
+    const row = index.items.find((x) => x.id === id) || {};
     const head = el('header', { class: 'item-head' },
       el('div', { class: 'navrow' }, el('a', { href: '#/list', class: 'back' }, '← Board'),
         el('span', { class: 'grow' }), pos ? el('span', { class: 'pos' }, `${pos} of ${total}`) : null,
         nextLink(id, 'Next')),
       el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
-        it.blocking ? el('span', { class: 'badge block' }, 'blocking') : null,
+        row.blocking_now ? el('span', { class: 'badge block' }, 'blocking') : it.blocking ? el('span', { class: 'badge' }, 'blocks when the agent stops') : null,
         qs.length > 1 ? el('span', { class: 'badge' }, `${qs.length} questions`) : null,
         el('span', { class: 'badge' }, it.status), el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
       el('h2', { html: inline(it.title) }),
@@ -550,8 +559,19 @@
         r.items && r.items.length ? el('div', { class: 'alinks' }, 'Waiting on: ', r.items.map((id) =>
           el('a', { href: `#/item/${id}`, class: 'alink' }, el('b', {}, id), titles.has(id) ? ` ${titles.get(id).slice(0, 70)}` : ''))) : null,
         r.why && !(r.items && r.items.length) ? el('div', { class: 'awhy' }, r.why) : null,
-        r.detail && r.state !== 'blocked' ? el('div', { class: 'who adetail' }, r.detail) : null,
-        el('div', { class: 'who' }, r.running ? '' : 'not running · ', r.updated ? `last active ${age(r.updated)} ago` : '')))
+        r.working_on ? el('div', { class: 'adetail' }, el('span', { class: 'who' }, r.state === 'working' ? 'Working on: ' : 'Last: '), r.working_on) : null,
+        el('div', { class: 'who' }, r.running ? '' : 'not running · ', r.updated ? `last active ${age(r.updated)} ago` : ''),
+        (r.recent || []).length ? el('details', { class: 'arecent' }, el('summary', {}, `Its entries (${r.recent.length})`),
+          el('div', { class: 'alinks' }, r.recent.map((x) => el('a', { href: `#/item/${x.id}`, class: 'alink' + (x.blocking_now ? ' blocking' : '') },
+            el('b', {}, x.id), ` ${x.title.slice(0, 70)} `,
+            el('span', { class: 'who' }, `${{ question: 'question', content: 'content', pr: 'review' }[x.tab] || x.tab}${['answered', 'closed'].includes(x.status) ? ' · ' + x.status : ''}`))))) : null,
+        el('details', { class: 'detail amsg' }, el('summary', {}, `Message ${r.name}`),
+          composer({
+            placeholder: 'Guide this agent. It is typed into its session within seconds (or restarts it). Images welcome.',
+            enterSends: false,
+            sendLabel: 'Send',
+            onSend: async (text, imgs) => { await send('messages', r.job, { kind: 'message', to: r.name, text }, imgs); },
+          }))))
         : el('p', { class: 'empty' }, 'None.')));
     main().replaceChildren(usage, ...sections,
       el('p', { class: 'foot' }, `Updated ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
