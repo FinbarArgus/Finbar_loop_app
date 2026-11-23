@@ -94,7 +94,7 @@ def make_fixture(loop_bin, tmp, graph):
     (repo / 'nojobs/aaaa0001').mkdir(parents=True)
     (repo / 'nojobs/aaaa0001/state.json').write_text(json.dumps({
         'name': 'HIGH-session-a', 'state': 'blocked', 'tempo': 'blocked', 'updatedAt': '2026-11-23T00:00:00Z',
-        'detail': 'waiting on LOOP Q-001 after drafting the run plan'}))
+        'detail': 'waiting on LOOP Q-0001 after drafting the run plan'}))
     loop(loop_bin, repo, 'status', '--force')
     return repo
 
@@ -167,7 +167,7 @@ def run(loop_bin, graph, shots):
                 tabs = page.locator('.tabs a').all_inner_texts()
                 check(page, [t[:4] for t in tabs] == ['Ques', 'Cont', 'Revi'] and tabs[0].endswith('31'),
                       f'board tabs Questions/Content/Review, with the blocking count {tabs}', failures)
-                check(page, page.locator('.card .id').first.inner_text() == 'Q-001', 'blocking question listed first', failures)
+                check(page, page.locator('.card .id').first.inner_text() == 'Q-0001', 'blocking question listed first', failures)
                 page.locator('.switch button', has_text='Blocking').click()
                 page.wait_for_selector('.switch button.on >> text=Blocking')
                 check(page, page.locator('.card').count() == 1, 'Blocking switch shows only blocking items', failures)
@@ -177,7 +177,7 @@ def run(loop_bin, graph, shots):
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-board.png', full_page=True)
 
-                page.goto(base + '#/item/Q-001')
+                page.goto(base + '#/item/Q-0001')
                 page.wait_for_selector('.figure img[src^="blob:"]')
                 page.wait_for_function("document.querySelector('.figure img').naturalWidth > 0")
                 check(page, page.locator('.katex').count() >= 2, 'maths rendered', failures)
@@ -192,8 +192,8 @@ def run(loop_bin, graph, shots):
                 box.locator('textarea').fill(f'Show the errors ({label})')
                 box.locator('textarea').press('Enter')
                 page.wait_for_selector('.exchange .who.pending')
-                reqs = sorted((repo / 'requests/Q-001').glob('*.json'))
-                imgs = sorted((repo / 'requests/Q-001').glob('*.png'))
+                reqs = sorted((repo / 'requests/Q-0001').glob('*.json'))
+                imgs = sorted((repo / 'requests/Q-0001').glob('*.png'))
                 check(page, reqs and json.loads(reqs[-1].read_text())['text'] == f'Show the errors ({label})',
                       'detail request written', failures)
                 check(page, imgs and json.loads(reqs[-1].read_text())['images'] == [imgs[-1].name],
@@ -201,7 +201,7 @@ def run(loop_bin, graph, shots):
 
                 # The owning session adds detail; the page shows it in place.
                 (tmp_l / 'resid.png').write_bytes(PNG)
-                loop(loop_bin, repo, 'add-detail', 'Q-001', '--request', reqs[-1].name,
+                loop(loop_bin, repo, 'add-detail', 'Q-0001', '--request', reqs[-1].name,
                      '--text', f'Errors for {label} are below.', '--figure', str(tmp_l / 'resid.png'))
                 page.evaluate('window.LoopApp.refresh()')
                 page.wait_for_selector('.exchange .reply .figure img[src^="blob:"]')
@@ -213,14 +213,14 @@ def run(loop_bin, graph, shots):
                 page.locator('.answer textarea').fill('Large, and note the error term.')
                 page.locator('.answer button.primary').click()
                 page.wait_for_selector('.given .choice')
-                ans = sorted((repo / 'answers/Q-001').glob('*.json'))
+                ans = sorted((repo / 'answers/Q-0001').glob('*.json'))
                 a = json.loads(ans[-1].read_text()) if ans else {}
                 check(page, a.get('choice') == 'Large step' and 'error term' in a.get('text', ''), 'answer written', failures)
                 check(page, narrow(), 'question: no sideways scroll', failures)
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-question.png', full_page=True)
 
-                page.goto(base + '#/item/R-001')
+                page.goto(base + '#/item/R-0001')
                 page.wait_for_selector('.pbox')
                 if graph:
                     n = len(json.loads(Path(graph).read_text())['nodes'])
@@ -246,7 +246,7 @@ def run(loop_bin, graph, shots):
                 qd.locator('textarea').fill('Why C?')
                 qd.locator('textarea').press('Enter')
                 page.wait_for_selector('.exchange')
-                rq = [json.loads(f.read_text()) for f in (repo / 'requests/R-001').glob('*.json')]
+                rq = [json.loads(f.read_text()) for f in (repo / 'requests/R-0001').glob('*.json')]
                 check(page, any(r.get('quiz') == 2 and r['text'] == 'Why C?' for r in rq), 'quiz detail request names its question', failures)
                 page.locator('.choice-btn', has_text='Needs changes').click()
                 page.locator('.answer button.primary').click()
@@ -257,7 +257,7 @@ def run(loop_bin, graph, shots):
                     page.screenshot(path=f'{shots}/{label}-review.png', full_page=True)
 
                 # The review's diagram: three boxes with change marks, the removed one struck.
-                page.goto(base + '#/item/R-001')
+                page.goto(base + '#/item/R-0001')
                 page.wait_for_selector('.diagram .pbox')
                 check(page, page.locator('.diagram .pbox').count() == 3, 'diagram boxes', failures)
                 check(page, page.locator('.diagram .pbox.removed.struck').count() == 1
@@ -266,7 +266,7 @@ def run(loop_bin, graph, shots):
 
                 # A batch: one card per question, picks per question, a detail asked on question 2
                 # answered inside its card, one send, then Next.
-                page.goto(base + '#/item/Q-003')
+                page.goto(base + '#/item/Q-0003')
                 page.wait_for_selector('.question .qtitle')
                 cards = page.locator('.question')
                 check(page, cards.count() == 2, 'batch: a card per question', failures)
@@ -278,9 +278,9 @@ def run(loop_bin, graph, shots):
                 cards.nth(1).locator('details.detail textarea').fill('Why is explicit cheaper here?')
                 cards.nth(1).locator('details.detail textarea').press('Enter')
                 page.wait_for_selector('.question >> nth=1 >> .exchange .who.pending')
-                rq = [(f, json.loads(f.read_text())) for f in sorted((repo / 'requests/Q-003').glob('*.json'))]
+                rq = [(f, json.loads(f.read_text())) for f in sorted((repo / 'requests/Q-0003').glob('*.json'))]
                 check(page, rq and rq[-1][1].get('question') == 1, 'batch: detail request names its question', failures)
-                loop(loop_bin, repo, 'add-detail', 'Q-003', '--request', rq[-1][0].name, '--question', '1',
+                loop(loop_bin, repo, 'add-detail', 'Q-0003', '--request', rq[-1][0].name, '--question', '1',
                      '--text', 'Explicit needs no Jacobian.')
                 page.evaluate('window.LoopApp.refresh()')
                 page.wait_for_selector('.question >> nth=1 >> .exchange .reply >> text=no Jacobian')
@@ -288,7 +288,7 @@ def run(loop_bin, graph, shots):
                 check(page, cards.nth(1).locator('.choice-btn.on').count() == 1, 'batch: pick kept across the refresh', failures)
                 page.locator('.answer button.primary').click()
                 page.wait_for_selector('.after a')
-                ans = [json.loads(f.read_text()) for f in sorted((repo / 'answers/Q-003').glob('*.json'))]
+                ans = [json.loads(f.read_text()) for f in sorted((repo / 'answers/Q-0003').glob('*.json'))]
                 got = ans[-1]['answers'] if ans else []
                 check(page, len(got) == 2 and got[0]['text'] == 'coarse is fine for the test' and got[0]['choice'] is None
                       and got[1]['choice'] == 'explicit', f'batch: one answer file with both answers {got}', failures)
@@ -296,10 +296,10 @@ def run(loop_bin, graph, shots):
                 page.locator('.after a').click()
                 page.wait_for_function(f"location.hash === '{nxt}'")
                 page.wait_for_selector('.item-head h2')
-                check(page, nxt.startswith('#/item/') and nxt != '#/item/Q-003', f'Next after sending goes to {nxt}', failures)
+                check(page, nxt.startswith('#/item/') and nxt != '#/item/Q-0003', f'Next after sending goes to {nxt}', failures)
                 check(page, narrow(), 'batch: no sideways scroll', failures)
                 if shots:
-                    page.goto(base + '#/item/Q-003')
+                    page.goto(base + '#/item/Q-0003')
                     page.wait_for_selector('.question .qtitle')
                     page.screenshot(path=f'{shots}/{label}-batch.png', full_page=True)
 
@@ -318,7 +318,7 @@ def run(loop_bin, graph, shots):
                 page.goto(base + '#/list/question')
                 page.wait_for_selector('details.history')
                 page.locator('details.history > summary').click()
-                page.locator('details.hentry', has_text='Q-003').locator('summary').click()
+                page.locator('details.hentry', has_text='Q-0003').locator('summary').click()
                 page.wait_for_selector('details.hentry[open] .hq')
                 h = page.locator('details.hentry[open]').inner_text()
                 check(page, 'Which solver?' in h and 'explicit' in h and 'coarse is fine' in h,
@@ -328,7 +328,7 @@ def run(loop_bin, graph, shots):
                 rv.locator('textarea').fill('Was explicit right after all?')
                 rv.locator('textarea').press('Enter')
                 page.wait_for_selector('details.hentry[open] details.revisit .status >> text=Sent')
-                rq = [json.loads(f.read_text()) for f in (repo / 'requests/Q-003').glob('*.json')]
+                rq = [json.loads(f.read_text()) for f in (repo / 'requests/Q-0003').glob('*.json')]
                 check(page, any(r.get('kind') == 'revisit' and r['text'] == 'Was explicit right after all?' for r in rq),
                       'revisit request written for that item', failures)
                 # Status: usage, each agent with what it does, its entries, and a message box.
@@ -339,10 +339,10 @@ def run(loop_bin, graph, shots):
                 agent = page.locator('.agent', has_text='HIGH-session-a')
                 check(page, 'Blocked' in page.locator('.status-card', has=agent).locator('h3').inner_text(),
                       'blocked agent under Blocked', failures)
-                check(page, agent.locator('.alinks a', has_text='Q-001').count() >= 1, 'blocked agent links its question', failures)
+                check(page, agent.locator('.alinks a', has_text='Q-0001').count() >= 1, 'blocked agent links its question', failures)
                 check(page, 'drafting the run plan' in agent.inner_text(), 'what the agent is doing', failures)
                 agent.locator('details.arecent summary').click()
-                check(page, agent.locator('details.arecent a', has_text='Q-001').count() == 1, "the agent's entries", failures)
+                check(page, agent.locator('details.arecent a', has_text='Q-0001').count() == 1, "the agent's entries", failures)
                 agent.locator('details.amsg summary').click()
                 agent.locator('details.amsg textarea').fill('Do test 15 first.')
                 agent.locator('details.amsg button.primary').click()
