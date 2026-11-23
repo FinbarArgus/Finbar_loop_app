@@ -53,24 +53,43 @@
   // taking crown mass variation into account in pantropical allometries", Biogeosciences 13, 1571-1585,
   // doi:10.5194/bg-13-1571-2016: in 673 destructively sampled trees the crown held on average 34% of
   // above-ground mass for trees under 10 Mg, rising sharply above that to over 50% on average for trees of
-  // 45 Mg and more. A paper's mass goes to the branches with that probability, to the trunk otherwise.
-  // MG_PER_UNIT maps the tree's mass (in papers; a good-day paper counts 2) onto tree mass: about a year of
-  // reading reaches 10 Mg, about five years 45 Mg. Between them the share rises linearly in log mass.
+  // 45 Mg and more. That is the baseline share, branchShare(). MG_PER_UNIT maps the tree's mass (in papers;
+  // a good-day paper counts 2) onto tree mass: about a year of reading reaches 10 Mg, about five years
+  // 45 Mg. Between them the share rises linearly in log mass.
   const MG_PER_UNIT = 0.0225;
   function branchShare(units) {
     const mg = units * MG_PER_UNIT;
     if (mg <= 10) return 0.34;
     return Math.min(0.55, 0.34 + (0.50 - 0.34) * Math.log(mg / 10) / Math.log(45 / 10));
   }
-  // Branch mass starts a new branch with probability 1 / (1 + n/3) (n branches so far), else lengthens an
-  // existing one chosen in proportion to its mass, so a few limbs dominate as in a real crown.
-  const newBranchChance = (n) => 1 / (1 + n / 3);
+  // BRANCH_WEIGHT (Finbar's choice, 2026-11-23: "branch networks reach much further out") multiplies the
+  // baseline odds of branch over trunk: p = w q / (1 - q + w q) for baseline share q. With 3, a young tree
+  // puts 61% of its wood into branches (34% baseline) and an old one 75% (50%).
+  const BRANCH_WEIGHT = 3;
+  function branchChance(units) {
+    const q = branchShare(units);
+    return BRANCH_WEIGHT * q / (1 - q + BRANCH_WEIGHT * q);
+  }
+  // Branch wood starts a new branch with probability 1 / (1 + n/6) (n branches so far), else lengthens an
+  // existing one chosen in proportion to its mass, so a few limbs dominate as in a real crown. A new branch
+  // grows from another branch with probability NEW_FROM_BRANCH (once one is big enough), else from the trunk.
+  const newBranchChance = (n) => 1 / (1 + n / 6);
+  const NEW_FROM_BRANCH = 0.75;
   const GOOD_DAY = 2;                             // growth earned on a good day counts double
   const STAGES = [[0, 'seedling'], [20, 'sapling'], [150, 'young tree'], [600, 'tree'], [1500, 'old tree']];
   const stageOf = (units) => STAGES.filter(([m]) => units >= m).pop()[1];
-  const ANIMALS = [['owl', '🦉'], ['squirrel', '🐿️'], ['koala', '🐨'], ['sloth', '🦥'], ['gecko', '🦎'],
-    ['parrot', '🦜'], ['monkey', '🐒'], ['ladybird', '🐞'], ['snail', '🐌'], ['butterfly', '🦋'],
-    ['bee', '🐝'], ['caterpillar', '🐛']];
+  // The animals, drawn in blocks: '#' ink, 'o' paper, ' ' clear.
+  const ANIMALS = [
+    ['owl', ['#      #', '########', '#oo##oo#', '#o#oo#o#', '#oo##oo#', ' #o##o# ', ' #oooo# ', ' ###### ', '  #  #  ']],
+    ['squirrel', ['  ##   ##', ' #oo# #oo#', ' #o#o##oo#', '#ooooo#oo#', ' ##ooo#oo# ', '  #ooo#o#', '  #o#o## ', '  ## ##  ']],
+    ['snail', ['#  #     ', '#  #  ###', ' ## ##ooo#', ' #o##o##o#', ' #oo#o#oo#', ' #oo#oo#o#', '##########']],
+    ['beetle', [' #    # ', '  #  #  ', '  ####  ', ' #o##o# ', '#oo##oo#', '#o#oo#o#', '#oo##oo#', ' ###### ', '#  ##  #']],
+    ['bird', ['   ###   ', '  #ooo#  ', '  #o#o###', ' #oooo#  ', '#ooooo#  ', '#o#ooo#  ', ' #####   ', '  #  #   ']],
+    ['monkey', ['  ####   ', ' #oooo#  ', '#o#oo#o# ', '#oooooo# ', ' #o##o#  ', '  ####  #', ' #oooo# #', ' #oooo## ', ' #o##o#  ', ' ##  ##  ']],
+    ['caterpillar', ['#  #         ', ' ###  ##  ## ', '#o#o##oo##oo#', '#ooo#oo##oo# ', ' ### #  #  # ']],
+    ['bat', ['#   #   #   #', '##  #####  ##', '###o#o#o#o###', ' ##########  ', '  ## ### ##  ', '   #  #  #   ']],
+  ];
+  const CELL = 0.5;                               // one drawn block, in tree units
   const DEFAULT_SEED = 'loop-tree';
 
   // ---------------------------------------------------------------- derivation
@@ -111,13 +130,13 @@
     for (const p of papers) {
       const r = rng(seed, 'paper', p.id);
       p.weight = good.has(p.day) ? GOOD_DAY : 1;
-      if (r() < branchShare(grown)) {
+      if (r() < branchChance(grown)) {
         let b;
         if (!branches.length || r() < newBranchChance(branches.length)) {
-          const hosts = branches.filter((x) => x.mass >= 3 && x.depth < 3);
-          const parent = !hosts.length || r() < 0.55 ? null : pickWeighted(r, hosts, (x) => x.mass);
+          const hosts = branches.filter((x) => x.mass >= 2 && x.depth < 5);
+          const parent = !hosts.length || r() >= NEW_FROM_BRANCH ? null : pickWeighted(r, hosts, (x) => x.mass);
           b = { id: branches.length, parent: parent ? parent.id : null, depth: parent ? parent.depth + 1 : 1,
-            t: parent ? 0.3 + 0.6 * r() : 0.3 + 0.65 * r(), side: r() < 0.5 ? -1 : 1, spread: r(),
+            t: parent ? 0.25 + 0.7 * r() : 0.3 + 0.65 * r(), side: r() < 0.5 ? -1 : 1, spread: r(),
             mass: 0, papers: [], born: p.day };
           branches.push(b);
           p.grew = { to: 'branch', branch: b.id, new: true };
@@ -145,11 +164,12 @@
       const own = (treeDoc.creatures || {})[c.id] || {};
       const a = ANIMALS.find(([k]) => k === own.animal) || ANIMALS[hash(seed, 'animal', c.id) % ANIMALS.length];
       c.animal = a[0];
-      c.emoji = a[1];
+      c.sprite = a[1];
       c.name = own.name || null;
       const n = c.doi ? ((cites.dois || {})[String(c.doi).toLowerCase()] || {}).count : undefined;
       c.citations = Number.isFinite(n) ? n : null;
-      c.size = 1 + 0.25 * Math.log(1 + (c.citations || 0));     // grows with the log of its citations
+      // Block scale grows with the log of its citations: 1 at 0, 2 from 3, 3 from 20, 4 from 148.
+      c.size = 1 + Math.floor(0.5 * Math.log(1 + (c.citations || 0)));
       c.startHour = hourOf(c.at);
     }
     const branchMass = branches.reduce((s, b) => s + b.mass, 0);
@@ -161,13 +181,14 @@
     ].sort((a, b) => b.day.localeCompare(a.day));
     return { seed, today, papers, leaves, passed, creatures, goodDays, branches, events,
       trunk, mass: { trunk: trunk.mass - 1, branches: branchMass, total: grown },
-      leafCount: leaves.reduce((s, l) => s + l.weight, 0), stage: stageOf(grown), share: branchShare(grown) };
+      leafCount: leaves.reduce((s, l) => s + l.weight, 0), stage: stageOf(grown), share: branchShare(grown), chance: branchChance(grown) };
   }
 
   // ---------------------------------------------------------------- layout (tree units, y up)
 
   // Trunk: mass ~ D^(8/3) and height ~ D^(2/3), the metabolic-scaling forms; drawn shorter and wider than a
-  // real stem so the crown stays readable. Branches: base width ~ m^(3/8), length ~ m^(0.35), at most 0.8 H.
+  // real stem so the crown stays readable. Branches: base width ~ m^(3/8), length ~ m^(0.45), at most 1.3 H,
+  // so the branch network reaches well beyond the trunk.
   function layout(state) {
     const D = 0.55 * Math.pow(state.trunk.mass, 3 / 8);
     const H = 11 * Math.pow(D, 2 / 3) + 4;
@@ -178,20 +199,22 @@
     for (const b of state.branches) {
       const p = b.parent == null ? segs[0] : segOf.get(`b${b.parent}`);
       const base = at(p, b.t);
-      const off = p.kind === 'trunk' ? (30 + 35 * b.spread) : (20 + 25 * b.spread);
+      const off = p.kind === 'trunk' ? (30 + 35 * b.spread) : (20 + 30 * b.spread);
       const ang = p.ang + b.side * off * Math.PI / 180;
-      const w0 = Math.min(0.32 * Math.pow(Math.max(b.mass, 0.5), 3 / 8), 0.8 * widthAt(p, b.t));
-      const s = { id: `b${b.id}`, branch: b.id, x: base.x, y: base.y, ang, len: Math.min(0.8 * H, 4.2 * Math.pow(Math.max(b.mass, 0.5), 0.35) + 1.5),
+      const m = Math.max(b.mass, 0.5);
+      const w0 = Math.min(0.32 * Math.pow(m, 3 / 8), 0.8 * widthAt(p, b.t));
+      const s = { id: `b${b.id}`, branch: b.id, x: base.x, y: base.y, ang, len: Math.min(1.3 * H, 4.5 * Math.pow(m, 0.45) + 1.5),
         w0, w1: Math.max(0.06, 0.25 * w0), kind: 'branch', parent: p.id, t: b.t };
       segs.push(s);
       segOf.set(s.id, s);
     }
-    const leafSize = 0.9 + 0.035 * H;
     const leaves = state.leaves.map((l) => {
       const s = l.host == null ? segs[0] : segOf.get(`b${l.host}`);
       const t = l.host == null ? 0.7 + 0.3 * l.t : l.t;
       const p = at(s, t);
-      return { id: l.id, x: p.x, y: p.y, ang: s.ang + l.side * (0.5 + 0.7 * l.tilt), size: leafSize * (l.weight > 1 ? 1.4 : 1), good: l.weight > 1 };
+      const a = s.ang + l.side * (0.5 + 0.7 * l.tilt);
+      const r = CELL * (l.weight > 1 ? 2.5 : 1.8);
+      return { id: l.id, x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r, good: l.weight > 1 };
     });
     // Walk graph: on each segment, its ends, its children's attach points and stops about H/10 apart;
     // neighbours along the segment.
@@ -216,7 +239,7 @@
       for (let i = 1; i < list.length; i++) link(key(s.id, list[i - 1]), key(s.id, list[i]));
     }
     const graph = { start: 'trunk@0', nodes, adj: new Map([...adj].map(([k, v]) => [k, [...v].sort()])) };
-    return { H, D, segs, leaves, graph, leafSize, at };
+    return { H, D, segs, leaves, graph, at, widthAt };
   }
 
   // ---------------------------------------------------------------- the hourly walk
@@ -237,55 +260,106 @@
     return { node, path };
   }
 
-  // ---------------------------------------------------------------- SVG
+  // ---------------------------------------------------------------- SVG: black-and-white pixel blocks
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const f = (n) => (Math.round(n * 100) / 100).toString();
+  const INK = '#111', PAPER = '#fff';
+  // Leaves: a diamond outline of cells, 3 wide (5 on a good day).
+  const LEAF = [[' # ', '#o#', ' # '], ['  #  ', ' #o# ', '#ooo#', ' #o# ', '  #  ']];
 
-  // The tree as an SVG string. opts: {hour, labels (creature names), mini (no labels, no ground detail)}.
-  // Elements carry data-k (trunk, branch, leaf, creature) and data-i (branch number or entry id) for taps.
+  // Cells (integer i, j; j up) -> SVG rects, one per horizontal run.
+  function runs(cells, fill, extra = '') {
+    const rows = new Map();
+    for (const c of cells) {
+      const [i, j] = c.split(',').map(Number);
+      if (!rows.has(j)) rows.set(j, []);
+      rows.get(j).push(i);
+    }
+    let out = '';
+    for (const [j, is] of rows) {
+      is.sort((a, b) => a - b);
+      for (let k = 0; k < is.length;) {
+        let e = k;
+        while (e + 1 < is.length && is[e + 1] === is[e] + 1) e++;
+        out += `<rect x="${f(is[k] * CELL)}" y="${f(-(j + 1) * CELL)}" width="${f((e - k + 1) * CELL)}" height="${f(CELL)}" fill="${fill}"${extra}/>`;
+        k = e + 1;
+      }
+    }
+    return out;
+  }
+  // A sprite (rows of '#' ink, 'o' paper, ' ' clear) at cell (i, j) = its bottom-centre, scaled by n.
+  function stamp(rows, i, j, n, ink, paper) {
+    const w = rows[0].length, h = rows.length;
+    const i0 = i - Math.floor(w * n / 2);
+    rows.forEach((row, r) => [...row].forEach((ch, k) => {
+      if (ch === ' ') return;
+      for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
+        (ch === '#' ? ink : paper).add(`${i0 + k * n + a},${j + (h - 1 - r) * n + b}`);
+      }
+    }));
+    return { i0, j0: j, w: w * n, h: h * n };
+  }
+
+  // The tree as an SVG string, drawn in CELL-sized blocks. opts: {hour, mini (no names, no tap targets)}.
+  // Tap targets carry data-k (trunk, branch, leaf, creature) and data-i (branch number or entry id).
   function svg(state, opts = {}) {
     const L = layout(state);
     const hour = opts.hour != null ? opts.hour : hourOf(Date.now());
-    const pts = [];
-    const poly = (s) => {
-      const c = Math.cos(s.ang), si = Math.sin(s.ang);
-      const nx = -si, ny = c;
+    const cell = (x, y) => `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`;
+    const wood = new Set();
+    const hits = [];
+    for (const s of L.segs) {                      // rasterise each segment with a square brush
+      const steps = Math.max(2, Math.ceil(s.len / (CELL * 0.4)));
+      for (let k = 0; k <= steps; k++) {
+        const t = k / steps;
+        const p = L.at(s, t);
+        const hw = Math.max(CELL * 0.5, L.widthAt(s, t) / 2);
+        for (let x = p.x - hw + CELL / 2; x <= p.x + hw - CELL / 2 + 1e-9; x += CELL) {
+          for (let y = p.y - hw + CELL / 2; y <= p.y + hw - CELL / 2 + 1e-9; y += CELL) wood.add(cell(x, y));
+        }
+        wood.add(cell(p.x, p.y));
+      }
+      const c = Math.cos(s.ang), si = Math.sin(s.ang), w = Math.max(s.w0, CELL * 2);
       const ex = s.x + c * s.len, ey = s.y + si * s.len;
-      const p = [[s.x + nx * s.w0 / 2, s.y + ny * s.w0 / 2], [ex + nx * s.w1 / 2, ey + ny * s.w1 / 2],
-        [ex - nx * s.w1 / 2, ey - ny * s.w1 / 2], [s.x - nx * s.w0 / 2, s.y - ny * s.w0 / 2]];
-      p.forEach((q) => pts.push(q));
-      return p.map(([x, y]) => `${f(x)},${f(-y)}`).join(' ');
-    };
-    const wood = L.segs.map((s) => `<polygon class="wood" points="${poly(s)}" data-k="${s.kind}" data-i="${s.kind === 'trunk' ? 'trunk' : s.branch}"`
-      + ` fill="${s.kind === 'trunk' ? '#6b4426' : '#7a5230'}" stroke="#4a2e18" stroke-width="${f(Math.max(0.04, s.w0 * 0.06))}" stroke-linejoin="round"/>`).join('');
-    const leaves = L.leaves.map((l) => {
-      const deg = -l.ang * 180 / Math.PI;
-      const cx = l.x + Math.cos(l.ang) * l.size * 0.5, cy = l.y + Math.sin(l.ang) * l.size * 0.5;
-      pts.push([cx - l.size, cy - l.size], [cx + l.size, cy + l.size]);
-      return `<ellipse class="leaf" data-k="leaf" data-i="${esc(l.id)}" cx="${f(cx)}" cy="${f(-cy)}" rx="${f(l.size * 0.55)}" ry="${f(l.size * 0.25)}"`
-        + ` transform="rotate(${f(deg)} ${f(cx)} ${f(-cy)})" fill="${l.good ? '#6dbb3c' : '#3f8f35'}" stroke="#2c6b25" stroke-width="${f(l.size * 0.04)}"/>`;
-    }).join('');
-    const unit = L.leafSize * 1.3;
-    const critters = state.creatures.map((c) => {
+      hits.push(`<polygon points="${[[s.x - si * w / 2, s.y + c * w / 2], [ex - si * w / 2, ey + c * w / 2], [ex + si * w / 2, ey - c * w / 2], [s.x + si * w / 2, s.y - c * w / 2]]
+        .map(([x, y]) => `${f(x)},${f(-y)}`).join(' ')}" data-k="${s.kind}" data-i="${s.kind === 'trunk' ? 'trunk' : s.branch}"/>`);
+    }
+    const leafInk = new Set(), leafPaper = new Set();
+    L.leaves.forEach((l) => {
+      const [i, j] = cell(l.x, l.y).split(',').map(Number);
+      const b = stamp(LEAF[l.good ? 1 : 0], i, j - (l.good ? 2 : 1), 1, leafInk, leafPaper);
+      hits.push(`<rect x="${f(b.i0 * CELL)}" y="${f(-(b.j0 + b.h) * CELL)}" width="${f(b.w * CELL)}" height="${f(b.h * CELL)}" data-k="leaf" data-i="${esc(l.id)}"/>`);
+    });
+    const critInk = new Set(), critPaper = new Set();
+    let labels = '';
+    state.creatures.forEach((c) => {
       const { node } = walk(L.graph, state.seed, c.id, c.startHour, hour);
       const p = L.graph.nodes.get(node);
-      const size = unit * c.size;
-      pts.push([p.x - size, p.y], [p.x + size, p.y + size * 1.6]);
-      const label = !opts.mini && opts.labels !== false
-        ? `<text x="${f(p.x)}" y="${f(-p.y - size * 1.05)}" font-size="${f(unit * 0.42)}" text-anchor="middle" fill="currentColor" stroke="var(--tree-halo, #fff)" stroke-width="${f(unit * 0.08)}" paint-order="stroke">${esc(c.name || `${c.animal} (name me)`)}</text>` : '';
-      return `<g class="creature" data-k="creature" data-i="${esc(c.id)}" data-node="${esc(node)}"><text x="${f(p.x)}" y="${f(-p.y)}" font-size="${f(size)}" text-anchor="middle">${c.emoji}</text>${label}</g>`;
-    }).join('');
-    pts.push([-L.H * 0.35, 0], [L.H * 0.35, L.H]);
-    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-    const pad = L.H * 0.06;
-    const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad, y0 = -Math.max(...ys) - pad, y1 = L.H * 0.06;
-    const ground = `<ellipse cx="0" cy="0" rx="${f((x1 - x0) * 0.42)}" ry="${f(L.H * 0.035)}" fill="#8a6a45" opacity="0.35"/>`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)}" class="growth-tree" role="img"`
+      const [i, j] = cell(p.x, p.y).split(',').map(Number);
+      const b = stamp(c.sprite, i, j + 1, c.size, critInk, critPaper);
+      hits.push(`<rect x="${f(b.i0 * CELL)}" y="${f(-(b.j0 + b.h) * CELL)}" width="${f(b.w * CELL)}" height="${f(b.h * CELL)}" data-k="creature" data-i="${esc(c.id)}" data-node="${esc(node)}"/>`);
+      if (!opts.mini) {
+        labels += `<text x="${f((b.i0 + b.w / 2) * CELL)}" y="${f(-(b.j0 + b.h + 0.6) * CELL)}" font-size="${f(CELL * 3.2)}" font-family="ui-monospace, Menlo, Consolas, monospace" font-weight="700"`
+          + ` text-anchor="middle" fill="${INK}" stroke="${PAPER}" stroke-width="${f(CELL * 0.9)}" paint-order="stroke">${esc(c.name || `${c.animal} (name me)`)}</text>`;
+      }
+    });
+    const all = [...wood, ...leafInk, ...leafPaper, ...critInk, ...critPaper].map((c) => c.split(',').map(Number));
+    const is = all.map((c) => c[0]), js = all.map((c) => c[1]);
+    const pad = 3 + (opts.mini ? 0 : 4);
+    const i0 = Math.min(...is, -6) - pad, i1 = Math.max(...is, 6) + pad + 1, j1 = Math.max(...js) + pad + 1, jg = -2;
+    const ground = new Set();
+    const g = Math.round((i1 - i0) * 0.35);
+    for (let i = -g; i <= g; i++) ground.add(`${i},-1`);
+    const x0 = i0 * CELL, y0 = -j1 * CELL, w = (i1 - i0) * CELL, h = (j1 - jg) * CELL;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${f(x0)} ${f(y0)} ${f(w)} ${f(h)}" class="growth-tree" role="img" shape-rendering="crispEdges"`
       + ` aria-label="${esc(state.stage)}: ${state.papers.length} papers, ${state.leaves.length} leaves">`
-      + `${ground}${wood}${leaves}${critters}</svg>`;
+      + `<rect x="${f(x0)}" y="${f(y0)}" width="${f(w)}" height="${f(h)}" fill="${PAPER}"/>`
+      + runs(ground, INK) + runs(wood, INK) + runs(leafPaper, PAPER) + runs(leafInk, INK)
+      + runs(critPaper, PAPER) + runs(critInk, INK) + labels
+      + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits.join('')}</g>`) + '</svg>';
   }
 
-  return { hash, rng, dayOf, addDays, hourOf, branchShare, newBranchChance, stageOf, STAGES, ANIMALS, GOOD_DAY,
-    MG_PER_UNIT, DEFAULT_SEED, derive, layout, walk, svg };
+  return { hash, rng, dayOf, addDays, hourOf, branchShare, branchChance, BRANCH_WEIGHT, NEW_FROM_BRANCH, newBranchChance,
+    stageOf, STAGES, ANIMALS, GOOD_DAY, MG_PER_UNIT, DEFAULT_SEED, CELL, derive, layout, walk, svg };
 }));
