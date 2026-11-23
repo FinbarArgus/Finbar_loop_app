@@ -697,6 +697,22 @@ def run(loop_bin, graph, shots):
                 page.locator('.hinfo a', has_text='Q-0001').first.click()
                 page.wait_for_selector('.item-head h2')
                 check(page, 'Which step size' in page.locator('.item-head h2').inner_text(), 'Hills: the item it waits on opens', failures)
+                # An answer typed only in the general box: no empty per-question rows; it answers a one-question item.
+                out = loop(loop_bin, repo, 'post', 'question', 'Plain question for the general box?', '--from', 'HIGH-a')
+                qid = re.search(r'Q-\d{4}', out).group(0)
+                page.goto(base + f'#/item/{qid}')
+                page.reload()
+                page.wait_for_selector('.answer textarea')
+                page.locator('.answer textarea').fill('Only the general box.')
+                page.locator('.answer button.primary').click()
+                page.wait_for_selector('.given')
+                ans = [json.loads(f.read_text()) for f in sorted((repo / 'answers' / qid).glob('*.json'))]
+                got = ans[-1].get('answers') if ans else None
+                check(page, got == [{'question': 0, 'asked': 'Plain question for the general box?', 'choice': None, 'text': 'Only the general box.'}],
+                      f'answer from the general box only: one row for the question, no empty rows {got}', failures)
+                loop(loop_bin, repo, 'pull')
+                check(page, json.loads((repo / 'items' / qid / 'item.json').read_text())['status'] == 'answered',
+                      'answer from the general box counts as answered', failures)
                 check(page, not errors, f'no console errors {errors}', failures)
                 ctx.close()
 
