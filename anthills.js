@@ -6,7 +6,8 @@
 // LOW- small, IMPLEMENT- and the rest medium-small. Its design (shape, soil, entrances, grass, twigs, flowers)
 // is drawn from a hash of its name, so each hill is recognisable and stays the same. Its state shows at a
 // glance: working hills have ants running along a trail, a blocked hill has a rock on top and an amber tint,
-// a stalled or stopped hill is grey and still.
+// a stalled or stopped hill is grey and still. Dirt paths join agents that messaged each other (state/messages.json,
+// the last 50), wider and busier with ants the more messages went between them.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -65,7 +66,7 @@
   const C = {
     hole: '#3b2a1c', twig: '#5b4632', pebble: '#9c9a92', crown: '#b89b55', ant: '#2e2219',
     rock: '#8a8c88', rockDark: '#686a66', rockLight: '#b0b2ad', ground: '#d9d1b7', groundDark: '#cbc2a4',
-    trail: '#b3a37a', crumb: '#87a068', bg: '#f3f2ea', label: '#4a4036', warn: '#c4a24e',
+    trail: '#b3a37a', path: '#d3c59f', pathDark: '#bfae84', crumb: '#87a068', bg: '#f3f2ea', label: '#4a4036', warn: '#c4a24e',
   };
 
   // A hill's design, fixed by its name.
@@ -99,9 +100,18 @@
   // agents (status.json agents[]) -> {width, height, hills}: each hill with its agent, size, mood, design,
   // w, h, x0 (left), base (ground row), cx, ants (how many), rock, trail (polyline the ants follow, in blocks).
   // Rows hold the hills in priority order (queen first), blocked before working before quiet, then by name.
+  // opts.messages: state/messages.json ({messages: [{at, from, to}], pairs: [{a, b, count, last}]}); agents named
+  // there but missing from the status are drawn as stalled hills (ghost: true). Adds `paths`.
   function layout(agents, opts = {}) {
     const width = Math.max(40, opts.width || 72);
-    const list = (agents || []).filter((a) => a && a.name).map((agent) => {
+    const all = (agents || []).filter((a) => a && a.name);
+    const known = new Set(all.map((a) => a.name));
+    for (const pr of (opts.messages || {}).pairs || []) {
+      for (const n of [pr.a, pr.b]) {
+        if (n && !known.has(n)) { known.add(n); all.push({ name: n, state: 'stalled', running: false, ghost: true }); }
+      }
+    }
+    const list = all.map((agent) => {
       const size = sizeOf(agent);
       const [w, h] = SIZES[size];
       const mood = moodOf(agent);
@@ -133,7 +143,42 @@
       }
       y = base + LABEL;
     }
-    return { width, height: y + 1, hills: list };
+    const height = y + 1;
+    return { width, height, hills: list, paths: pathsOf(list, opts.messages, width, height) };
+  }
+
+  // ---------------------------------------------------------------- message paths
+
+  // A path's width in blocks for n messages: 1 for one, growing as sqrt, at most 5.
+  const pathWidth = (n) => Math.min(5, 1 + 0.8 * Math.sqrt(Math.max(0, n - 1)));
+  const MAX_PATH_ANTS = 8;
+
+  // One path per pair that messaged: from the foot of one hill (the side facing the other) to the other's, bowed
+  // so it does not run straight through the hills between (downwards, under the names, when both share a row).
+  function pathsOf(hills, messages, width, height) {
+    const by = new Map(hills.map((h) => [h.name, h]));
+    const msgs = (messages || {}).messages || [];
+    return ((messages || {}).pairs || []).filter((pr) => by.has(pr.a) && by.has(pr.b) && pr.a !== pr.b && pr.count > 0).map((pr) => {
+      const A = by.get(pr.a), B = by.get(pr.b);
+      const dir = Math.sign(B.cx - A.cx) || 1;
+      const p0 = { x: A.cx + dir * A.w * 0.35, y: A.base - 0.5 }, p2 = { x: B.cx - dir * B.w * 0.35, y: B.base - 0.5 };
+      const dx = p2.x - p0.x, dy = p2.y - p0.y, d = Math.hypot(dx, dy) || 1;
+      const bow = (hash('bow', pr.a, pr.b) % 2 ? 1 : -1) * Math.min(10, 0.18 * d);
+      const c = A.base === B.base ? { x: (p0.x + p2.x) / 2, y: A.base + 2 + Math.min(LABEL + 4, 0.12 * d) }
+        : { x: (p0.x + p2.x) / 2 - (dy / d) * bow, y: (p0.y + p2.y) / 2 + (dx / d) * bow };
+      const n = Math.max(8, Math.ceil(d / 1.5));
+      const trail = [];
+      for (let k = 0; k <= n; k++) {
+        const t = k / n, u = 1 - t;
+        trail.push({ x: Math.max(0.5, Math.min(width - 0.5, u * u * p0.x + 2 * u * t * c.x + t * t * p2.x)),
+          y: Math.max(0.5, Math.min(height - 1.5, u * u * p0.y + 2 * u * t * c.y + t * t * p2.y)) });
+      }
+      const between = msgs.filter((m) => (m.from === pr.a && m.to === pr.b) || (m.from === pr.b && m.to === pr.a));
+      return { a: pr.a, b: pr.b, count: pr.count, last: pr.last, w: pathWidth(pr.count), trail,
+        ants: Math.min(MAX_PATH_ANTS, pr.count),
+        ab: between.filter((m) => m.from === pr.a).length, ba: between.filter((m) => m.from === pr.b).length,
+        msgs: [...between].sort((x, y) => String(y.at).localeCompare(String(x.at))) };   // newest first
+    });
   }
 
   const colHeight = (hl, i) => Math.round(hl.h * profile(hl.design.shape, ((i + 0.5) / hl.w) * 2 - 1, hl.design.side));
@@ -306,6 +351,20 @@
       px.set(`${x},${b}`, C.ground);
       px.set(`${x},${b + 1}`, C.groundDark);
     }
+    for (const pa of L.paths) {                 // dirt paths, under everything else
+      const r = pa.w / 2;
+      for (let k = 1; k < pa.trail.length; k++) {
+        const a = pa.trail[k - 1], b = pa.trail[k], steps = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.3);
+        for (let m = 0; m <= steps; m++) {
+          const x = a.x + (b.x - a.x) * m / steps, y = a.y + (b.y - a.y) * m / steps;
+          for (let i = Math.floor(x - r); i <= Math.floor(x + r - 1e-9); i++) {
+            for (let j = Math.floor(y - r); j <= Math.floor(y + r - 1e-9); j++) {
+              if (Math.hypot(i + 0.5 - x, j + 0.5 - y) <= Math.max(0.75, r)) px.set(`${i},${j}`, (hash('dirt', i, j) % 7) ? C.path : C.pathDark);
+            }
+          }
+        }
+      }
+    }
     for (const hl of L.hills) {
       if (!hl.ants) continue;
       const [, , end] = hl.trail;
@@ -316,6 +375,15 @@
     }
     L.hills.forEach((hl) => paint(hl, px));
     let ants = '', labels = '', hits = '';
+    L.paths.forEach((pa, n) => {
+      for (let k = 0; k < pa.ants; k++) {
+        ants += `<g class="ant" data-p="${n}" data-a="${k}" transform="${antPose(antAt(pa, k, opts.t || 0))}">${ANT}</g>`;
+      }
+      if (!opts.mini) {
+        hits += `<polyline data-k="path" data-i="${n}" points="${pa.trail.map((q) => `${f(q.x)},${f(q.y)}`).join(' ')}"`
+          + ` fill="none" stroke="#000" stroke-opacity="0" stroke-width="${f(Math.max(2.5, pa.w + 1))}"/>`;
+      }
+    });
     L.hills.forEach((hl, n) => {
       for (let k = 0; k < hl.ants; k++) {
         const p = antAt(hl, k, opts.t || 0);
@@ -323,16 +391,16 @@
       }
       if (opts.mini) return;
       labels += `<text x="${f(hl.cx)}" y="${f(hl.base + 3.6)}" font-size="2.2" font-family="ui-monospace, Menlo, Consolas, monospace"`
-        + ` text-anchor="middle" fill="${hl.mood === 'quiet' ? '#8d8a84' : C.label}">${esc(label(hl))}</text>`;
+        + ` text-anchor="middle" fill="${hl.mood === 'quiet' ? '#8d8a84' : C.label}" stroke="${C.bg}" stroke-width="0.7" paint-order="stroke">${esc(label(hl))}</text>`;
       hits += `<rect data-k="hill" data-i="${n}" x="${hl.x0 - 2}" y="${hl.base - hl.h - TOP + 1}" width="${hl.w + 4}" height="${hl.h + TOP + LABEL - 1}"/>`;
     });
     const counts = MOOD_ORDER.map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L.width} ${L.height}" class="anthills" role="img" shape-rendering="crispEdges"`
       + ` aria-label="${L.hills.length} agents: ${counts}">`
       + `<rect width="${L.width}" height="${L.height}" fill="${C.bg}"/>` + rects(px)
-      + `<g class="ants">${ants}</g>${labels}`
+      + `${labels}<g class="ants">${ants}</g>`
       + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}</g>`) + '</svg>';
   }
 
-  return { antPose, hash, rng, sizeOf, moodOf, design, profile, layout, antAt, svg, label, SIZES, ANTS, SHAPES, SOILS, SPEED };
+  return { pathWidth, antPose, hash, rng, sizeOf, moodOf, design, profile, layout, antAt, svg, label, SIZES, ANTS, SHAPES, SOILS, SPEED };
 }));

@@ -91,3 +91,46 @@ test('names are escaped and shortened; the mini meadow has no text or tap target
   assert.match(H.svg(AGENTS, { width: 48 }), /data-k="hill" data-i="0"/);
   assert.match(H.svg([], { width: 48 }), /<svg/);
 });
+
+const MSGS = {
+  messages: [
+    { at: '2026-11-23T01:00:00Z', from: 'LOOP', to: 'HIGH-a', text: 'first' },
+    { at: '2026-11-23T02:00:00Z', from: 'HIGH-a', to: 'LOOP', text: 'second' },
+    { at: '2026-11-23T03:00:00Z', from: 'LOOP', to: 'HIGH-a', text: 'third' },
+    { at: '2026-11-23T04:00:00Z', from: 'ghost-agent', to: 'LOOP', text: 'from a session not in the status' }],
+  pairs: [{ a: 'HIGH-a', b: 'LOOP', count: 3, last: '2026-11-23T03:00:00Z' },
+    { a: 'LOOP', b: 'ghost-agent', count: 1, last: '2026-11-23T04:00:00Z' },
+    { a: 'LOOP', b: 'LOOP', count: 2, last: '2026-11-23T04:00:00Z' }],          // never a path to itself
+};
+
+test('path width: one block for one message, growing as sqrt, at most five', () => {
+  assert.equal(H.pathWidth(1), 1);
+  for (let n = 1; n < 60; n++) assert.ok(H.pathWidth(n + 1) >= H.pathWidth(n));
+  assert.ok(H.pathWidth(4) > 2 && H.pathWidth(4) < 3);
+  assert.equal(H.pathWidth(50), 5);
+  assert.equal(H.pathWidth(1000), 5);
+});
+
+test('message paths: one per pair, ants in proportion, messages newest first; agents only in messages are stalled hills', () => {
+  const L = H.layout(AGENTS, { width: 96, messages: MSGS });
+  const ghost = L.hills.find((h) => h.name === 'ghost-agent');
+  assert.ok(ghost && ghost.mood === 'quiet' && ghost.agent.ghost && ghost.ants === 0);
+  assert.equal(L.paths.length, 2);
+  const pa = L.paths.find((x) => x.a === 'HIGH-a');
+  assert.deepEqual([pa.count, pa.ab, pa.ba, pa.ants, pa.w], [3, 1, 2, 3, H.pathWidth(3)]);
+  assert.deepEqual(pa.msgs.map((m) => m.text), ['third', 'second', 'first']);
+  // ends at the two hills' feet, and ants stay on it
+  const A = L.hills.find((h) => h.name === 'HIGH-a'), B = L.hills.find((h) => h.name === 'LOOP');
+  const [s, e] = [pa.trail[0], pa.trail.at(-1)];
+  assert.ok(Math.abs(s.y - (A.base - 0.5)) < 1e-9 && Math.abs(e.y - (B.base - 0.5)) < 1e-9);
+  for (const p of pa.trail) assert.ok(p.x >= 0 && p.x <= L.width && p.y >= 0 && p.y <= L.height);
+  const q = H.antAt(pa, 1, 5.5);
+  assert.ok(pa.trail.some((p, i) => i && Math.min(Math.hypot(q.x - p.x, q.y - p.y), Math.hypot(q.x - pa.trail[i - 1].x, q.y - pa.trail[i - 1].y))
+    <= Math.hypot(p.x - pa.trail[i - 1].x, p.y - pa.trail[i - 1].y) + 1e-9));
+  const svg = H.svg(AGENTS, { width: 96, messages: MSGS });
+  assert.equal((svg.match(/data-k="path"/g) || []).length, 2);
+  assert.equal((svg.match(/class="ant" data-p=/g) || []).length, 3 + 1);
+  assert.match(svg, /fill="#d3c59f"/);                           // dirt
+  assert.doesNotMatch(H.svg(AGENTS, { width: 96 }), /data-k="path"|#d3c59f/);
+  assert.doesNotMatch(H.svg(AGENTS, { width: 96, messages: MSGS, mini: true }), /data-k=/);
+});

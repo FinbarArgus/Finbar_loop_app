@@ -1159,11 +1159,31 @@
       el('div', { class: 'who' }, a.updated ? `last active ${age(a.updated)} ago · ` : '', el('a', { href: '#/status' }, 'message it on Status')));
   }
 
+  // A path's messages, newest first, one at a time: ◀ steps back to older ones, ▶ forward again.
+  function pathInfo(pa) {
+    const box = el('div', {});
+    let k = 0;
+    const draw = () => {
+      const m = pa.msgs[k];
+      const older = el('button', { class: 'ghost hnav', title: 'older message', disabled: k >= pa.msgs.length - 1 ? true : null, onclick: () => { k++; draw(); } }, '◀ older');
+      const newer = el('button', { class: 'ghost hnav', title: 'newer message', disabled: k === 0 ? true : null, onclick: () => { k--; draw(); } }, 'newer ▶');
+      box.replaceChildren(
+        el('div', { class: 'arow' }, el('b', {}, `${pa.a} ↔ ${pa.b}`),
+          el('span', { class: 'who' }, ` · ${pa.count} of the last 50 messages (${pa.ab} from ${pa.a}, ${pa.ba} from ${pa.b})`)),
+        m ? el('div', { class: 'hmsg' },
+          el('div', { class: 'who' }, `${m.from} → ${m.to} · ${new Date(m.at).toLocaleString()} (${age(m.at)} ago)`),
+          el('div', { class: 'hmsgtext' }, m.text || '(no text)')) : el('p', { class: 'who' }, 'No messages to show.'),
+        pa.msgs.length > 1 ? el('div', { class: 'row hmsgnav' }, older, el('span', { class: 'who' }, `${k + 1} of ${pa.msgs.length}`), newer) : null);
+    };
+    draw();
+    return box;
+  }
+
   let hillsFrame = 0;
-  function animateAnts(view, hills) {
+  function animateAnts(view, hills, paths) {
     cancelAnimationFrame(hillsFrame);
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const ants = [...view.querySelectorAll('.ant')].map((g) => ({ g, hl: hills[+g.dataset.h], k: +g.dataset.a }));
+    const ants = [...view.querySelectorAll('.ant')].map((g) => ({ g, hl: g.dataset.p != null ? paths[+g.dataset.p] : hills[+g.dataset.h], k: +g.dataset.a }));
     if (!ants.length) return;
     let last = 0;
     const step = (now) => {
@@ -1177,40 +1197,47 @@
   }
 
   async function showHills() {
-    const [st] = await Promise.all([getJSON('state/status.json'), index.items.length ? null : refreshIndex(), loadMine()]);
+    await loadTree();                          // so a messages.json written since the last load is seen
+    const [st, msgs] = await Promise.all([getJSON('state/status.json'),
+      tree.paths.has('state/messages.json') ? getJSON('state/messages.json').catch(() => null) : null,
+      index.items.length ? null : refreshIndex(), loadMine()]);
     lastStatus = st;
     const agents = st.agents || [];
     const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, 'Tap a hill.'));
     const view = el('div', { class: 'hview' });
-    const tree = el('a', { class: 'htree gmini', href: '#/tree', title: 'Open the tree' });
+    const treePic = el('a', { class: 'htree gmini', href: '#/tree', title: 'Open the tree' });
     const state = growthState();
-    tree.innerHTML = G.svg(state, { mini: true });
+    treePic.innerHTML = G.svg(state, { mini: true });
     const legend = el('div', { class: 'hlegend' },
       el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
-      el('span', {}, el('b', {}, 'Grey'), ' stalled'), el('span', {}, el('b', {}, 'Size'), ' priority (crown: LOOP)'));
+      el('span', {}, el('b', {}, 'Grey'), ' stalled'), el('span', {}, el('b', {}, 'Size'), ' priority (crown: LOOP)'),
+      el('span', {}, el('b', {}, 'Paths'), ' messages between them (last 50; tap one to read them)'));
     const counts = ['blocked', 'working', 'quiet'].map((m) => [m, agents.filter((a) => H.moodOf(a) === m).length]);
     main().replaceChildren(
       el('section', { class: 'ghead' }, ...counts.map(([m, n]) => el('div', { class: 'gstat' }, el('b', {}, String(n)), el('span', {}, m === 'quiet' ? 'stalled' : m)))),
       el('div', { class: 'hillsgrid' },
         el('div', { class: 'hillscol' }, legend, view, info),
-        el('div', { class: 'treecol' }, el('div', { class: 'who' }, el('a', { href: '#/tree' }, 'Tree'), ` ${state.stage} · ${metres(state.height)}`), tree)),
+        el('div', { class: 'treecol' }, el('div', { class: 'who' }, el('a', { href: '#/tree' }, 'Tree'), ` ${state.stage} · ${metres(state.height)}`), treePic)),
       el('p', { class: 'foot' }, `Agents as of ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
     const width = Math.max(48, Math.min(96, Math.round(view.clientWidth / 8)));
-    const L = H.layout(agents, { width });
-    view.innerHTML = H.svg(agents, { width, t: performance.now() / 1000 });
+    const L = H.layout(agents, { width, messages: msgs });
+    view.innerHTML = H.svg(agents, { width, messages: msgs, t: performance.now() / 1000 });
     if (!agents.length) view.replaceChildren(el('p', { class: 'empty' }, 'No agents in the status yet.'));
-    view.addEventListener('click', (ev) => {
-      const t = ev.target.closest('[data-k="hill"]');
+    let shown = null;
+    const show = (t) => {
+      if (!t || t === shown) return;
+      shown = t;
       view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
-      if (!t) return;
       t.classList.add('on');
-      info.replaceChildren(hillInfo(L.hills[+t.dataset.i]));
-    });
-    animateAnts(view, L.hills);
-    tree.scrollTop = tree.scrollHeight;
+      info.replaceChildren(t.dataset.k === 'path' ? pathInfo(L.paths[+t.dataset.i]) : hillInfo(L.hills[+t.dataset.i]));
+    };
+    view.addEventListener('click', (ev) => show(ev.target.closest('[data-k]')));
+    view.addEventListener('pointerover', (ev) => { if (ev.pointerType === 'mouse') show(ev.target.closest('[data-k="path"]')); });
+    animateAnts(view, L.hills, L.paths);
+    treePic.scrollTop = treePic.scrollHeight;
     setPoll(async () => {
       const fresh = await getJSON('state/status.json');
-      if (fresh.generated !== st.generated && location.hash.startsWith('#/hills') && !info.querySelector('details[open]')) showHills();
+      if (fresh.generated !== st.generated && location.hash.startsWith('#/hills') && !info.querySelector('details[open], .hmsg')) showHills();
     }, 60_000);
   }
 

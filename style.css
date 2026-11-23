@@ -423,3 +423,9 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
   .hillsgrid { grid-template-columns: minmax(0, 1fr) 220px; align-items: start; }
   .htree { max-height: calc(100vh - 140px); position: sticky; top: 70px; }
 }
+.hview .hits polyline.on { stroke-opacity: .12; }
+.hmsg { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+.hmsgtext { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; max-height: 50vh; overflow-y: auto; }
+.hmsgnav { justify-content: space-between; }
+.hnav[disabled] { opacity: .4; cursor: default; }
+@media (max-width: 759px) { .htree { max-width: 240px; margin-left: auto; margin-right: auto; } }
