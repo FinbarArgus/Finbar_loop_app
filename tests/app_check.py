@@ -460,9 +460,12 @@ def run(loop_bin, graph, shots):
                 page.goto(base + '#/manual/read')
                 page.wait_for_selector('.mgroup.prio-high .dropzone')
                 check(page, page.locator('.mgroup').count() == 3, 'Read: High / Medium / Low groups', failures)
-                page.locator('.mgroup.prio-high input[type=file]').set_input_files(str(tmp_l / 'fig.png'))
+                (tmp_l / 'A_paper_to_read.png').write_bytes(PNG)
+                page.locator('.mgroup.prio-high input[type=file]').set_input_files(str(tmp_l / 'A_paper_to_read.png'))
                 form = page.locator('.mgroup > .newentry')
                 form.locator('.colsel').wait_for()
+                check(page, form.locator(':scope > label > input[type=text]').count() == 0 and form.locator('.autotitle').count() == 1,
+                      'Read: no title box for a paper (the loop titles it from its record)', failures)
                 form.locator('input[type=search]').fill('opinf')
                 check(page, form.locator('.colsel option:not([hidden])').count() == 1, 'collection filter', failures)
                 # a new collection from the form: requested, then selected once the loop has made it
@@ -483,12 +486,12 @@ def run(loop_bin, graph, shots):
                 nc.locator('.status >> text=/^Made "ROM \\/ Beat maps" in Zotero/').wait_for(timeout=15000)
                 check(page, form.locator('.colsel').input_value() == 'NEWC0001', 'new collection selected', failures)
                 form.locator('.colsel').select_option('BBBB2222')
-                form.locator(':scope > label > input[type=text]').fill('A paper to read')
                 form.locator(':scope > .row button.primary').click()
                 page.wait_for_selector('.mrow >> text=A paper to read')
                 ents = [json.loads(f.read_text()) for f in (repo / 'personal').glob('read-*/entry.json')]
                 check(page, ents and ents[0]['priority'] == 'high' and ents[0]['zotero']['collection_id'] == 2
-                      and ents[0]['files'] == ['fig.png'] and (repo / 'personal' / ents[0]['id'] / 'fig.png').exists(),
+                      and ents[0]['title'] == 'A paper to read'
+                      and ents[0]['files'] == ['A_paper_to_read.png'] and (repo / 'personal' / ents[0]['id'] / 'A_paper_to_read.png').exists(),
                       f'Read entry written with its file and collection {ents[:1]}', failures)
                 check(page, 'to Zotero: ROM / OpInf' in page.locator('.mrow').first.inner_text(), 'Zotero badge', failures)
                 soon = (_dt.date.today() + _dt.timedelta(days=2)).isoformat()
@@ -701,13 +704,17 @@ def run(loop_bin, graph, shots):
                 check(page, True, 'Tree: branch names shown', failures)
                 page.locator('.gtools .wstate input').uncheck()
                 page.wait_for_selector('.gview svg .hits')
-                w0 = page.evaluate("document.querySelector('.gview svg').clientWidth")
+                vb = lambda: page.evaluate("(() => { const b = document.querySelector('.gview svg').viewBox.baseVal; return [b.x, b.y, b.width, b.height]; })()")
+                v0 = vb()
                 page.locator('.gzoom button', has_text='+').click()
-                check(page, page.evaluate("document.querySelector('.gview svg').clientWidth") > w0, 'Tree: zoom in', failures)
+                check(page, vb()[2] < v0[2] * 0.75, f'Tree: zoom in {v0} -> {vb()}', failures)
+                page.locator('.gzoom button', has_text='Reset').click()
+                check(page, all(abs(a - b) < 0.05 for a, b in zip(vb(), v0)), f'Tree: Reset goes back to the first view {v0} {vb()}', failures)
                 check(page, narrow(), 'Tree: no sideways scroll', failures)
                 if shots:
-                    page.locator('.gzoom button', has_text='Fit').click()
+                    page.locator('.gzoom button', has_text='Whole tree').click()
                     page.screenshot(path=f'{shots}/{label}-tree.png', full_page=True)
+                    page.locator('.gzoom button', has_text='Reset').click()
                 page.goto(base + '#/list')
                 page.wait_for_selector('.card')
                 if label == 'computer':
@@ -793,8 +800,8 @@ def run(loop_bin, graph, shots):
                 check(page, narrow(), 'status with permissions: no sideways scroll', failures)
                 if shots:
                     page.locator('.perms').screenshot(path=f'{shots}/{label}-permissions.png')
-                # Hills: the ant farm (LOOP the food on top, an anthome per session sized by tokens, lights by role, a rock
-                # when blocked, ants when working, tunnels for messages), the tree beside.
+                # The ant farm under the tree (LOOP the fruit pile at the trunk's foot, an anthome per session sized by
+                # tokens, lights by role, a rock when blocked, ants when working, tunnels for messages).
                 st = json.loads((repo / 'state/status.json').read_text())
                 mk = lambda name, state, **kw: {'name': name, 'job': name[:8], 'state': state, 'running': state != 'stalled',
                                                 'why': '', 'working_on': f'{name} at work', 'recent': [], 'items': [], **kw}
@@ -825,85 +832,152 @@ def run(loop_bin, graph, shots):
                 dot = page.locator('.card .from .rdot').first.evaluate('(n) => getComputedStyle(n).backgroundColor')
                 want = {'HIGH': 'rgb(224, 72, 47)', 'IMPLEMENT': 'rgb(63, 143, 224)', 'MED': 'rgb(240, 169, 42)', 'LOW': 'rgb(95, 176, 74)'}
                 check(page, dot == want.get(who.split('-')[0], 'rgb(164, 106, 214)'), f'Agents: a card shows its session in its role colour {who!r} {dot}', failures)
+                # The ant farm under the tree: #/hills opens the Tree tab, whose scene holds the farm.
                 page.goto(base + '#/hills')
-                page.wait_for_selector('.hview svg .hits [data-k="hill"]')
-                check(page, page.locator('.meta a.on').inner_text() == 'Hills', 'Hills tab in the header', failures)
-                check(page, page.locator('.hview [data-k="hill"]').count() == 7, 'Hills: one hill per agent, and one for an agent only in the messages', failures)
-                # The whole meadow on one screen: every hill and path inside the viewport with the page unscrolled.
+                page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
+                check(page, page.evaluate('location.hash') == '#/tree' and page.locator('.meta a.on').inner_text() == 'Tree'
+                      and page.locator('.meta a', has_text='Hills').count() == 0, '#/hills opens the Tree tab; no Hills tab', failures)
+                F = '.gview .farm'
+                check(page, page.locator(f'{F} [data-k="hill"]').count() == 7, 'Farm: one hill per agent, and one for an agent only in the messages', failures)
+                # It opens on the farm: every hill, home and path inside the view, the view inside the screen.
                 out = page.evaluate("""() => { scrollTo(0, 0);
-                    const r0 = document.querySelector('.hview svg').getBoundingClientRect();
-                    return [...document.querySelectorAll('.hview svg [data-k]'), document.querySelector('.hview svg')].map((n) => {
+                    const v = document.querySelector('.gview').getBoundingClientRect();
+                    const bad = [...document.querySelectorAll('.gview .farm [data-k]')].map((n) => {
                       const r = n.getBoundingClientRect();
-                      return [n.dataset.k || 'svg', n.dataset.i, Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)];
-                    }).filter(([, , l, t, r, b]) => l < -1 || t < -1 || r > innerWidth + 1 || b > innerHeight + 1); }""")
-                check(page, not out and page.evaluate('scrollY') == 0, f'Hills: every hill and path on one screen, no scroll {out}', failures)
+                      return [n.dataset.k, n.dataset.i, Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)];
+                    }).filter(([, , l, t, r, b]) => l < v.left - 1 || t < v.top - 1 || r > v.right + 1 || b > v.bottom + 1);
+                    if (v.bottom > innerHeight + 1) bad.push(['view', Math.round(v.bottom), innerHeight]);
+                    return bad; }""")
+                check(page, not out, f'Farm: every hill and path in the first view, the view on one screen {out}', failures)
                 if shots:
-                    page.screenshot(path=f'{shots}/{label}-hills-screen.png')
-                ys = page.evaluate("Object.fromEntries([...document.querySelectorAll('.hview text')].map((t) => [t.textContent, t.getBoundingClientRect().top]))")
-                check(page, all(ys['LOOP'] < y for n, y in ys.items() if n != 'LOOP'), f'Hills: LOOP the food on the surface, the homes below {ys}', failures)
-                glows = page.evaluate("[...document.querySelectorAll('.hview .glow')].map((c) => [c.dataset.role, c.getAttribute('fill')])")
+                    page.screenshot(path=f'{shots}/{label}-scene-screen.png')
+                ys = page.evaluate(f"Object.fromEntries([...document.querySelectorAll('{F} text')].map((t) => [t.textContent, t.getBoundingClientRect().top]))")
+                check(page, all(ys['LOOP'] < y for n, y in ys.items() if n != 'LOOP'), f'Farm: LOOP the food on the surface, the homes below {ys}', failures)
+                # The tree stands beside LOOP's fruit pile, in the gap before the first anthill to its right, on the surface.
+                foot = page.evaluate("""() => {
+                    const segs = [...document.querySelectorAll('.gview .tree .hits [data-k="branch"], .gview .tree .hits [data-k="seg"]')].map((n) => n.getBoundingClientRect());
+                    const low = segs.reduce((a, r) => (r.bottom > a.bottom ? r : a));
+                    const loop = document.querySelector('.gview .farm .hits g[data-k="hill"][data-i="0"] rect').getBoundingClientRect();
+                    const next = Math.min(...[...document.querySelectorAll('.gview .farm .hits g[data-k="hill"]:not([data-i="0"])')]
+                      .map((g) => g.getBoundingClientRect().left).filter((x) => x > loop.right));
+                    return { x: (low.left + low.right) / 2, y: low.bottom, l: loop.left, r: loop.right, next, b: loop.bottom, h: loop.height }; }""")
+                clear = 0.15 * (foot['r'] - foot['l'])
+                check(page, foot['r'] + clear < foot['x'] < foot['next'] - clear and abs(foot['y'] - foot['b']) < 0.15 * foot['h'],
+                      f'Scene: the trunk stands beside the fruit pile, before the next anthill {foot}', failures)
+                glows = page.evaluate(f"[...document.querySelectorAll('{F} .glow')].map((c) => [c.dataset.role, c.getAttribute('fill')])")
                 roles = {r: c for r, c in glows}
                 check(page, roles.get('high') == '#e0482f' and roles.get('implement') == '#3f8fe0' and roles.get('low') == '#5fb04a' and 'med' not in roles,
-                      f'Hills: lights in the role colour, off when stalled {roles}', failures)
-                widths = page.evaluate("Object.fromEntries([...document.querySelectorAll('.hview .hits g[data-k=hill]')].map((g) => [g.dataset.i, g.lastElementChild.getBoundingClientRect().width]))")
-                names = page.evaluate("[...document.querySelectorAll('.hview text')].map((t) => t.textContent)")
+                      f'Farm: lights in the role colour, off when stalled {roles}', failures)
+                widths = page.evaluate(f"Object.fromEntries([...document.querySelectorAll('{F} .hits g[data-k=hill]')].map((g) => [g.dataset.i, g.lastElementChild.getBoundingClientRect().width]))")
+                names = page.evaluate(f"[...document.querySelectorAll('{F} text')].map((t) => t.textContent)")
                 wd = {names[int(i)]: w for i, w in widths.items()}
                 check(page, wd['HIGH-paper'] > wd['IMPLEMENT-app'] > wd['HIGH-session-a'] > wd['LOW-x'] > wd['MED-y'],
-                      f'Hills: anthomes sized by tokens since the weekly reset {wd}', failures)
+                      f'Farm: anthomes sized by tokens since the weekly reset {wd}', failures)
                 # Hover (tap on a phone) an anthome for its usage, the food inside it for its focus.
                 hp = names.index('HIGH-paper')
-                home = page.locator(f'.hview .hits g[data-k="hill"][data-i="{hp}"] rect').last
-                food = page.locator(f'.hview .hits [data-k="food"][data-i="{hp}"]')
+                home = page.locator(f'{F} .hits g[data-k="hill"][data-i="{hp}"] rect').last
+                food = page.locator(f'{F} .hits [data-k="food"][data-i="{hp}"]')
                 if label == 'computer':
                     home.hover(position={'x': 2, 'y': 2}, force=True)
                 else:
                     home.dispatch_event('click')
                 info = page.locator('.hinfo').inner_text()
                 check(page, 'HIGH-paper' in info and '25M tokens' in info and 'since the weekly reset' in info and 'cache reads' in info,
-                      f'Hills: {"hovering" if label == "computer" else "tapping"} an anthome shows its usage {info!r}', failures)
+                      f'Farm: {"hovering" if label == "computer" else "tapping"} an anthome shows its usage {info!r}', failures)
                 if label == 'computer':
                     food.hover(force=True)
                 else:
                     food.dispatch_event('click')
                 info = page.locator('.hinfo').inner_text()
                 check(page, 'current focus' in info and 'HIGH-paper at work' in info,
-                      f'Hills: {"hovering" if label == "computer" else "tapping"} the food shows its focus {info!r}', failures)
+                      f'Farm: {"hovering" if label == "computer" else "tapping"} the food shows its focus {info!r}', failures)
                 if shots:
                     page.locator('.hinfo').scroll_into_view_if_needed()
-                    page.screenshot(path=f'{shots}/{label}-hills-focus.png')
+                    page.screenshot(path=f'{shots}/{label}-scene-focus.png')
                     page.evaluate('scrollTo(0, 0)')
-                n_ants = page.locator('.hview .ant[data-h]').count()
-                check(page, n_ants == 6 + 5 + 2 + 5, f'Hills: ants on the working hills only ({n_ants})', failures)   # LOOP, HIGH, LOW, IMPLEMENT (large)
-                check(page, page.locator('.hview [data-k="path"]').count() == 3 and page.locator('.hview .ant[data-p]').count() == 3 + 1 + 1,
-                      'Hills: a path per pair that messaged, ants on them', failures)
-                page.locator('.hview [data-k="path"][data-i="0"]').dispatch_event('click')
+                n_ants = page.locator(f'{F} .ant[data-h]').count()
+                check(page, n_ants == 6 + 5 + 2 + 5, f'Farm: ants on the working hills only ({n_ants})', failures)   # LOOP, HIGH, LOW, IMPLEMENT (large)
+                check(page, page.locator(f'{F} [data-k="path"]').count() == 3 and page.locator(f'{F} .ant[data-p]').count() == 3 + 1 + 1,
+                      'Farm: a path per pair that messaged, ants on them', failures)
+                page.locator(f'{F} [data-k="path"][data-i="0"]').dispatch_event('click')
                 info = page.locator('.hinfo').inner_text()
                 check(page, 'HIGH-paper ↔ LOOP' in info and 'fixture message 2' in info and '1 of 3' in info,
-                      f'Hills: tapping a path shows its latest message {info!r}', failures)
+                      f'Farm: tapping a path shows its latest message {info!r}', failures)
+                if label == 'computer':
+                    home.hover(position={'x': 2, 'y': 2}, force=True)
+                    check(page, 'fixture message 2' in page.locator('.hinfo').inner_text(), 'Farm: a tapped tunnel stays while the mouse crosses other hills', failures)
                 page.locator('.hinfo button', has_text='older').click()
-                check(page, 'fixture message 1' in page.locator('.hinfo').inner_text(), 'Hills: ◀ older', failures)
+                check(page, 'fixture message 1' in page.locator('.hinfo').inner_text(), 'Farm: ◀ older', failures)
                 page.locator('.hinfo button', has_text='newer').click()
-                check(page, 'fixture message 2' in page.locator('.hinfo').inner_text(), 'Hills: newer ▶', failures)
+                check(page, 'fixture message 2' in page.locator('.hinfo').inner_text(), 'Farm: newer ▶', failures)
                 if shots:
                     page.locator('.hinfo').scroll_into_view_if_needed()
-                    page.screenshot(path=f'{shots}/{label}-hills-path.png')
-                check(page, page.locator('.hview svg rect[fill="#686a66"]').count() > 0, 'Hills: a rock on the blocked hill', failures)
-                check(page, page.locator('.treecol svg').count() == 1, 'Hills: the growth tree beside the hills', failures)
-                t0 = page.locator('.hview .ant').first.get_attribute('transform')
+                    page.screenshot(path=f'{shots}/{label}-scene-path.png')
+                    page.evaluate('scrollTo(0, 0)')
+                check(page, page.locator(f'{F} rect[fill="#686a66"]').count() > 0, 'Farm: a rock on the blocked hill', failures)
+                t0 = page.locator(f'{F} .ant').first.get_attribute('transform')
                 page.wait_for_timeout(400)
-                check(page, page.locator('.hview .ant').first.get_attribute('transform') != t0, 'Hills: the ants move', failures)
-                blocked = page.evaluate("[...document.querySelectorAll('.hview text')].findIndex((t) => t.textContent.startsWith('HIGH-session'))")
-                page.locator(f'.hview [data-k="hill"][data-i="{blocked}"]').dispatch_event('click')
-                info = page.locator('.hinfo').inner_text()
-                check(page, 'HIGH-session-a' in info and 'blocked' in info and 'Waiting on' in info, f'Hills: tap a blocked hill {info!r}', failures)
-                check(page, narrow(), 'Hills: no sideways scroll', failures)
-                if shots:
-                    page.screenshot(path=f'{shots}/{label}-hills.png', full_page=True)
+                check(page, page.locator(f'{F} .ant').first.get_attribute('transform') != t0, 'Farm: the ants move', failures)
+                # Zoom and pan. The page itself never zooms: the view takes Ctrl+wheel (a trackpad pinch) and two fingers.
+                box = page.locator('.gview').bounding_box()
+                wheel = lambda x, y: page.evaluate(f"""() => {{ const v = document.querySelector('.gview');
+                    const ev = new WheelEvent('wheel', {{ deltaY: -200, ctrlKey: true, clientX: {x}, clientY: {y}, bubbles: true, cancelable: true }});
+                    v.dispatchEvent(ev); return ev.defaultPrevented; }}""")
+                # First zoom until the view is shorter than the scene: a view taller than the scene keeps its foot on the
+                # farm's floor, so a zoom there moves the view up and down by design.
+                vh = vb()                                                                     # the opening view
+                wheel(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+                v0 = vb()
+                cx, cy = box['x'] + box['width'] * 0.3, box['y'] + box['height'] * 0.8      # a point in the farm
+                world = lambda v: (v[0] + (cx - box['x']) * v[2] / box['width'], v[1] + (cy - box['y']) * v[2] / box['width'])
+                took = wheel(cx, cy)
+                v1 = vb()
+                w0, w1 = world(v0), world(v1)
+                check(page, took and v1[2] < v0[2] * 0.8 and abs(w0[0] - w1[0]) < 0.3 and abs(w0[1] - w1[1]) < 0.3,
+                      f'Scene: Ctrl+wheel zooms toward the pointer, not the page {v0} -> {v1}', failures)
+                took = page.evaluate("""() => { const v = document.querySelector('.gview');
+                    const ev = new WheelEvent('wheel', { deltaY: 120, shiftKey: true, bubbles: true, cancelable: true });
+                    v.dispatchEvent(ev); return ev.defaultPrevented; }""")
+                v2 = vb()
+                check(page, took and v2[0] > v1[0] and v2[1] == v1[1] and v2[2] == v1[2], f'Scene: Shift+wheel pans sideways {v1} -> {v2}', failures)
                 if label == 'computer':
-                    check(page, not page.locator('#gside').is_visible(), 'Hills: no side panel (the tree is on the page)', failures)
+                    before = page.locator('.hinfo').inner_text()
+                    page.mouse.move(cx, cy)
+                    page.mouse.down()
+                    page.mouse.move(cx + 10, cy + 60, steps=4)
+                    page.mouse.up()
+                    v3 = vb()
+                    check(page, v3[1] < v2[1] and v3[0] < v2[0], f'Scene: a mouse drag pans (down shows what is above) {v2} -> {v3}', failures)
+                    check(page, page.locator('.hinfo').inner_text() == before, 'Scene: a drag is not a tap', failures)
+                else:
+                    # Two fingers spreading apart: the view zooms in about their midpoint and the page does not.
+                    took = page.evaluate(f"""() => {{ const v = document.querySelector('.gview'), r = v.getBoundingClientRect();
+                        const t = (id, x) => new Touch({{ identifier: id, target: v, clientX: r.left + x, clientY: r.top + 100 }});
+                        let prevented = true;
+                        for (const [type, d] of [['touchstart', 40], ['touchmove', 60], ['touchmove', 90]]) {{
+                          const ev = new TouchEvent(type, {{ touches: [t(1, 150 - d), t(2, 150 + d)], bubbles: true, cancelable: true }});
+                          v.dispatchEvent(ev); prevented = prevented && ev.defaultPrevented; }}
+                        v.dispatchEvent(new TouchEvent('touchend', {{ touches: [], bubbles: true, cancelable: true }}));
+                        return prevented; }}""")
+                    v3 = vb()
+                    check(page, took and v3[2] < v2[2] * 0.6, f'Scene: two fingers pinch-zoom the view, not the page {v2} -> {v3}', failures)
+                page.locator('.gzoom button', has_text='Whole tree').click()
+                vt = vb()
+                check(page, vt[1] < v0[1], f'Scene: "Whole tree" frames the tree above the farm {v0} -> {vt}', failures)
+                page.locator('.gzoom button', has_text='Reset').click()
+                check(page, all(abs(a - b) < 0.05 for a, b in zip(vb(), vh)), f'Scene: Reset goes back to the farm {vb()}', failures)
+                blocked = page.evaluate(f"[...document.querySelectorAll('{F} text')].findIndex((t) => t.textContent.startsWith('HIGH-session'))")
+                page.locator(f'{F} [data-k="hill"][data-i="{blocked}"]').dispatch_event('click')
+                info = page.locator('.hinfo').inner_text()
+                check(page, 'HIGH-session-a' in info and 'blocked' in info and 'Waiting on' in info, f'Farm: tap a blocked hill {info!r}', failures)
+                check(page, narrow(), 'Scene: no sideways scroll', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-scene.png', full_page=True)
+                if label == 'computer':
+                    check(page, not page.locator('#gside').is_visible(), 'Scene: no side panel (the tree is on the page)', failures)
                 page.locator('.hinfo a', has_text='Q-0001').first.click()
                 page.wait_for_selector('.item-head h2')
-                check(page, 'Which step size' in page.locator('.item-head h2').inner_text(), 'Hills: the item it waits on opens', failures)
+                check(page, 'Which step size' in page.locator('.item-head h2').inner_text(), 'Farm: the item it waits on opens', failures)
                 # An answer typed only in the general box: no empty per-question rows; it answers a one-question item.
                 out = loop(loop_bin, repo, 'post', 'question', 'Plain question for the general box?', '--from', 'HIGH-a')
                 qid = re.search(r'Q-\d{4}', out).group(0)
