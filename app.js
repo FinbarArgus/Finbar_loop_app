@@ -569,6 +569,7 @@
 
   async function showStatus() {
     const [st] = await Promise.all([getJSON('state/status.json'), index.items.length ? null : refreshIndex()]);
+    lastStatus = st;
     const titles = new Map(index.items.map((x) => [x.id, x.title]));
     const u = st.usage || {};
     const usage = el('section', { class: 'status-card' }, el('h3', {}, 'Claude usage'),
@@ -1133,11 +1134,91 @@
     }, 60_000);
   }
 
+  // ------------------------------------------------------------ Hills: every agent as an anthill (anthills.js)
+  // From state/status.json: size by priority, a rock on a blocked hill, ants on a working one, grey when stalled.
+  // The growth tree stands beside the meadow. Ants move with requestAnimationFrame (about 20 frames a second,
+  // only while the tab shows), and stand still for people who ask for reduced motion.
+
+  const H = window.LoopHills;
+  let lastStatus = null;
+  const MOOD_TEXT = { working: 'working', blocked: 'blocked: waiting on you', quiet: 'stalled or stopped' };
+
+  function hillInfo(hl) {
+    const a = hl.agent;
+    const titles = new Map(index.items.map((x) => [x.id, x.title]));
+    const link = (id, title) => el('a', { href: `#/item/${id}`, class: 'alink' }, el('b', {}, id), title ? ` ${String(title).slice(0, 80)}` : '');
+    return el('div', {},
+      el('div', { class: 'arow' }, el('b', {}, a.name), el('span', { class: `badge hmood ${hl.mood}` }, MOOD_TEXT[hl.mood]),
+        el('span', { class: 'who' }, ` · ${hl.size === 'queen' ? 'the queen (LOOP)' : hl.size} hill`)),
+      a.items && a.items.length ? el('div', { class: 'alinks' }, hl.mood === 'blocked' ? 'Waiting on: ' : 'Will need: ',
+        a.items.map((id) => link(id, titles.get(id)))) : null,
+      a.why && !(a.items && a.items.length) ? el('div', { class: 'awhy' }, a.why) : null,
+      a.working_on ? el('div', { class: 'adetail' }, el('span', { class: 'who' }, hl.mood === 'working' ? 'Working on: ' : 'Last: '), a.working_on) : null,
+      (a.recent || []).length ? el('details', { class: 'arecent' }, el('summary', {}, `Its entries (${a.recent.length})`),
+        el('div', { class: 'alinks' }, a.recent.map((x) => link(x.id, x.title)))) : null,
+      el('div', { class: 'who' }, a.updated ? `last active ${age(a.updated)} ago · ` : '', el('a', { href: '#/status' }, 'message it on Status')));
+  }
+
+  let hillsFrame = 0;
+  function animateAnts(view, hills) {
+    cancelAnimationFrame(hillsFrame);
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const ants = [...view.querySelectorAll('.ant')].map((g) => ({ g, hl: hills[+g.dataset.h], k: +g.dataset.a }));
+    if (!ants.length) return;
+    let last = 0;
+    const step = (now) => {
+      if (!view.isConnected) return;
+      hillsFrame = requestAnimationFrame(step);
+      if (now - last < 50 || document.hidden) return;
+      last = now;
+      for (const a of ants) a.g.setAttribute('transform', H.antPose(H.antAt(a.hl, a.k, now / 1000)));
+    };
+    hillsFrame = requestAnimationFrame(step);
+  }
+
+  async function showHills() {
+    const [st] = await Promise.all([getJSON('state/status.json'), index.items.length ? null : refreshIndex(), loadMine()]);
+    lastStatus = st;
+    const agents = st.agents || [];
+    const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, 'Tap a hill.'));
+    const view = el('div', { class: 'hview' });
+    const tree = el('a', { class: 'htree gmini', href: '#/tree', title: 'Open the tree' });
+    const state = growthState();
+    tree.innerHTML = G.svg(state, { mini: true });
+    const legend = el('div', { class: 'hlegend' },
+      el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
+      el('span', {}, el('b', {}, 'Grey'), ' stalled'), el('span', {}, el('b', {}, 'Size'), ' priority (crown: LOOP)'));
+    const counts = ['blocked', 'working', 'quiet'].map((m) => [m, agents.filter((a) => H.moodOf(a) === m).length]);
+    main().replaceChildren(
+      el('section', { class: 'ghead' }, ...counts.map(([m, n]) => el('div', { class: 'gstat' }, el('b', {}, String(n)), el('span', {}, m === 'quiet' ? 'stalled' : m)))),
+      el('div', { class: 'hillsgrid' },
+        el('div', { class: 'hillscol' }, legend, view, info),
+        el('div', { class: 'treecol' }, el('div', { class: 'who' }, el('a', { href: '#/tree' }, 'Tree'), ` ${state.stage} · ${metres(state.height)}`), tree)),
+      el('p', { class: 'foot' }, `Agents as of ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
+    const width = Math.max(48, Math.min(96, Math.round(view.clientWidth / 8)));
+    const L = H.layout(agents, { width });
+    view.innerHTML = H.svg(agents, { width, t: performance.now() / 1000 });
+    if (!agents.length) view.replaceChildren(el('p', { class: 'empty' }, 'No agents in the status yet.'));
+    view.addEventListener('click', (ev) => {
+      const t = ev.target.closest('[data-k="hill"]');
+      view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
+      if (!t) return;
+      t.classList.add('on');
+      info.replaceChildren(hillInfo(L.hills[+t.dataset.i]));
+    });
+    animateAnts(view, L.hills);
+    tree.scrollTop = tree.scrollHeight;
+    setPoll(async () => {
+      const fresh = await getJSON('state/status.json');
+      if (fresh.generated !== st.generated && location.hash.startsWith('#/hills') && !info.querySelector('details[open]')) showHills();
+    }, 60_000);
+  }
+
   // Wide screens: the tree, small, in a right-hand panel on every page, scrolled to its foot.
   const wide = () => matchMedia('(min-width: 1100px)').matches;
   async function drawSide() {
     const side = $('#gside');
-    if (!wide() || !cfg.token || location.hash.startsWith('#/tree') || location.hash.startsWith('#/settings')) {
+    if (!wide() || !cfg.token || /^#\/(tree|hills|settings)/.test(location.hash)) {
       side.hidden = true;
       document.body.classList.remove('with-side');
       return;
@@ -1195,12 +1276,13 @@
     refreshItem = null;
     justSent = null;
     try {
-      const meta = ['status', 'mine', 'tree'].includes(h[0]) ? h[0] : 'work';
+      const meta = ['status', 'mine', 'tree', 'hills'].includes(h[0]) ? h[0] : 'work';
       document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'status') await showStatus();
       else if (h[0] === 'mine') await showMine(h[1]);
       else if (h[0] === 'tree') await showTree();
+      else if (h[0] === 'hills') await showHills();
       else if (h[0] === 'settings') showSettings();
       else await showList(h[0] === 'list' ? h[1] : null);
       window.scrollTo(0, 0);

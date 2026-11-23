@@ -401,6 +401,25 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 @media (max-width: 480px) {
   .bar { gap: 6px; padding-left: 10px; padding-right: 10px; }
   .bar .ghost { padding: 6px 9px; }
-  .meta { margin-left: 2px; }
-  .meta a { padding: 4px 8px; }
+  .bar .brand { display: none; }           /* Work opens the same board */
+  .meta { margin-left: 0; }
+  .meta a { padding: 4px 7px; font-size: 13px; }
+}
+
+/* Hills: every agent as an anthill, the tree beside them */
+.hillsgrid { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+.hillscol { min-width: 0; }
+.hlegend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+.hview { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #f3f2ea; }
+.hview svg { display: block; width: 100%; height: auto; }
+.hview .hits [data-k] { cursor: pointer; }
+.hview .hits .on { fill-opacity: .07; }
+.treecol { min-width: 0; }
+.htree { display: block; max-height: 60vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: #fff; margin-top: 4px; }
+.htree svg { display: block; width: 100%; height: auto; }
+.badge.hmood.blocked { background: color-mix(in srgb, var(--ask) 22%, transparent); color: var(--ask); font-weight: 600; }
+.badge.hmood.working { color: var(--ok); }
+@media (min-width: 760px) {
+  .hillsgrid { grid-template-columns: minmax(0, 1fr) 220px; align-items: start; }
+  .htree { max-height: calc(100vh - 140px); position: sticky; top: 70px; }
 }
