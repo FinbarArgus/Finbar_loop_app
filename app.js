@@ -509,16 +509,18 @@
     });
     const thread = el('section', { class: 'thread' });
     const answerPanel = el('section', { class: 'answer' });
+    const bundlePanel = it.bundle ? el('section', { class: 'bundle' }) : null;
     const redraw = async () => {
       await drawThread(thread, it, ctx, (x) => x.question == null);
       for (let i = 0; i < threads.length; i++) await drawThread(threads[i], it, ctx, (x) => x.question === i);
-      await drawAnswers(answerPanel, it, qs, picks, notes, st);
+      const counted = await drawAnswers(answerPanel, it, qs, picks, notes, st);
+      if (bundlePanel) drawBundle(bundlePanel, it, st, await bundleGiven(it), body, counted);
     };
     await redraw();
     const generalBox = !['open'].includes(it.status) ? revisitBox(id)
       : qs.length ? null : detailBox(id, {}, 'More detail before you review?');
     const perm = isPermission(it) ? permissionBar(it, async () => { if (refreshItem) await refreshItem(); }) : null;
-    main().replaceChildren(head, body, ...(perm ? [cards[0], perm, ...cards.slice(1)] : cards), thread, generalBox || '', answerPanel);
+    main().replaceChildren(head, ...(bundlePanel ? [bundlePanel] : []), body, ...(perm ? [cards[0], perm, ...cards.slice(1)] : cards), thread, generalBox || '', answerPanel);
     requestAnimationFrame(() => window.LoopRender.fitWide(main()));
     let sig = JSON.stringify([it.details, it.forwarded]) + [...tree.paths].filter((p) => p.includes(`/${id}/`)).join();
     const check = async (force) => {
@@ -595,6 +597,67 @@
       }));
   }
 
+  // ------------------------------------------------------------ PR-review bundles: a verdict per PR
+
+  const prKey = (p) => `${p.repo}#${p.pr}`;
+  // Each bundled PR's latest verdict over the answers sent: {key: {verdict, text, at}}.
+  async function bundleGiven(it) {
+    const out = {};
+    for (const name of filesIn(`answers/${it.id}`)) {
+      const a = await getJSON(`answers/${it.id}/${name}`).catch(() => null);
+      for (const r of (a && a.prs) || []) if (r.verdict) out[prKey(r)] = { verdict: r.verdict, text: r.text || '', at: a.at };
+    }
+    return out;
+  }
+
+  // The rows at the top of a bundle: each PR's class, why, the verdict sent, Approve / Changes with a note,
+  // and a link down to the section that reviews it. Verdicts chosen and not yet sent are kept in the item's
+  // store ('prs') until "Send review" sends them. after() updates the answer panel's count.
+  function drawBundle(box, it, st, given, body, after) {
+    const pend = st.get('prs') || {};
+    const save = () => { st.set('prs', pend); after(); };
+    const prs = it.bundle.prs || [];
+    const lows = prs.filter((p) => p.class === 'low' && !given[prKey(p)]);
+    const rows = prs.map((p) => {
+      const k = prKey(p), g = given[k], cur = pend[k] || {};
+      const note = el('textarea', { rows: 1, class: 'qnote', placeholder: 'Note (what to change)' });
+      note.value = cur.text || '';
+      note.addEventListener('input', () => { pend[k] = { ...(pend[k] || {}), text: note.value }; st.set('prs', pend); });
+      const btn = (v, label) => el('button', { class: `choice-btn v-${v}` + (cur.verdict === v ? ' on' : '') + (g && g.verdict === v ? ' sent' : ''), onclick: () => {
+        pend[k] = { ...(pend[k] || {}), verdict: (pend[k] || {}).verdict === v ? null : v };
+        save();
+        drawBundle(box, it, st, given, body, after);
+      } }, el('b', {}, label));
+      const sec = p.review_section ? body.querySelector(`details.section[id="${CSS.escape(p.review_section)}"]`) : null;
+      return el('div', { class: `bpr cls-${p.class}`, 'data-pr': k },
+        el('div', { class: 'brow' }, el('span', { class: `badge cls ${p.class}` }, p.class),
+          el('a', { href: p.url, target: '_blank', rel: 'noopener' }, el('b', {}, `${p.repo} #${p.pr}`)),
+          el('span', { class: 'grow' }),
+          sec ? el('a', { href: '#', class: 'bsec', onclick: (e) => {
+            e.preventDefault();
+            sec.open = true;
+            sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } }, 'Review ↓') : null),
+        el('div', { class: 'bwhy', html: inline(p.why || '') }),
+        g ? el('div', { class: `bgiven ${g.verdict}` }, `You sent: ${g.verdict === 'approve' ? 'approve' : 'changes'}`,
+          g.text ? ` — ${g.text}` : '', g.at ? ` · ${age(g.at)} ago` : '') : null,
+        el('div', { class: 'choices bverdict' }, btn('approve', 'Approve'), btn('changes', 'Changes')),
+        note);
+    });
+    const done = prs.filter((p) => given[prKey(p)]).length;
+    box.replaceChildren(
+      el('div', { class: 'brow' }, el('h3', {}, `Bundle ${it.bundle.title || it.bundle.id}`),
+        el('span', { class: 'n' }, ` ${done} of ${prs.length} with your verdict`), el('span', { class: 'grow' }),
+        lows.length ? el('button', { class: 'ghost bapprove-low', onclick: () => {
+          lows.forEach((p) => { pend[prKey(p)] = { ...(pend[prKey(p)] || {}), verdict: 'approve' }; });
+          save();
+          drawBundle(box, it, st, given, body, after);
+        } }, `Approve all low (${lows.length})`) : null),
+      ...rows);
+    after();
+  }
+
+  // Returns a function that updates the line over the send button (a bundle's count of verdicts chosen).
   async function drawAnswers(box, it, qs, picks, notes, st) {
     const prev = filesIn(`answers/${it.id}`);
     const shown = [];
@@ -604,7 +667,8 @@
       const rows = (a.answers || []).filter((x) => x.choice || x.text).map((x) => el('div', { class: 'choice' },
         qs.length > 1 ? `${x.question + 1}. ` : '', x.choice || '', x.choice && x.text ? ' — ' : '', x.text || ''));
       shown.push(el('div', { class: 'given' }, el('div', { class: 'who' }, `Your answer · ${age(a.at)} ago`),
-        ...rows, a.choice ? el('div', { class: 'choice' }, a.choice) : null,
+        ...rows, ...(a.prs || []).map((r) => el('div', { class: 'choice' }, `${r.repo} #${r.pr}: ${r.verdict}`, r.text ? ` — ${r.text}` : '')),
+        a.choice ? el('div', { class: 'choice' }, a.choice) : null,
         a.text ? el('div', { html: inline(a.text) }) : null,
         el('div', { class: 'thumbs' }, (a.images || []).map((n) => {
           const img = el('img', { alt: '' });
@@ -613,9 +677,18 @@
         }))));
     }
     const done = el('div', { class: 'status' });
+    let counted = () => {};
     let reviewChoice = null;
     let extra = null;
-    if (it.kind === 'review') {
+    if (it.bundle) {
+      const pend = () => Object.entries(st.get('prs') || {}).filter(([, v]) => v && v.verdict);
+      counted = () => {
+        const n = pend().length;
+        done.textContent = n ? `${n} verdict${n > 1 ? 's' : ''} chosen above, sent with your review.` : 'Choose Approve or Changes for each PR above.';
+      };
+      counted();
+      extra = { el: done, value: () => pend().length > 0, ready: () => true };
+    } else if (it.kind === 'review') {
       const labels = it.category === 'content' ? ['Understood', 'Have questions (in the comments)', 'Not now']
         : ['Reviewed: fine', 'Needs changes', 'Not now'];
       const opts = el('div', { class: 'choices' }, labels.map((label) => {
@@ -643,7 +716,11 @@
       extra,
       onSend: async (text, imgs) => {
         const body = { kind: 'answer', text };
-        if (it.kind === 'review') body.choice = reviewChoice;
+        if (it.bundle) {
+          const pend = st.get('prs') || {};
+          body.prs = (it.bundle.prs || []).filter((p) => pend[prKey(p)] && pend[prKey(p)].verdict)
+            .map((p) => ({ repo: p.repo, pr: p.pr, verdict: pend[prKey(p)].verdict, text: (pend[prKey(p)].text || '').trim() }));
+        } else if (it.kind === 'review') body.choice = reviewChoice;
         else {
           // Only the questions answered get a row; text typed only in the general box answers a one-question item.
           const rows = qs.map((q, i) => ({ question: i, asked: q.text, choice: picks[i] || null, text: (notes[i] || '').trim() }))
@@ -653,11 +730,13 @@
           if (qs.length === 1) body.choice = picks[0] || null;
         }
         await send('answers', it.id, body, imgs);
+        if (it.bundle) st.set('prs', {});
         justSent = it.id;
         if (refreshItem) await refreshItem();
       },
     });
     box.replaceChildren(el('h3', {}, it.kind === 'review' ? 'Your review' : qs.length > 1 ? 'Send your answers' : 'Your answer'), ...shown, comp, sent);
+    return counted;
   }
 
   // ------------------------------------------------------------ Status: usage and each agent's state
@@ -667,10 +746,27 @@
     return el('div', { class: 'ubar' }, el('div', { class: `ufill ${level}`, style: `width:${Math.min(100, pct)}%` }));
   }
 
+  // PR-review bundles: per triage class, how often the reviewer's predicted verdict matched yours (your first
+  // verdict on each PR), from the shadow log's summary (state/pr_triage.json, written by `loop`).
+  function triageCard(t) {
+    const cls = Object.entries((t && t.classes) || {});
+    if (!cls.length) return '';
+    const pct = (x) => (x == null ? '–' : `${Math.round(x * 100)}%`);
+    return el('section', { class: 'status-card triage' }, el('h3', {}, 'Triage accuracy'),
+      el('table', { class: 'ttable' },
+        el('thead', {}, el('tr', {}, ['Class', 'PRs', 'Answered', 'Changes asked', 'Prediction right'].map((h) => el('th', {}, h)))),
+        el('tbody', {}, cls.map(([name, c]) => el('tr', { 'data-class': name },
+          el('td', {}, el('span', { class: `badge cls ${name}` }, name)), el('td', {}, String(c.reviews)),
+          el('td', {}, String(c.answered)), el('td', {}, String(c.change_requests)),
+          el('td', {}, `${pct(c.agreement)}${c.answered ? ` (${c.agreed}/${c.answered})` : ''}`))))),
+      el('div', { class: 'who' }, 'The reviewer predicts each bundled PR\'s verdict before you answer; nothing is accepted for you.'));
+  }
+
   async function showStatus() {
     await useTree();
-    const [st, plog] = await Promise.all([getJSON('state/status.json'),
+    const [st, plog, triage] = await Promise.all([getJSON('state/status.json'),
       tree.paths.has('state/permissions.json') ? getJSON('state/permissions.json').catch(() => null) : null,
+      tree.paths.has('state/pr_triage.json') ? getJSON('state/pr_triage.json').catch(() => null) : null,
       index.items.length ? null : refreshIndex()]);
     lastStatus = st;
     const titles = new Map(index.items.map((x) => [x.id, x.title]));
@@ -713,7 +809,7 @@
           }))))
         : el('p', { class: 'empty' }, 'None.')));
     await loadMine().catch(() => {});
-    main().replaceChildren(deadlinesCard(), usage, ...sections, permissionsCard(plog),
+    main().replaceChildren(deadlinesCard(), usage, ...sections, permissionsCard(plog), triageCard(triage),
       el('p', { class: 'foot' }, `Updated ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
     setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/status')) await showStatus(); }, 60_000);
   }
