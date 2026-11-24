@@ -1308,7 +1308,7 @@
   const growthState = () => G.derive(mine.entries, growthDocs.tree, growthDocs.cites, new Date());
   const dayText = (d) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const collName = (b) => (b === 'trunk' ? 'no collection (the trunk)' : b);
-  const metres = (h) => `${h < 10 ? h.toFixed(1) : Math.round(h)} m`;
+  const metres = (h) => (h < 1 ? `${Math.round(h * 100)} cm` : `${h < 10 ? h.toFixed(1) : Math.round(h)} m`);
 
   // What a tapped or hovered part of the tree is: a paper's segment, a collection's stub, or an animal.
   function growthInfo(state, k, id, b) {
@@ -1481,6 +1481,9 @@
     const svgEl = view.querySelector('svg');
     svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     const size = () => ({ W: view.clientWidth || 1, H: view.clientHeight || 1 });
+    const sprout = svgEl.querySelector('.sprout');
+    // The closest zoom: 12 blocks across, or a small (young) tree's own frame, so it can be seen up close.
+    const narrowest = () => Math.min(12, 0.9 * (sc.tree.x1 - sc.tree.x0));
     const widest = () => { const { W, H } = size(); return 1.1 * Math.max(sc.box.x1 - sc.box.x0, (sc.box.y1 - sc.box.y0) * W / H); };
     // A box shown whole: centred across, its foot at the view's foot.
     const frame = (b) => {
@@ -1491,19 +1494,21 @@
     const draw = () => {
       if (!view.isConnected) return;
       const { W, H } = size(), b = sc.box, c = sceneCam;
-      c.w = Math.max(12, Math.min(widest(), c.w));
+      c.w = Math.max(narrowest(), Math.min(widest(), c.w));
       const h = c.w * H / W;
       // Across: inside the scene, or centred on it when wider. Up and down: never below the farm's floor, and the
       // top no higher than the tree's unless the view is taller than the scene.
       c.x = c.w >= b.x1 - b.x0 ? (b.x0 + b.x1 - c.w) / 2 : Math.max(b.x0, Math.min(b.x1 - c.w, c.x));
       c.y = Math.max(Math.min(b.y0, b.y1 - h), Math.min(b.y1 - h, c.y));
       svgEl.setAttribute('viewBox', [c.x, c.y, c.w, h].map((v) => Math.round(v * 100) / 100).join(' '));
+      // A young tree's marker ("tree: 7 cm ↓", ~12 blocks wide) points it out in the farm view; zoomed in, the tree is seen.
+      if (sprout) sprout.style.display = c.w < 20 ? 'none' : '';
     };
     const zoomAt = (k, px, py) => {               // k > 1 zooms in, about the point (px, py) of the view
       const { W, H } = size(), c = sceneCam;
       if (px == null) { px = W / 2; py = H / 2; }
       const u = c.w / W, wx = c.x + px * u, wy = c.y + py * u;
-      c.w = Math.max(12, Math.min(widest(), c.w / k));
+      c.w = Math.max(narrowest(), Math.min(widest(), c.w / k));
       c.x = wx - px * c.w / W; c.y = wy - py * c.w / W;
       draw();
     };
@@ -1536,7 +1541,9 @@
     svgEl.addEventListener('pointerover', (ev) => { if (ev.pointerType === 'mouse') show(ev.target.closest('[data-k]')); });
     svgEl.addEventListener('click', (ev) => {
       if (sdragged) { sdragged = false; return; }
-      show(ev.target.closest('[data-k]'), true);
+      const t = ev.target.closest('[data-k]');
+      if (t && t.dataset.k === 'sprout') { goto(sc.tree); return; }     // a young tree's marker: zoom to the tree
+      show(t, true);
     });
     const goto = (b) => { sceneCam = frame(b); draw(); };
     const zoom = el('div', { class: 'gzoom' },
