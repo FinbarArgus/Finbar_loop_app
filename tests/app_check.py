@@ -1042,6 +1042,43 @@ def run(loop_bin, graph, shots):
                     page.locator('.hinfo').scroll_into_view_if_needed()
                     page.screenshot(path=f'{shots}/{label}-scene-path.png')
                     page.evaluate('scrollTo(0, 0)')
+                # Tapping an anthome opens "Message <agent>" (Finbar 2026-11-24): the Status box, its send and its draft (shared
+                # with Status by the agent's name). Zoom, pan and redraws keep it open with the text; send reaches that agent.
+                ha = names.index('HIGH-session-a')
+                ha_job = next(a['job'] for a in json.loads((repo / 'state/status.json').read_text())['agents'] if a['name'] == 'HIGH-session-a')
+                page.locator(f'{F} .hits g[data-k="hill"][data-i="{ha}"] rect').last.dispatch_event('click')
+                mb = page.locator('.hinfo details.amsg[data-agent="HIGH-session-a"]')
+                check(page, mb.count() == 1 and mb.get_attribute('open') is not None and 'Message HIGH-session-a' in mb.inner_text(),
+                      'Farm: tapping an anthome opens a message box for that agent', failures)
+                mb.locator('textarea').fill('from the tree')
+                page.locator('.gzoom button', has_text='+').click()
+                page.evaluate("""() => document.querySelector('.gview').dispatchEvent(new WheelEvent('wheel',
+                    { deltaY: 120, shiftKey: true, bubbles: true, cancelable: true }))""")
+                page.evaluate('window.LoopApp.route({ quiet: true })')
+                page.wait_for_selector('.hinfo details.amsg[data-agent="HIGH-session-a"] textarea')
+                mb = page.locator('.hinfo details.amsg[data-agent="HIGH-session-a"]')
+                fits = page.evaluate("""() => { const r = document.querySelector('.hinfo details.amsg').getBoundingClientRect();
+                    return r.left >= 0 && r.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; }""")
+                check(page, mb.get_attribute('open') is not None and mb.locator('textarea').input_value() == 'from the tree' and fits,
+                      'Farm: the message box stays open with its text through zoom, pan and a redraw, and fits the screen', failures)
+                if shots:
+                    page.locator('.hinfo').scroll_into_view_if_needed()
+                    page.screenshot(path=f'{shots}/{label}-scene-message.png')
+                    page.evaluate('scrollTo(0, 0)')
+                page.goto(base + '#/status')
+                page.wait_for_selector('details.amsg[data-agent="HIGH-session-a"] textarea')
+                check(page, page.locator('details.amsg[data-agent="HIGH-session-a"] textarea').input_value() == 'from the tree',
+                      'Farm: the draft is shared with the Status tab', failures)
+                page.goto(base + '#/tree')
+                page.wait_for_selector('.hinfo details.amsg[data-agent="HIGH-session-a"] textarea')
+                before_msgs = set((repo / 'messages' / ha_job).glob('*.json')) if (repo / 'messages' / ha_job).exists() else set()
+                page.locator('.hinfo details.amsg button.primary').click()
+                page.wait_for_selector('.hinfo details.amsg .status >> text=Sent')
+                sent = [json.loads(f.read_text()) for f in set((repo / 'messages' / ha_job).glob('*.json')) - before_msgs]
+                check(page, len(sent) == 1 and sent[0]['to'] == 'HIGH-session-a' and sent[0]['text'] == 'from the tree',
+                      f'Farm: Send from the anthome delivers to that agent {sent}', failures)
+                page.locator('.gview svg').first.dispatch_event('click')          # open ground: unpin
+                page.locator('.gzoom button', has_text='Reset').click()
                 check(page, page.locator(f'{F} rect[fill="#686a66"]').count() > 0, 'Farm: a rock on the blocked hill', failures)
                 t0 = page.locator(f'{F} .ant').first.get_attribute('transform')
                 page.wait_for_timeout(400)
