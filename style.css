@@ -474,3 +474,4 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .ttable th, .ttable td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
 .bverdict .choice-btn { padding: 6px 8px; }
 .bverdict .choice-btn.sent { border-style: dashed; }
+.ausage { font-weight: 600; } .ausage.stale { color: var(--muted); font-weight: 400; }

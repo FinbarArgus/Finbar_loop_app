@@ -373,13 +373,23 @@
     }
   }
   // LOOP: a pile of fruit fallen from the growth tree (which stands in it in the scene) and leaf bits, wearing a crown.
-  function paintFood(hl, L, px) {
-    const t = toneOf(hl), f = L.food, r = rng('food', hl.name);
+  // The pile is the weekly usage left: opts.usage = {pct, stale} (pct of the week used). Full (6 blocks) after the
+  // reset, lower as it runs out, a crumb at 100%; with no figure it is full, and a stale figure is drawn faded.
+  const fade = (c) => '#' + [1, 3, 5].map((k) => Math.round(parseInt(c.slice(k, k + 2), 16) * 0.35 + 0xe6 * 0.65)
+    .toString(16).padStart(2, '0')).join('');
+  function foodLeft(usage) {
+    return usage && usage.pct != null ? Math.max(0, Math.min(1, (100 - usage.pct) / 100)) : 1;
+  }
+  function paintFood(hl, L, px, usage) {
+    const tone = toneOf(hl), f = L.food, r = rng('food', hl.name);
+    const t = usage && usage.stale ? (c) => fade(tone(c)) : tone;
     const set = (x, y, c) => px.set(`${x},${y}`, t(c));
-    const H = 6;
+    const left = foodLeft(usage), H = 6 * left;
     let peak = 0;
     for (let i = 0; i < f.w; i++) {
-      const u = ((i + 0.5) / f.w) * 2 - 1, col = Math.max(1, Math.round(H * (1 - Math.abs(u)) ** 0.8));
+      const u = ((i + 0.5) / f.w) * 2 - 1;
+      const col = Math.round(H * (1 - Math.abs(u)) ** 0.8) || (Math.abs(u) < Math.max(0.2, left) ? 1 : 0);
+      if (!col) continue;
       peak = Math.max(peak, col);
       for (let j = 0; j < col; j++) {
         const n = r();
@@ -387,7 +397,7 @@
       }
     }
     ['# # #', '#####'].forEach((row, ry) => [...row].forEach((ch, rx) => {
-      if (ch === '#') set(Math.floor(f.cx) - 2 + rx, L.surface - peak - 3 + ry, C.crown);
+      if (ch === '#') set(Math.floor(f.cx) - 2 + rx, L.surface - Math.max(peak, 1) - 3 + ry, C.crown);
     }));
     if (hl.rock) paintRock(px, f.cx, L.surface - peak - 3);
   }
@@ -467,7 +477,7 @@
     }
     for (const hl of homes) paintHome(hl, px, carved);
     for (const hl of homes) paintMound(hl, px, L.surface);
-    for (const hl of L.hills.filter((h) => h.kind === 'food')) paintFood(hl, L, px);
+    for (const hl of L.hills.filter((h) => h.kind === 'food')) paintFood(hl, L, px, opts.usage);
     let ants = '', labels = '', hits = '', glow = '', foods = '';
     L.paths.forEach((pa, n) => {
       for (let k = 0; k < pa.ants; k++) ants += `<g class="ant" data-p="${n}" data-a="${k}" transform="${antPose(antAt(pa, k, opts.t || 0))}">${ANT}</g>`;
@@ -517,6 +527,6 @@
       + ` aria-label="${L.hills.length} agents: ${counts}">${body}</svg>`;
   }
 
-  return { pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, parts, svg, label,
+  return { foodLeft, pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, parts, svg, label,
     SIZES, ANTS, SHAPES, CONTENTS, SOILS, LIGHTS, ROLE_ORDER, ROLE_TEXT, SPEED, SCALE, COL };
 }));

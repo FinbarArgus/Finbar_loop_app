@@ -915,6 +915,32 @@ def run(loop_bin, graph, shots):
                       and page.locator('.meta a', has_text='Hills').count() == 0, '#/hills opens the Tree tab; no Hills tab', failures)
                 F = '.gview .farm'
                 check(page, page.locator(f'{F} [data-k="hill"]').count() == 7, 'Farm: one hill per agent, and one for an agent only in the messages', failures)
+                # LOOP's food pile is the weekly usage left (state/usage.json, from the usage guard via `loop status`): full at 0%,
+                # half at 50%, a crumb at 94% and 100%; tapped, it says the figure; older than 2 h it is faded, "usage unknown".
+                fruit = lambda: page.evaluate("""() => [...document.querySelectorAll('.gview .farm rect')]
+                    .filter((r) => ['#c8553d', '#e39a3b', '#9a3d2c'].includes(r.getAttribute('fill'))).length""")
+                def food_at(pct, age_s=0):
+                    (repo / 'state/usage.json').write_text(json.dumps({'pct': pct, 'resets': 'Nov 26, 7am (Pacific/Auckland)', 'at': int(time.time()) - age_s}))
+                    page.reload()
+                    page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
+                n = {}
+                for pct in (0, 50, 94, 100):
+                    food_at(pct)
+                    n[pct] = fruit()
+                check(page, n[0] > n[50] > n[94] > 0 and n[94] == n[100] and n[94] <= 3, f'Farm: the food pile shrinks with the weekly usage, a crumb left {n}', failures)
+                food_at(94)
+                page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
+                lab = page.locator('.hinfo .ausage').inner_text()
+                check(page, lab == 'weekly usage 94% · resets Nov 26 7am', f'Farm: tapping the food says the weekly usage {lab!r}', failures)
+                food_at(50, age_s=3 * 3600)
+                page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
+                lab = page.locator('.hinfo .ausage').inner_text()
+                check(page, fruit() == 0 and 'usage unknown' in lab, f'Farm: a usage figure over 2 h old is faded, "usage unknown" {lab!r}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-food-stale.png')
+                (repo / 'state/usage.json').unlink()
+                page.reload()
+                page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
                 # It opens on the farm: every hill, home and path inside the view, the view inside the screen.
                 out = page.evaluate("""() => { scrollTo(0, 0);
                     const v = document.querySelector('.gview').getBoundingClientRect();
