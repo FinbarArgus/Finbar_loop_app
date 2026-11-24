@@ -140,10 +140,18 @@
     return { ext: 'jpg', bytes: new Uint8Array(await blob.arrayBuffer()), file: blob };
   }
 
-  // A text box that takes images (attach, paste, drop). onSend(text, images) -> Promise.
-  function composer({ placeholder, onSend, enterSends, sendLabel, extra }) {
+  // Unsent text, kept in localStorage per box (`draft`: e.g. "item.R-0012.answer", "agent.HIGH-x.message") so a
+  // redraw (a poll, coming back to the tab, leaving and reopening a view) never loses it. Cleared on a successful send.
+  const DRAFT = 'loop.draft.';
+  const draftGet = (key) => (key ? safeGet(DRAFT + key) : '');
+  const draftSet = (key, v) => { if (key) safeSet(DRAFT + key, v ? v : null); };
+
+  // A text box that takes images (attach, paste, drop). onSend(text, images) -> Promise. draft: its draft key.
+  function composer({ placeholder, onSend, enterSends, sendLabel, extra, draft }) {
     const imgs = [];
     const ta = el('textarea', { rows: 2, placeholder });
+    ta.value = draftGet(draft);
+    ta.addEventListener('input', () => draftSet(draft, ta.value));
     const thumbs = el('div', { class: 'thumbs' });
     const status = el('div', { class: 'status' });
     const pick = el('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
@@ -176,6 +184,7 @@
       status.textContent = 'Sending…';
       try {
         await onSend(text, imgs.slice());
+        draftSet(draft, null);
         ta.value = '';
         imgs.length = 0;
         thumbs.replaceChildren();
@@ -391,11 +400,12 @@
   }
 
   function revisitBox(id) {
-    return el('details', { class: 'detail revisit' },
+    return el('details', { class: 'detail revisit', open: draftGet(`item.${id}.revisit`) ? true : null },
       el('summary', {}, 'Revisit with the agent'),
       composer({
         placeholder: 'What should the agent look at again? Only this item is sent to it. Enter sends.',
         enterSends: true,
+        draft: `item.${id}.revisit`,
         sendLabel: 'Send',
         onSend: async (text, imgs) => { await send('requests', id, { kind: 'revisit', text }, imgs); },
       }));
@@ -584,11 +594,13 @@
   }
 
   function detailBox(id, where, label) {
-    return el('details', { class: 'detail', open: (where.open ?? where.quiz == null) ? true : null },
+    const draft = `item.${id}.detail.${where.quiz != null ? `quiz${where.quiz}` : where.question != null ? `q${where.question}` : 'item'}`;
+    return el('details', { class: 'detail', open: (where.open ?? where.quiz == null) || draftGet(draft) ? true : null },
       el('summary', {}, label),
       composer({
         placeholder: 'What do you want to know before answering? Enter sends; Shift+Enter for a new line. Paste or attach images.',
         enterSends: true,
+        draft,
         sendLabel: 'Ask',
         onSend: async (text, imgs) => {
           await send('requests', id, { kind: 'detail', quiz: where.quiz ?? null, question: where.question ?? null, text }, imgs);
@@ -712,6 +724,7 @@
       placeholder: it.kind === 'review' ? 'Comments for the agent (optional). Images welcome.'
         : qs.length > 1 ? 'Anything for all the questions (optional). Images welcome.' : 'Anything else (optional). Images welcome.',
       enterSends: false,
+      draft: `item.${it.id}.answer`,
       sendLabel: it.kind === 'review' ? 'Send review' : prev.length ? 'Send follow-up' : qs.length > 1 ? 'Send answers' : 'Send answer',
       extra,
       onSend: async (text, imgs) => {
@@ -731,6 +744,13 @@
         }
         await send('answers', it.id, body, imgs);
         if (it.bundle) st.set('prs', {});
+        else if (it.kind !== 'review') {          // sent: the questions' drafts (notes and picks) start empty again
+          qs.forEach((q, i) => { delete notes[i]; delete picks[i]; });
+          st.set('notes', notes);
+          st.set('picks', picks);
+          document.querySelectorAll('#main .question .qnote').forEach((n) => { n.value = ''; });
+          document.querySelectorAll('#main .question .choice-btn.on').forEach((b) => b.classList.remove('on'));
+        }
         justSent = it.id;
         if (refreshItem) await refreshItem();
       },
@@ -800,11 +820,12 @@
           el('div', { class: 'alinks' }, r.recent.map((x) => el('a', { href: `#/item/${x.id}`, class: 'alink' + (x.blocking_now ? ' blocking' : '') },
             el('b', {}, x.id), ` ${x.title.slice(0, 70)} `,
             el('span', { class: 'who' }, `${{ question: 'question', content: 'content', pr: 'review' }[x.tab] || x.tab}${['answered', 'closed'].includes(x.status) ? ' · ' + x.status : ''}`))))) : null,
-        el('details', { class: 'detail amsg' }, el('summary', {}, `Message ${r.name}`),
+        el('details', { class: 'detail amsg', open: draftGet(`agent.${r.name}.message`) ? true : null }, el('summary', {}, `Message ${r.name}`),
           composer({
             placeholder: 'Guide this agent. It is typed into its session within seconds (or restarts it). Images welcome.',
             enterSends: false,
             sendLabel: 'Send',
+            draft: `agent.${r.name}.message`,
             onSend: async (text, imgs) => { await send('messages', r.job, { kind: 'message', to: r.name, text }, imgs); },
           }))))
         : el('p', { class: 'empty' }, 'None.')));
@@ -1736,7 +1757,7 @@
   window.addEventListener('hashchange', route);
   let resizeTimer = null;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => drawSide().catch(() => {}), 300); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && tree.at && Date.now() - tree.at > 20_000) route(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && tree.at && Date.now() - tree.at > 20_000) route({ quiet: true }); });
   $('#refresh').addEventListener('click', () => { tree.at = 0; route(); });
   route();
   window.LoopApp = { route, refresh: () => refreshItem && refreshItem() };
