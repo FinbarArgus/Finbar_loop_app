@@ -1481,6 +1481,7 @@
     const svgEl = view.querySelector('svg');
     svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     const size = () => ({ W: view.clientWidth || 1, H: view.clientHeight || 1 });
+    const sprout = svgEl.querySelector('.sprout');
     // The closest zoom: 12 blocks across, or a small (young) tree's own frame, so it can be seen up close.
     const narrowest = () => Math.min(12, 0.9 * (sc.tree.x1 - sc.tree.x0));
     const widest = () => { const { W, H } = size(); return 1.1 * Math.max(sc.box.x1 - sc.box.x0, (sc.box.y1 - sc.box.y0) * W / H); };
@@ -1500,6 +1501,8 @@
       c.x = c.w >= b.x1 - b.x0 ? (b.x0 + b.x1 - c.w) / 2 : Math.max(b.x0, Math.min(b.x1 - c.w, c.x));
       c.y = Math.max(Math.min(b.y0, b.y1 - h), Math.min(b.y1 - h, c.y));
       svgEl.setAttribute('viewBox', [c.x, c.y, c.w, h].map((v) => Math.round(v * 100) / 100).join(' '));
+      // A young tree's marker ("tree: 7 cm ↓", ~12 blocks wide) points it out in the farm view; zoomed in, the tree is seen.
+      if (sprout) sprout.style.display = c.w < 20 ? 'none' : '';
     };
     const zoomAt = (k, px, py) => {               // k > 1 zooms in, about the point (px, py) of the view
       const { W, H } = size(), c = sceneCam;

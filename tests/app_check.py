@@ -700,6 +700,7 @@ def run(loop_bin, graph, shots):
                 page.locator('.gview .hits [data-k="sprout"]').dispatch_event('click')
                 vy = [float(x) for x in page.locator('.gview svg').first.get_attribute('viewBox').split()]
                 wood = page.evaluate(fill)
+                check(page, not page.locator('.gview .sprout text').is_visible(), 'Young tree: zoomed in, the marker is hidden', failures)
                 check(page, max(before['across'], before['up']) < 0.2 and vy[2] < 12 and wood['wood'] and wood['inside']
                       and max(wood['across'], wood['up']) >= 0.6,
                       f'Young tree: tapping the marker zooms onto the whole tree {vy} {before} {wood}', failures)

@@ -29,7 +29,7 @@ test('the tree stands on the surface in a gap between LOOP\'s fruit pile and the
     assert.ok(foot.x - half >= pile + 4, `trunk ${foot.x - half} clear of the pile ${pile}`);
     assert.ok(foot.x + half <= next - 4, `trunk ${foot.x + half} clear of the anthill ${next}`);
     assert.ok(sc.L.gap.x1 - sc.L.gap.x0 >= S.GAP);
-    assert.match(sc.svg, new RegExp(`<g class="tree" transform="translate\\(${sc.L.gap.cx} ${sc.L.surface}\\) scale\\(2\\)"`));
+    assert.match(sc.svg, new RegExp(`<g class="tree" transform="translate\\(${sc.L.gap.cx} ${sc.L.surface}\\) scale\\(${S.SCALE}\\)"`));
   }
 });
 
@@ -66,13 +66,17 @@ test('a tree wider than the farm widens the ground under it', () => {
   assert.equal(+soil[0][2], 3 * bw, 'and past the right');
 });
 
-test('one sky, the tree behind the farm, the tree\'s tap targets on top of the farm\'s', () => {
+test('one sky, a grown tree behind the farm and a young one over it, the tree\'s tap targets on top of the farm\'s', () => {
   const st = G.derive([{ id: 'r1', kind: 'read', done: true, created: '2026-12-01T09:00:00', done_at: '2026-12-01T15:00:00' }], {}, {}, NOW);
   const sc = S.scene(st, AGENTS);
   assert.equal((sc.svg.match(/fill="#f3f2ea"\/>/g) || []).length, 1, 'one sky rect');
   assert.ok(!sc.svg.includes('fill="#fff"'), 'no white paper behind the tree');
+  // A young tree is drawn over the farm (its grass would hide it); its tap targets are on top of the farm's.
   const treeBody = sc.svg.indexOf('<g class="tree"'), farm = sc.svg.indexOf('<g class="farm">'), treeHits = sc.svg.lastIndexOf('<g class="tree"');
-  assert.ok(treeBody < farm && farm < treeHits);
+  assert.ok(farm < treeBody && treeBody < treeHits);
+  // A grown tree stands behind the farm, so its foot is in LOOP's pile.
+  const gs = S.scene(grown(365), AGENTS).svg;
+  assert.ok(gs.indexOf('<g class="tree"') < gs.indexOf('<g class="farm">') && gs.indexOf('<g class="farm">') < gs.lastIndexOf('<g class="tree"'));
   assert.ok(sc.svg.indexOf('data-k="hill"') > farm && sc.svg.indexOf('data-k="hill"') < treeHits);
   assert.ok(sc.svg.indexOf('data-k="seg" data-i="r1"') > treeHits);
   assert.equal((sc.svg.match(/class="ant"/g) || []).length, 6 + 5 + 2 + 5);
@@ -83,7 +87,7 @@ test('the height scale stands at the farm\'s left edge, its labels to its right'
   const m = /<g class="scale">.*?<text x="([-\d.]+)"[^>]*text-anchor="start"[^>]*>(\d+) m<\/text>/.exec(sc.svg);
   assert.ok(m, 'a scale label');
   const x = sc.L.gap.cx + S.SCALE * +m[1];
-  assert.ok(x > 0 && x < 8, `label at ${x} blocks`);
+  assert.ok(x > 0 && x < 1 + 4 * G.CELL * S.SCALE, `label at ${x} blocks, within 4 of the tree's blocks of the edge`);
 });
 
 test('without agents the tree still stands on an empty farm', () => {
@@ -110,4 +114,14 @@ test('a young tree (Q-0036) stands small beside the fruit pile: a marker with it
   const big = S.scene(grown(365), AGENTS);
   assert.doesNotMatch(big.svg, /data-k="sprout"/);
   assert.ok(big.tree.x1 - big.tree.x0 >= big.L.width);
+});
+
+test('anthomes are about 1 m on the tree\'s height scale (Finbar, C-0007), and LOOP\'s pile has no crown', () => {
+  const sc = S.scene(young(), AGENTS);
+  const m = (blocks) => blocks / S.SCALE;
+  // A home grows with its agent's tokens: a typical one is under 1 m, the heaviest user's up to 1.5 m.
+  const homes = sc.L.hills.filter((x) => x.home).map((h) => m(h.home.h)).sort((x, y) => x - y);
+  assert.ok(homes[Math.floor(homes.length / 2)] <= 1 && homes.every((h) => h >= 0.5 && h <= 1.5), `homes ${homes} m`);
+  assert.ok(sc.L.hills.filter((x) => x.mound).every((h) => m(h.mound.h) <= 1), 'mounds under 1 m');
+  assert.ok(!sc.svg.includes('#b89b55'), 'no crown');
 });

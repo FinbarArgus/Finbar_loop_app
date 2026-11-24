@@ -1,7 +1,8 @@
 // The Tree tab's scene: the growth tree (growth.js) standing on the ant farm (anthills.js), as one drawing.
 // The tree stands on the surface in a gap between LOOP's fruit pile (its fallen fruit) and the first anthill to the
 // right; the anthills' shafts lead down to the anthomes. Coordinates are the farm's blocks (y down, the surface at L.surface); the
-// tree is drawn at SCALE blocks per tree unit, so one of its blocks (CELL = 0.5 units) is one farm block.
+// tree is drawn at SCALE farm blocks per tree unit (a metre): a farm block is BLOCK_M = 12.5 cm, so an anthome (5-7 blocks)
+// is under 1 m on the tree's height scale, and one of the tree's own blocks (CELL = 0.5 m) is 4 farm blocks.
 // A pure function like the two it draws (no clock, no network). Loaded in the browser (window.LoopScene) and by Node.
 (function (root, factory) {
   const api = typeof module === 'object' && module.exports
@@ -12,7 +13,8 @@
 }(typeof self !== 'undefined' ? self : this, (G, H) => {
   'use strict';
 
-  const SCALE = 1 / G.CELL;     // farm blocks per tree unit
+  const BLOCK_M = 0.125;        // a farm block, in metres (the tree's units)
+  const SCALE = 1 / BLOCK_M;    // farm blocks per tree unit
   const SKY = '#f3f2ea';        // the farm's sky
   const HOME_SKY = 16;          // blocks of sky above the surface in the default view (the anthills and the trunk's foot)
   const GAP = 12;               // the least open surface the tree stands in; it widens with the trunk (trunk + 8)
@@ -54,8 +56,10 @@
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${f(home.x0)} ${f(home.y0)} ${f(home.x1 - home.x0)} ${f(home.y1 - home.y0)}"`
       + ` class="scene" role="img" aria-label="${state.stage}, ${f(state.height)} m tall, over ${L.hills.length} agents: ${counts}">`
       + `<rect x="${f(span[0])}" y="${f(box.y0 - (box.y1 - box.y0))}" width="${f(span[1] - span[0])}" height="${f(L.surface - box.y0 + (box.y1 - box.y0))}" fill="${SKY}"/>`
-      + `<g class="tree" transform="${place}" shape-rendering="crispEdges">${T.body}</g>`
-      + `<g class="farm">${farm.body}</g>${sprout}`
+      // A grown tree's foot stands in LOOP's pile (the farm drawn over it); a young one is drawn over the farm's grass.
+      + (small ? `<g class="farm">${farm.body}</g><g class="tree" transform="${place}" shape-rendering="crispEdges">${T.body}</g>`
+        : `<g class="tree" transform="${place}" shape-rendering="crispEdges">${T.body}</g><g class="farm">${farm.body}</g>`)
+      + sprout
       + `<g class="tree" transform="${place}">${T.hits}</g>${sproutHit ? `<g class="hits">${sproutHit}</g>` : ''}</svg>`;
     return { svg, L, box, home, tree };
   }
