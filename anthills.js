@@ -79,7 +79,7 @@
     sky: '#f3f2ea', grass: '#6f8a55', grassLight: '#87a068', topsoil: '#7d5e42', soil: ['#6e5139', '#634832', '#57402d'],
     pebble: '#8d8378', pebbleDark: '#6f675d', room: '#c9a77e', roomFloor: '#b99569', wall: '#9c7a57', tunnel: '#b8956b',
     trail: '#a89068', ant: '#1f1610', egg: '#f2ece0', seed: '#d2b483', seedDark: '#a8885b', larva: '#efe3c7', fungus: '#d9dccb',
-    fungusDark: '#b5b9a3', root: '#3c2c1f', crumb: '#e2c46e', leaf: '#7f9a5c', crown: '#b89b55', fruit: '#c8553d', fruitDark: '#9a3d2c', fruitGold: '#e39a3b', off: '#6d665e',
+    fungusDark: '#b5b9a3', root: '#3c2c1f', crumb: '#e2c46e', leaf: '#7f9a5c', fruit: '#c8553d', fruitDark: '#9a3d2c', fruitGold: '#e39a3b', off: '#6d665e',
     rock: '#8a8c88', rockDark: '#686a66', rockLight: '#b0b2ad', label: '#4a4036', inkUnder: '#f4ecdc',
   };
 
@@ -372,7 +372,7 @@
       }
     }
   }
-  // LOOP: a pile of fruit fallen from the growth tree (which stands in it in the scene) and leaf bits, wearing a crown.
+  // LOOP: a pile of fruit fallen from the growth tree (which stands in it in the scene) and leaf bits.
   // The pile is the weekly usage left: opts.usage = {pct, stale} (pct of the week used). Full (6 blocks) after the
   // reset, lower as it runs out, a crumb at 100%; with no figure it is full, and a stale figure is drawn faded.
   const fade = (c) => '#' + [1, 3, 5].map((k) => Math.round(parseInt(c.slice(k, k + 2), 16) * 0.35 + 0xe6 * 0.65)
@@ -396,9 +396,6 @@
         set(Math.floor(f.x0) + i, L.surface - 1 - j, n < 0.35 ? C.fruit : n < 0.55 ? C.fruitGold : n < 0.75 ? C.fruitDark : n < 0.88 ? C.crumb : C.leaf);
       }
     }
-    ['# # #', '#####'].forEach((row, ry) => [...row].forEach((ch, rx) => {
-      if (ch === '#') set(Math.floor(f.cx) - 2 + rx, L.surface - Math.max(peak, 1) - 3 + ry, C.crown);
-    }));
     if (hl.rock) paintRock(px, f.cx, L.surface - peak - 3);
   }
 

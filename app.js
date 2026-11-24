@@ -140,13 +140,21 @@
     return { ext: 'jpg', bytes: new Uint8Array(await blob.arrayBuffer()), file: blob };
   }
 
-  // A text box that takes images (attach, paste, drop). onSend(text, images) -> Promise.
+  // Unsent text, kept in localStorage per box (`draft`: e.g. "item.R-0012.answer", "agent.HIGH-x.message") so a
+  // redraw (a poll, coming back to the tab, leaving and reopening a view) never loses it. Cleared on a successful send.
+  const DRAFT = 'loop.draft.';
+  const draftGet = (key) => (key ? safeGet(DRAFT + key) : '');
+  const draftSet = (key, v) => { if (key) safeSet(DRAFT + key, v ? v : null); };
+
+  // A text box that takes images (attach, paste, drop). onSend(text, images) -> Promise. draft: its draft key.
   // urgent: while the usage hold is on, show an "Urgent: deliver now" tick; onSend gets {urgent} as its third argument.
-  function composer({ placeholder, onSend, enterSends, sendLabel, extra, urgent }) {
+  function composer({ placeholder, onSend, enterSends, sendLabel, extra, draft, urgent }) {
     const imgs = [];
     const tick = el('input', { type: 'checkbox', class: 'urgent' });
     const urgentRow = urgent && heldNow ? el('label', { class: 'wstate urgentrow' }, tick, 'Urgent: deliver now, despite the usage hold') : null;
     const ta = el('textarea', { rows: 2, placeholder });
+    ta.value = draftGet(draft);
+    ta.addEventListener('input', () => draftSet(draft, ta.value));
     const thumbs = el('div', { class: 'thumbs' });
     const status = el('div', { class: 'status' });
     const pick = el('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
@@ -180,6 +188,7 @@
       try {
         await onSend(text, imgs.slice(), { urgent: !!(urgentRow && tick.checked) });
         tick.checked = false;
+        draftSet(draft, null);
         ta.value = '';
         imgs.length = 0;
         thumbs.replaceChildren();
@@ -395,11 +404,12 @@
   }
 
   function revisitBox(id) {
-    return el('details', { class: 'detail revisit' },
+    return el('details', { class: 'detail revisit', open: draftGet(`item.${id}.revisit`) ? true : null },
       el('summary', {}, 'Revisit with the agent'),
       composer({
         placeholder: 'What should the agent look at again? Only this item is sent to it. Enter sends.',
         enterSends: true,
+        draft: `item.${id}.revisit`,
         sendLabel: 'Send',
         onSend: async (text, imgs) => { await send('requests', id, { kind: 'revisit', text }, imgs); },
       }));
@@ -588,11 +598,13 @@
   }
 
   function detailBox(id, where, label) {
-    return el('details', { class: 'detail', open: (where.open ?? where.quiz == null) ? true : null },
+    const draft = `item.${id}.detail.${where.quiz != null ? `quiz${where.quiz}` : where.question != null ? `q${where.question}` : 'item'}`;
+    return el('details', { class: 'detail', open: (where.open ?? where.quiz == null) || draftGet(draft) ? true : null },
       el('summary', {}, label),
       composer({
         placeholder: 'What do you want to know before answering? Enter sends; Shift+Enter for a new line. Paste or attach images.',
         enterSends: true,
+        draft,
         sendLabel: 'Ask',
         onSend: async (text, imgs) => {
           await send('requests', id, { kind: 'detail', quiz: where.quiz ?? null, question: where.question ?? null, text }, imgs);
@@ -716,6 +728,7 @@
       placeholder: it.kind === 'review' ? 'Comments for the agent (optional). Images welcome.'
         : qs.length > 1 ? 'Anything for all the questions (optional). Images welcome.' : 'Anything else (optional). Images welcome.',
       enterSends: false,
+      draft: `item.${it.id}.answer`,
       sendLabel: it.kind === 'review' ? 'Send review' : prev.length ? 'Send follow-up' : qs.length > 1 ? 'Send answers' : 'Send answer',
       extra,
       onSend: async (text, imgs) => {
@@ -735,6 +748,13 @@
         }
         await send('answers', it.id, body, imgs);
         if (it.bundle) st.set('prs', {});
+        else if (it.kind !== 'review') {          // sent: the questions' drafts (notes and picks) start empty again
+          qs.forEach((q, i) => { delete notes[i]; delete picks[i]; });
+          st.set('notes', notes);
+          st.set('picks', picks);
+          document.querySelectorAll('#main .question .qnote').forEach((n) => { n.value = ''; });
+          document.querySelectorAll('#main .question .choice-btn.on').forEach((b) => b.classList.remove('on'));
+        }
         justSent = it.id;
         if (refreshItem) await refreshItem();
       },
@@ -804,12 +824,13 @@
           el('div', { class: 'alinks' }, r.recent.map((x) => el('a', { href: `#/item/${x.id}`, class: 'alink' + (x.blocking_now ? ' blocking' : '') },
             el('b', {}, x.id), ` ${x.title.slice(0, 70)} `,
             el('span', { class: 'who' }, `${{ question: 'question', content: 'content', pr: 'review' }[x.tab] || x.tab}${['answered', 'closed'].includes(x.status) ? ' · ' + x.status : ''}`))))) : null,
-        el('details', { class: 'detail amsg' }, el('summary', {}, `Message ${r.name}`),
+        el('details', { class: 'detail amsg', open: draftGet(`agent.${r.name}.message`) ? true : null }, el('summary', {}, `Message ${r.name}`),
           composer({
             placeholder: 'Guide this agent. It is typed into its session within seconds (or restarts it). Images welcome.',
             enterSends: false,
             sendLabel: 'Send',
             urgent: true,
+            draft: `agent.${r.name}.message`,
             onSend: async (text, imgs, o) => { await send('messages', r.job, { kind: 'message', to: r.name, text, ...(o.urgent ? { urgent: true } : {}) }, imgs); },
           }))))
         : el('p', { class: 'empty' }, 'None.')));
@@ -1313,7 +1334,7 @@
   const growthState = () => G.derive(mine.entries, growthDocs.tree, growthDocs.cites, new Date());
   const dayText = (d) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const collName = (b) => (b === 'trunk' ? 'no collection (the trunk)' : b);
-  const metres = (h) => `${h < 10 ? h.toFixed(1) : Math.round(h)} m`;
+  const metres = (h) => (h < 1 ? `${Math.round(h * 100)} cm` : `${h < 10 ? h.toFixed(1) : Math.round(h)} m`);
 
   // What a tapped or hovered part of the tree is: a paper's segment, a collection's stub, or an animal.
   function growthInfo(state, k, id, b) {
@@ -1497,6 +1518,9 @@
     const svgEl = view.querySelector('svg');
     svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     const size = () => ({ W: view.clientWidth || 1, H: view.clientHeight || 1 });
+    const sprout = svgEl.querySelector('.sprout');
+    // The closest zoom: 12 blocks across, or a small (young) tree's own frame, so it can be seen up close.
+    const narrowest = () => Math.min(12, 0.9 * (sc.tree.x1 - sc.tree.x0));
     const widest = () => { const { W, H } = size(); return 1.1 * Math.max(sc.box.x1 - sc.box.x0, (sc.box.y1 - sc.box.y0) * W / H); };
     // A box shown whole: centred across, its foot at the view's foot.
     const frame = (b) => {
@@ -1507,19 +1531,21 @@
     const draw = () => {
       if (!view.isConnected) return;
       const { W, H } = size(), b = sc.box, c = sceneCam;
-      c.w = Math.max(12, Math.min(widest(), c.w));
+      c.w = Math.max(narrowest(), Math.min(widest(), c.w));
       const h = c.w * H / W;
       // Across: inside the scene, or centred on it when wider. Up and down: never below the farm's floor, and the
       // top no higher than the tree's unless the view is taller than the scene.
       c.x = c.w >= b.x1 - b.x0 ? (b.x0 + b.x1 - c.w) / 2 : Math.max(b.x0, Math.min(b.x1 - c.w, c.x));
       c.y = Math.max(Math.min(b.y0, b.y1 - h), Math.min(b.y1 - h, c.y));
       svgEl.setAttribute('viewBox', [c.x, c.y, c.w, h].map((v) => Math.round(v * 100) / 100).join(' '));
+      // A young tree's marker ("tree: 7 cm ↓", ~12 blocks wide) points it out in the farm view; zoomed in, the tree is seen.
+      if (sprout) sprout.style.display = c.w < 20 ? 'none' : '';
     };
     const zoomAt = (k, px, py) => {               // k > 1 zooms in, about the point (px, py) of the view
       const { W, H } = size(), c = sceneCam;
       if (px == null) { px = W / 2; py = H / 2; }
       const u = c.w / W, wx = c.x + px * u, wy = c.y + py * u;
-      c.w = Math.max(12, Math.min(widest(), c.w / k));
+      c.w = Math.max(narrowest(), Math.min(widest(), c.w / k));
       c.x = wx - px * c.w / W; c.y = wy - py * c.w / W;
       draw();
     };
@@ -1552,7 +1578,9 @@
     svgEl.addEventListener('pointerover', (ev) => { if (ev.pointerType === 'mouse') show(ev.target.closest('[data-k]')); });
     svgEl.addEventListener('click', (ev) => {
       if (sdragged) { sdragged = false; return; }
-      show(ev.target.closest('[data-k]'), true);
+      const t = ev.target.closest('[data-k]');
+      if (t && t.dataset.k === 'sprout') { goto(sc.tree); return; }     // a young tree's marker: zoom to the tree
+      show(t, true);
     });
     const goto = (b) => { sceneCam = frame(b); draw(); };
     const zoom = el('div', { class: 'gzoom' },
@@ -1772,7 +1800,7 @@
   window.addEventListener('hashchange', route);
   let resizeTimer = null;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => drawSide().catch(() => {}), 300); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && tree.at && Date.now() - tree.at > 20_000) route(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && tree.at && Date.now() - tree.at > 20_000) route({ quiet: true }); });
   $('#refresh').addEventListener('click', () => { tree.at = 0; route(); });
   route();
   window.LoopApp = { route, refresh: () => refreshItem && refreshItem() };

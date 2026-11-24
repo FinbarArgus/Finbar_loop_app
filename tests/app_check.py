@@ -179,8 +179,15 @@ def check_file_links(browser, base, repo, vp, label, failures):
         'created': '2026-01-01T00:00:00Z', 'files': ['paper.pdf']}))
     gh = fake_github(repo)
 
+    # A slow PDF download. While `hold` is set, PDF requests wait in `held` until the test fulfils them, so a check that the
+    # tap opened the tab before the download ended can't race it (a sleep here runs on the test's thread, inside click()).
+    held, hold = [], [False]
+
     def slow(route):
-        if route.request.url.endswith('.pdf'):
+        if urlparse(route.request.url).path.endswith('.pdf'):
+            if hold[0]:
+                held.append(route)
+                return None
             time.sleep(0.8)
         return gh(route)
 
@@ -205,10 +212,14 @@ def check_file_links(browser, base, repo, vp, label, failures):
         link = page.locator('.mrow', has_text='PDF paper').locator('a.flink')
         link.wait_for()
         if mode == 'tab':
+            hold[0] = True
             link.click()
             first = page.evaluate('window.__opens.slice()')
             check(page, len(first) == 1 and first[0]['u'] == '' and first[0]['href'] is None,
                   f'{label} PDF link: a tab opens in the tap, before the slow download ends {first}', failures)
+            hold[0] = False
+            while held:
+                gh(held.pop())
             href = poll(page, 'window.__opens[0] && window.__opens[0].href')
             typ = page.evaluate('(u) => fetch(u).then((r) => r.blob()).then((b) => [b.type, b.size])', href) if href else None
             check(page, href and href.startswith('blob:') and typ == ['application/pdf', len(PDF)],
@@ -666,6 +677,37 @@ def run(loop_bin, graph, shots):
                 w = rj(wid)
                 check(page, w['published'] and w.get('published_at') and w['done'] and w.get('done_at'), 'Write: published is done', failures)
 
+                # A young tree (one paper so far, Q-0036): a few centimetres tall beside the fruit pile. The default view shows
+                # a marker with its height over the trunk's foot; tapping it zooms onto the tree, its wood seen up close.
+                page.goto(base + '#/tree')
+                page.reload()
+                page.wait_for_selector('.gview .sprout text')
+                mk = page.locator('.gview .sprout text').text_content()
+                check(page, re.fullmatch(r'tree: \d+ cm ↓', mk) is not None and 'cm' in page.locator('.ghead').inner_text(),
+                      f'Young tree: a marker with its height in cm {mk!r}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-young-tree.png')
+                # Zoomed onto the whole tree: the tree's drawing (wood, height scale, animal) inside the view and filling it
+                # across or up, as far as it can be zoomed without cutting part of it off. Measured as a share of the view, since
+                # a phone's narrow view fits the drawing's width and a computer's its height. The frame's margins leave it ~80% of the
+                # view; before the tap it fills ~2%.
+                fill = """() => { const v = document.querySelector('.gview').getBoundingClientRect();
+                    const t = document.querySelector('.gview .tree').getBoundingClientRect();
+                    const r = [...document.querySelectorAll('.gview .tree .hits [data-k="seg"]')].map((n) => n.getBoundingClientRect());
+                    return { across: (t.right - t.left) / v.width, up: (t.bottom - t.top) / v.height, wood: r.length > 0,
+                      inside: [t, ...r].every((b) => b.left >= v.left - 1 && b.right <= v.right + 1 && b.top >= v.top - 1 && b.bottom <= v.bottom + 1) }; }"""
+                before = page.evaluate(fill)
+                page.locator('.gview .hits [data-k="sprout"]').dispatch_event('click')
+                vy = [float(x) for x in page.locator('.gview svg').first.get_attribute('viewBox').split()]
+                wood = page.evaluate(fill)
+                check(page, not page.locator('.gview .sprout text').is_visible(), 'Young tree: zoomed in, the marker is hidden', failures)
+                check(page, max(before['across'], before['up']) < 0.2 and vy[2] < 12 and wood['wood'] and wood['inside']
+                      and max(wood['across'], wood['up']) >= 0.6,
+                      f'Young tree: tapping the marker zooms onto the whole tree {vy} {before} {wood}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-young-tree-zoom.png')
+                page.locator('.gzoom button', has_text='Reset').click()
+                page.goto(base + '#/list')
                 # Tree: papers read on past days in two collections, one met deadline (a leaf), the animal.
                 import datetime as _dt2
                 for k, (name, days) in enumerate([('ROM / OpInf', 3), ('ROM / OpInf', 2), ('ROM / Beat maps', 2),
@@ -856,6 +898,58 @@ def run(loop_bin, graph, shots):
                 page.wait_for_selector('.triage tr[data-class="low"]')
                 check(page, page.locator('.triage tr[data-class="low"]').inner_text().split('\t')[-1].strip() == '100% (2/2)'
                       and '0% (0/1)' in page.locator('.triage tr[data-class="high"]').inner_text(), 'Status: triage accuracy per class', failures)
+                # Drafts (Finbar 2026-11-24): unsent text survives a redraw by the item's poll, coming back to the tab after
+                # 20 s (a full redraw), and leaving the view and coming back; a successful send clears it.
+                def back_to_tab():
+                    page.evaluate("() => { const real = Date.now; Date.now = () => real() + 60_000; document.dispatchEvent(new Event('visibilitychange')); Date.now = real; }")
+                    page.wait_for_timeout(600)
+                did = loop(loop_bin, repo, 'post', 'question', 'Which mesh for the draft test?', '--from', 'MED-y', '--option', 'coarse', '--option', 'fine')
+                page.goto(base + f'#/item/{did}')
+                page.reload()
+                page.wait_for_selector('.answer textarea')
+                page.locator('.answer textarea').fill('half a reply')
+                page.locator('.question details.detail textarea').fill('half a detail request')
+                page.locator('.question .qnote').fill('half a note')
+                page.evaluate('window.LoopApp.refresh()')
+                page.wait_for_timeout(400)
+                back_to_tab()
+                page.goto(base + '#/list')
+                page.wait_for_selector('.card')
+                page.goto(base + f'#/item/{did}')
+                page.wait_for_selector('.answer textarea')
+                kept = [page.locator('.answer textarea').input_value(), page.locator('.question details.detail textarea').input_value(),
+                        page.locator('.question .qnote').input_value()]
+                check(page, kept == ['half a reply', 'half a detail request', 'half a note'],
+                      f'Drafts: an item\'s reply, detail request and note survive redraws and leaving the item {kept}', failures)
+                page.locator('.answer button.primary').click()
+                page.wait_for_selector('.answer .given')
+                page.goto(base + '#/list')
+                page.wait_for_selector('.card')
+                page.goto(base + f'#/item/{did}')
+                page.wait_for_selector('.answer .given')
+                left = [page.locator('.answer textarea').input_value(), page.locator('.question .qnote').input_value(),
+                        page.locator('.question details.detail textarea').input_value()]
+                check(page, left == ['', '', 'half a detail request'],
+                      f'Drafts: sending the answer clears its drafts, not the unsent detail request {left}', failures)
+                page.goto(base + '#/status')
+                page.wait_for_selector('details.amsg')
+                agent = page.locator('.agent', has_text='HIGH-session-a').first
+                agent.locator('details.amsg summary').click()
+                agent.locator('details.amsg textarea').fill('a message half written')
+                page.locator('.foot').click()                       # clicks off it
+                back_to_tab()
+                page.goto(base + '#/list')
+                page.wait_for_selector('.card')
+                page.goto(base + '#/status')
+                page.wait_for_selector('details.amsg')
+                agent = page.locator('.agent', has_text='HIGH-session-a').first
+                check(page, agent.locator('details.amsg').get_attribute('open') is not None
+                      and agent.locator('details.amsg textarea').input_value() == 'a message half written',
+                      'Drafts: a message to an agent is kept (its box reopens) after clicking off, redraws and leaving Status', failures)
+                agent.locator('details.amsg button.primary').click()
+                page.wait_for_selector('details.amsg .status >> text=Sent')
+                check(page, page.evaluate("() => localStorage.getItem('loop.draft.agent.HIGH-session-a.message')") is None,
+                      'Drafts: sending the message clears its draft', failures)
                 # The ant farm under the tree (LOOP the fruit pile at the trunk's foot, an anthome per session sized by
                 # tokens, lights by role, a rock when blocked, ants when working, tunnels for messages).
                 st = json.loads((repo / 'state/status.json').read_text())
@@ -1060,7 +1154,12 @@ def run(loop_bin, graph, shots):
                 # First zoom until the view is shorter than the scene: a view taller than the scene keeps its foot on the
                 # farm's floor, so a zoom there moves the view up and down by design.
                 vh = vb()                                                                     # the opening view
-                wheel(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+                mid = lambda v: v[1] + v[3] / 2
+                for _ in range(6):                     # until shorter than the scene: a zoom then keeps the centre still
+                    a = vb()
+                    wheel(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+                    if abs(mid(vb()) - mid(a)) < 0.3 or vb()[2] < 40:
+                        break
                 v0 = vb()
                 cx, cy = box['x'] + box['width'] * 0.3, box['y'] + box['height'] * 0.8      # a point in the farm
                 world = lambda v: (v[0] + (cx - box['x']) * v[2] / box['width'], v[1] + (cy - box['y']) * v[2] / box['width'])
