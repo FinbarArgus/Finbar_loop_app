@@ -1009,6 +1009,64 @@ def run(loop_bin, graph, shots):
                       and page.locator('.meta a', has_text='Hills').count() == 0, '#/hills opens the Tree tab; no Hills tab', failures)
                 F = '.gview .farm'
                 check(page, page.locator(f'{F} [data-k="hill"]').count() == 7, 'Farm: one hill per agent, and one for an agent only in the messages', failures)
+                # LOOP's food pile is the weekly usage left (state/usage.json, from the usage guard via `loop status`): full at 0%,
+                # half at 50%, a crumb at 94% and 100%; tapped, it says the figure; older than 2 h it is faded, "usage unknown".
+                fruit = lambda: page.evaluate("""() => [...document.querySelectorAll('.gview .farm rect')]
+                    .filter((r) => ['#c8553d', '#e39a3b', '#9a3d2c'].includes(r.getAttribute('fill'))).length""")
+                def food_at(pct, age_s=0):
+                    (repo / 'state/usage.json').write_text(json.dumps({'pct': pct, 'resets': 'Nov 26, 7am (Pacific/Auckland)', 'at': int(time.time()) - age_s}))
+                    page.reload()
+                    page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
+                n = {}
+                for pct in (0, 50, 94, 100):
+                    food_at(pct)
+                    n[pct] = fruit()
+                check(page, n[0] > n[50] > n[94] > 0 and n[94] == n[100] and n[94] <= 3, f'Farm: the food pile shrinks with the weekly usage, a crumb left {n}', failures)
+                food_at(94)
+                page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
+                lab = page.locator('.hinfo .ausage:not(.session)').inner_text()
+                check(page, lab == 'weekly usage 94% · resets Nov 26 7am', f'Farm: tapping the food says the weekly usage {lab!r}', failures)
+                ses = page.locator('.hinfo .ausage.session').inner_text()
+                check(page, ses.startswith('session usage 43% · resets Nov 23'), f'Farm: and the current session\'s usage {ses!r}', failures)
+                # Held (the usage guard tripped): a banner on every tab; send buttons stay enabled.
+                (repo / 'state/usage.json').write_text(json.dumps({'pct': 95, 'resets': 'Nov 26, 7am (Pacific/Auckland)', 'at': int(time.time()), 'held': True}))
+                hb = []
+                for where in ('#/list', '#/status'):
+                    page.goto(base + where)
+                    page.reload()
+                    page.wait_for_selector('#held:not([hidden])')
+                    hb.append(page.locator('#held').inner_text())
+                check(page, all(t == 'Weekly usage at 95%: messages, answers and papers are saved and reach the agents after the reset (Nov 26, 7am).' for t in hb)
+                      and page.locator('details.amsg button.primary').first.is_enabled(), f'Held: the banner on every tab, sending still on {hb}', failures)
+                ag = page.locator('.agent', has_text='HIGH-paper').first
+                ag.locator('details.amsg summary').click()
+                ag.locator('details.amsg textarea').fill('urgent one')
+                ag.locator('details.amsg input.urgent').check()
+                jb = next(x['job'] for x in json.loads((repo / 'state/status.json').read_text())['agents'] if x['name'] == 'HIGH-paper')
+                old = set((repo / 'messages' / jb).glob('*.json')) if (repo / 'messages' / jb).exists() else set()
+                ag.locator('details.amsg button.primary').click()
+                ag.locator('details.amsg .status', has_text='Sent').wait_for()
+                new = [json.loads(f.read_text()) for f in set((repo / 'messages' / jb).glob('*.json')) - old]
+                check(page, len(new) == 1 and new[0].get('urgent') is True and new[0]['text'] == 'urgent one',
+                      f'Held: a message ticked Urgent is saved as urgent {new}', failures)
+                (repo / 'state/usage.json').write_text(json.dumps({'pct': 50, 'resets': 'x', 'at': int(time.time()), 'held': False}))
+                page.reload()
+                page.wait_for_timeout(500)
+                page.goto(base + '#/status')
+                page.wait_for_selector('details.amsg')
+                page.wait_for_timeout(500)
+                check(page, page.locator('#held').is_hidden() and page.locator('input.urgent').count() == 0,
+                      'Held: no banner and no Urgent tick when not held', failures)
+                page.goto(base + '#/tree')
+                food_at(50, age_s=3 * 3600)
+                page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
+                lab = page.locator('.hinfo .ausage:not(.session)').inner_text()
+                check(page, fruit() == 0 and 'usage unknown' in lab, f'Farm: a usage figure over 2 h old is faded, "usage unknown" {lab!r}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-food-stale.png')
+                (repo / 'state/usage.json').unlink()
+                page.reload()
+                page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
                 # It opens on the farm: every hill, home and path inside the view, the view inside the screen.
                 out = page.evaluate("""() => { scrollTo(0, 0);
                     const v = document.querySelector('.gview').getBoundingClientRect();

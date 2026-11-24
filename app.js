@@ -147,8 +147,11 @@
   const draftSet = (key, v) => { if (key) safeSet(DRAFT + key, v ? v : null); };
 
   // A text box that takes images (attach, paste, drop). onSend(text, images) -> Promise. draft: its draft key.
-  function composer({ placeholder, onSend, enterSends, sendLabel, extra, draft }) {
+  // urgent: while the usage hold is on, show an "Urgent: deliver now" tick; onSend gets {urgent} as its third argument.
+  function composer({ placeholder, onSend, enterSends, sendLabel, extra, draft, urgent }) {
     const imgs = [];
+    const tick = el('input', { type: 'checkbox', class: 'urgent' });
+    const urgentRow = urgent && heldNow ? el('label', { class: 'wstate urgentrow' }, tick, 'Urgent: deliver now, despite the usage hold') : null;
     const ta = el('textarea', { rows: 2, placeholder });
     ta.value = draftGet(draft);
     ta.addEventListener('input', () => draftSet(draft, ta.value));
@@ -183,7 +186,8 @@
       busy = true;
       status.textContent = 'Sending…';
       try {
-        await onSend(text, imgs.slice());
+        await onSend(text, imgs.slice(), { urgent: !!(urgentRow && tick.checked) });
+        tick.checked = false;
         draftSet(draft, null);
         ta.value = '';
         imgs.length = 0;
@@ -197,7 +201,7 @@
     ta.addEventListener('keydown', (e) => {
       if (enterSends && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); go(); }
     });
-    box.append(extra ? extra.el : '', ta, thumbs,
+    box.append(extra ? extra.el : '', ta, urgentRow || '', thumbs,
       el('div', { class: 'row' },
         el('button', { class: 'ghost', title: 'Attach images (or paste / drop them)', onclick: () => pick.click() }, '+ image'),
         pick, el('span', { class: 'grow' }), el('button', { class: 'primary', onclick: go }, sendLabel || 'Send')),
@@ -825,8 +829,9 @@
             placeholder: 'Guide this agent. It is typed into its session within seconds (or restarts it). Images welcome.',
             enterSends: false,
             sendLabel: 'Send',
+            urgent: true,
             draft: `agent.${r.name}.message`,
-            onSend: async (text, imgs) => { await send('messages', r.job, { kind: 'message', to: r.name, text }, imgs); },
+            onSend: async (text, imgs, o) => { await send('messages', r.job, { kind: 'message', to: r.name, text, ...(o.urgent ? { urgent: true } : {}) }, imgs); },
           }))))
         : el('p', { class: 'empty' }, 'None.')));
     await loadMine().catch(() => {});
@@ -1423,6 +1428,15 @@
       a.updated ? el('div', { class: 'who' }, `last active ${age(a.updated)} ago`) : null);
   }
 
+  let foodUsage = null;
+  // The current session's usage (status.json, from /usage), beside the weekly figure on LOOP's food pile.
+  const sessionLine = () => {
+    const l = ((lastStatus && lastStatus.usage && lastStatus.usage.limits) || []).find((x) => /^session/i.test(x.name));
+    return l ? el('div', { class: 'ausage session' }, `session usage ${l.pct}%`, l.resets ? ` · resets ${String(l.resets).replace(/\s*\(.*\)$/, '')}` : '') : null;
+  };
+  const usageLine = (u) => (!u ? null : el('div', { class: 'ausage' + (u.stale ? ' stale' : '') },
+    u.stale ? `usage unknown (last: weekly usage ${Math.round(u.pct)}%)` : `weekly usage ${Math.round(u.pct)}%`,
+    u.resets ? ` · resets ${String(u.resets).replace(/\s*\(.*\)$/, '').replace(',', '')}` : ''));
   function hillInfo(hl, L) {
     const a = hl.agent;
     const titles = new Map(index.items.map((x) => [x.id, x.title]));
@@ -1430,6 +1444,8 @@
     return el('div', {},
       el('div', { class: 'arow' }, el('b', {}, a.name), el('span', { class: `badge hmood ${hl.mood}` }, MOOD_TEXT[hl.mood]),
         el('span', { class: 'who' }, hl.kind === 'food' ? ' · the food source (LOOP)' : ` · ${H.ROLE_TEXT[hl.role]} anthome`)),
+      hl.kind === 'food' ? usageLine(foodUsage) : null,
+      hl.kind === 'food' ? sessionLine() : null,
       L ? usageInfo(hl, L) : null,
       a.items && a.items.length ? el('div', { class: 'alinks' }, hl.mood === 'blocked' ? 'Waiting on: ' : 'Will need: ',
         a.items.map((id) => link(id, titles.get(id)))) : null,
@@ -1586,8 +1602,9 @@
   async function showTree() {
     await useTree();
     const has = (p) => tree.paths.has(p);
-    const [st, msgs] = await Promise.all([has('state/status.json') ? getJSON('state/status.json').catch(() => null) : null,
+    const [st, msgs, gu] = await Promise.all([has('state/status.json') ? getJSON('state/status.json').catch(() => null) : null,
       has('state/messages.json') ? getJSON('state/messages.json').catch(() => null) : null,
+      has('state/usage.json') ? getJSON('state/usage.json').catch(() => null) : null,
       index.items.length ? null : refreshIndex(), loadMine()]);
     lastStatus = st;
     const agents = (st && st.agents) || [];
@@ -1596,7 +1613,9 @@
     const hint = 'Tap or hover a branch, an animal, an anthome (its usage), the food in it (its focus) or a tunnel (its messages).';
     const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, hint));
     const names = safeGet('loop.tree.names') === '1';
-    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000 });
+    // LOOP's food pile is the weekly usage left (the usage guard's figure, published by `loop status`); faded when stale.
+    foodUsage = gu && gu.pct != null ? { pct: gu.pct, resets: gu.resets, stale: Date.now() / 1000 - gu.at > 2 * 3600 } : null;
+    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: foodUsage });
     const L = sc.L;
     // Hover or tap: the info line. Every segment of the same paper lights up. A tap pins it, so the mouse can cross
     // the scene to its buttons; a tap on open ground unpins it.
@@ -1726,6 +1745,22 @@
   }
 
   // quiet: a redraw after the background tree reload, which keeps the scroll position.
+  // Over the weekly limit (the usage guard tripped; state/usage.json "held"): a banner on every tab. What Finbar sends
+  // is still saved; the loop delivers it after the reset. Send buttons stay enabled.
+  let heldNow = false;
+  async function drawHeld() {
+    const box = $('#held');
+    const u = tree.paths.has('state/usage.json') ? await getJSON('state/usage.json').catch(() => null) : null;
+    const was = heldNow;
+    heldNow = !!(u && u.held);
+    box.hidden = !heldNow;
+    if (was !== heldNow && location.hash.startsWith('#/status')) route({ quiet: true });   // show or hide the Urgent ticks
+    if (u && u.held) {
+      box.textContent = `Weekly usage at ${Math.round(u.pct)}%: messages, answers and papers are saved and reach the agents `
+        + `after the reset${u.resets ? ` (${String(u.resets).replace(/\s*\(.*\)$/, '')})` : ''}.`;
+    }
+  }
+
   async function route(opts) {
     if (!cfg.token || !cfg.repo) return showSettings();
     const quiet = !!(opts && opts.quiet);
@@ -1747,6 +1782,7 @@
       else await showList(h[0] === 'list' ? h[1] : null);
       if (!quiet) window.scrollTo(0, 0);
       drawSide().catch(() => {});
+      drawHeld().catch(() => {});
       if (treeWasCached && !quiet) revalidate(hash);
     } catch (e) {
       if (e.status === 401 || e.status === 403 || e.status === 404) showSettings(`GitHub said ${e.message}. Check the token and repository.`);
