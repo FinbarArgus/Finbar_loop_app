@@ -464,6 +464,28 @@ def run(loop_bin, graph, shots):
                 rq = [json.loads(f.read_text()) for f in (repo / 'requests/Q-0003').glob('*.json')]
                 check(page, any(r.get('kind') == 'revisit' and r['text'] == 'Was explicit right after all?' for r in rq),
                       'revisit request written for that item', failures)
+                # Back from an item goes to the view it was opened from (its board tab, Status), not the default tab; an item
+                # opened straight from a link goes back to its own board tab.
+                def back():
+                    page.wait_for_selector('.navrow a.back')
+                    b = page.locator('.navrow a.back')
+                    return b.inner_text(), b.get_attribute('href')
+                page.goto(base + '#/list/content')
+                page.locator('.cards .card').first.click()
+                got = back()
+                content_item = page.url
+                page.locator('.navrow a.back').click()
+                page.wait_for_selector('.tabs a.on')
+                check(page, got == ('← Content', '#/list/content') and page.locator('.tabs a.on').inner_text().startswith('Content'),
+                      f'Back from a Content entry returns to Content {got}', failures)
+                page.goto(base + '#/status')
+                page.locator('.agent', has_text='HIGH-session-a').locator('.alinks a', has_text='Q-0001').first.click()
+                got = back()
+                check(page, got == ('← Status', '#/status'), f'Back from an item opened on Status returns to Status {got}', failures)
+                page.goto(content_item)
+                page.reload()
+                got = back()
+                check(page, got == ('← Content', '#/list/content'), f'Back from an item opened by link goes to its own tab {got}', failures)
                 # The Manual tab was called Mine: old links redirect.
                 meta = page.locator('.meta a').all_inner_texts()
                 check(page, meta[:2] == ['Agents', 'Manual'], f'header tabs Agents and Manual {meta}', failures)
