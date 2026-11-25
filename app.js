@@ -909,7 +909,7 @@
 
   const MINE_TABS = [['read', 'Read'], ['write', 'Write'], ['student', 'Students'], ['other', 'Other']];
   const PRIOS = [['high', 'High'], ['med', 'Medium'], ['low', 'Low']];
-  let mine = { entries: [], zotero: {}, people: [], collections: [] };
+  let mine = { entries: [], deleting: [], zotero: {}, people: [], collections: [] };
   let mineLoaded = false;
   // personal/tree.json ({seed, creatures: {<write entry id>: {name, animal}}}) and state/citations.json.
   let growthDocs = { tree: {}, cites: {} };
@@ -940,7 +940,16 @@
     await Promise.all(ids.filter((id) => tree.paths.has(`personal/${id}/zotero.json`)).map(async (id) => {
       zot[id] = await getJSON(`personal/${id}/zotero.json`).catch(() => null);
     }));
-    mine = { entries: entries.filter(Boolean), zotero: zot, people: people.students || [], collections: cols.collections || [] };
+    // Entries with a delete asked for (delete_requests/<id>.json) are left out everywhere, tree included, and listed
+    // as "Deleting" until the loop has removed them; <id>.waiting says why it waits.
+    const asked = {};
+    await Promise.all(ids.filter((id) => tree.paths.has(`delete_requests/${id}.json`)).map(async (id) => {
+      const w = `delete_requests/${id}.waiting`;
+      asked[id] = tree.paths.has(w) ? ((await getJSON(w).catch(() => null)) || {}).why || '' : '';
+    }));
+    const all = entries.filter(Boolean);
+    mine = { entries: all.filter((e) => !(e.id in asked)), deleting: all.filter((e) => e.id in asked).map((e) => ({ e, why: asked[e.id] })),
+      zotero: zot, people: people.students || [], collections: cols.collections || [] };
     return mine;
   }
 
@@ -1076,9 +1085,31 @@
         e.title_warning ? el('div', { class: 'mwarn', title: 'The loop found no author and year for this paper; the summary or a later lookup fixes it.' }, `⚠ ${e.title_warning}`) : null,
         e.note ? el('div', { class: 'mnote', html: inline(e.note) }) : null,
         isWrite ? writeStates(e, redraw) : null,
-        el('div', { class: 'mmeta' }, ...fileLinks(e), zb, ...(plibs ? plibs.chips : []), plibs ? plibs.button : null, extra || null, deadlineChip(e, redraw), prio),
+        el('div', { class: 'mmeta' }, ...fileLinks(e), zb, ...(plibs ? plibs.chips : []), plibs ? plibs.button : null, extra || null, deadlineChip(e, redraw), prio,
+          e.kind === 'read' || isWrite ? deleteButton(e, z, redraw) : null),
         plibs ? plibs.picker : null,
         pex ? pex.el : null));
+  }
+
+  // Delete (Read and Write entries), after a confirm step: writes delete_requests/<id>.json. The loop moves a saved
+  // paper's Zotero item to Zotero's trash (it can be restored there), removes the entry with its PDF, notes, summary
+  // and its branch or animal on the tree, and logs the delete.
+  function deleteButton(e, z, redraw) {
+    const box = el('span', { class: 'mdel' });
+    const ask = el('button', { class: 'ghost mdelbtn', onclick: () => box.replaceChildren(confirm) }, 'Delete');
+    const what = e.kind === 'read'
+      ? `Delete this paper, its PDF, notes and summary?${z && z.status === 'saved' ? " Its Zotero item goes to Zotero's trash, where you can restore it." : ''}`
+      : `Delete this writing entry?${e.submitted ? ' Its animal leaves the tree.' : ''}`;
+    const yes = el('button', { class: 'mdelyes', onclick: async () => {
+      yes.disabled = true;
+      await put(`delete_requests/${e.id}.json`, new TextEncoder().encode(JSON.stringify({ entry: e.id, kind: e.kind, title: e.title || '', at: new Date().toISOString() })),
+        `${e.id}: delete`);
+      redraw();
+    } }, 'Delete');
+    const confirm = el('span', { class: 'mdelask' }, el('span', {}, what), yes,
+      el('button', { class: 'ghost', onclick: () => box.replaceChildren(ask) }, 'Cancel'));
+    box.append(ask);
+    return box;
   }
 
   // "Add to paper lib": a paper saved to Zotero (its item key known) can be put in paper libraries, the Zotero
@@ -1380,12 +1411,17 @@
     }
     const done = all.filter((e) => e.done).sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
     const hist = el('details', { class: 'history' }, el('summary', {}, `Done (${done.length})`), ...done.map((e) => entryRow(e, redraw)));
-    main().replaceChildren(tabs, body, hist);
+    const gone = mine.deleting.filter((x) => x.e.kind === tab);
+    const deleting = gone.length ? el('section', { class: 'mdeleting' }, el('h3', {}, 'Deleting'), ...gone.map(({ e, why }) =>
+      el('div', { class: 'mrow' }, el('div', { class: 'mmain' }, el('div', { class: 'mtitle' }, e.title || (e.files || [])[0] || 'note'),
+        el('div', { class: 'status' }, why ? `Waiting: ${why}` : 'Deleted within about a minute (by the scheduled script)…'))))) : null;
+    main().replaceChildren(tabs, ...(deleting ? [deleting] : []), body, hist);
     drawSide().catch(() => {});
+    const watched = () => [...tree.sha].filter(([x]) => x.startsWith('personal/') || x.startsWith('delete_requests/')).join();
     setPoll(async () => {
-      const before = [...tree.sha].filter(([x]) => x.startsWith('personal/')).join();
+      const before = watched();
       await loadTree();
-      if ([...tree.sha].filter(([x]) => x.startsWith('personal/')).join() !== before && !main().querySelector('.newentry input:focus, .newentry textarea:focus, .datein')) redraw();
+      if (watched() !== before && !main().querySelector('.newentry input:focus, .newentry textarea:focus, .datein')) redraw();
     }, 30_000);
   }
 
