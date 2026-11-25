@@ -773,11 +773,24 @@ def run(loop_bin, graph, shots):
                 check(page, page.locator('.meta a.on').inner_text() == 'Tree', 'Tree tab in the header', failures)
                 head = page.locator('.ghead').inner_text()
                 check(page, 'seedling' in head and 'papers' in head and 'days in a row' in head, f'Tree: stage, streak and counts {head!r}', failures)
-                page.locator('.hits [data-k="seg"][data-i="read-tree2"]').first.dispatch_event('click')
+                page.locator('.hits [data-k="seg"][data-i="read-tree2"]:not([data-b="trunk"])').first.dispatch_event('click')
                 info = page.locator('.ginfo').inner_text()
                 check(page, 'Tree paper 2' in info and 'ROM / Beat maps' in info and '1.2x' in info,
-                      f'Tree: tapping a segment shows its paper and collection {info!r}', failures)
-                check(page, page.locator('.hits .on').count() >= 1, 'Tree: the tapped paper lights up', failures)
+                      f'Tree: tapping a branch segment shows its paper and collection {info!r}', failures)
+                check(page, page.locator('.hits .on').count() >= 1 and page.locator('.hits .on[data-b="trunk"]').count() == 0,
+                      'Tree: the tapped paper lights up on its branches', failures)
+                # The trunk (a paper's rise, or the paper in no collection) shows the topics read, not one paper.
+                page.locator('.hits [data-k="seg"][data-i="read-tree2"][data-b="trunk"]').first.dispatch_event('click')
+                info = page.locator('.ginfo').inner_text()
+                topics = page.locator('.ginfo .gtopics li').all_inner_texts()
+                check(page, 'what you have read' in info and 'Tree paper' not in info and len(topics) == 3
+                      and topics[0].startswith('ROM 5 (71%)') and 'OpInf 3 · Beat maps 1' in topics[0]
+                      and topics[1].startswith('Physiology 1') and topics[2].startswith('No collection 1'),
+                      f'Tree: tapping the trunk shows the topics read {topics!r}', failures)
+                check(page, page.locator('.hits .on').count() == page.locator('.hits [data-b="trunk"]').count(),
+                      'Tree: the whole trunk lights up', failures)
+                if shots:
+                    page.locator('.ginfo').screenshot(path=f'{shots}/{label}-trunk-topics.png')
                 page.locator(f'.hits [data-k="creature"][data-i="{wid}"]').dispatch_event('click')
                 info = page.locator('.ginfo').inner_text()
                 check(page, 'Paper 1 draft' in info and '12 citations' in info, f'Tree: tapping the animal shows its paper {info!r}', failures)
@@ -799,8 +812,8 @@ def run(loop_bin, graph, shots):
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-birds.png')
                 # Real pointers on the young tree in the default view (Finbar's 1.9 m tree is ~4 px a paper on a phone): a tap (phone)
-                # or a hover (computer) on each paper's own spot selects it, and a point a finger's width off the tree still
-                # picks the tree, not the farm or nothing.
+                # or a hover (computer) on each paper's own spot on a branch selects it, on the trunk selects the trunk, and a
+                # point a finger's width off the tree still picks the tree, not the farm or nothing.
                 page.locator('.gzoom button', has_text='Reset').click()
                 segw = lambda: page.evaluate("""() => Math.max(...[...document.querySelectorAll('.gview .tree .hits [data-k="seg"]')]
                     .map((n) => n.getBoundingClientRect().width))""")
@@ -811,16 +824,16 @@ def run(loop_bin, graph, shots):
                 segs = page.evaluate("""() => [...document.querySelectorAll('.gview .tree .hits [data-k="seg"]')].map((n) => {
                     const b = n.getBoundingClientRect(), x = (b.left + b.right) / 2, y = (b.top + b.bottom) / 2;
                     const t = document.elementFromPoint(x, y); const h = t && t.closest('[data-k]');
-                    return { i: n.dataset.i, x, y, own: !!h && h.dataset.i === n.dataset.i, l: b.left, r: b.right, top: b.top, bottom: b.bottom }; })""")
+                    return { i: n.dataset.i, b: n.dataset.b, x, y, own: !!h && h.dataset.i === n.dataset.i, l: b.left, r: b.right, top: b.top, bottom: b.bottom }; })""")
                 def point(x, y, tap=label == 'phone'):
                     if tap:
                         page.touchscreen.tap(x, y) if label == 'phone' else page.mouse.click(x, y)
                     else:
                         page.mouse.move(x, y)
-                    on = page.evaluate("[...document.querySelectorAll('.gview .hits .on')].map((n) => n.dataset.k + ':' + n.dataset.i)")
+                    on = page.evaluate("[...document.querySelectorAll('.gview .hits .on')].map((n) => n.dataset.k + ':' + (n.dataset.b === 'trunk' ? 'trunk' : n.dataset.i))")
                     return on[0] if on else None
-                spots = {s['i']: s for s in segs if s['own']}
-                got = {i for i, s in spots.items() if point(s['x'], s['y']) == f'seg:{i}'}
+                spots = {(s['i'], s['b']): s for s in segs if s['own']}
+                got = {(i, b) for (i, b), s in spots.items() if point(s['x'], s['y']) in ((f'seg:{i}',) if b != 'trunk' else ('seg:trunk', 'branch:trunk'))}
                 off = 12 if label == 'phone' else 7
                 edge = max(segs, key=lambda s: s['r'])
                 near = point(edge['r'] + off, (edge['top'] + edge['bottom']) / 2, tap=True)   # a click: hover never clears

@@ -138,6 +138,31 @@
     return parts.map((_, i) => parts.slice(0, i + 1).join(' / '));
   }
 
+  // What the trunk shows: the papers read, by top-level topic (the first part of each collection path, null for
+  // papers in no collection), most read first, no collection last. Each topic: n, its share of all papers, n read in
+  // the RECENT_DAYS to `today`, the day it was last read, and its subtopics (path below the top) by count.
+  const RECENT_DAYS = 30;
+  function topicStats(papers, today) {
+    const since = addDays(today, 1 - RECENT_DAYS);
+    const tops = new Map();
+    for (const p of papers) {
+      const name = p.path.length ? p.path[0] : null;
+      const t = tops.get(name) || { name, n: 0, recent: 0, last: null, subs: new Map() };
+      t.n += 1;
+      t.recent += p.day >= since ? 1 : 0;
+      if (!t.last || p.day > t.last) t.last = p.day;
+      if (p.path.length > 1) {
+        const sub = p.path[p.path.length - 1].slice(name.length + 3);
+        t.subs.set(sub, (t.subs.get(sub) || 0) + 1);
+      }
+      tops.set(name, t);
+    }
+    const byCount = (a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1);
+    const topics = [...tops.values()].map((t) => ({ ...t, share: t.n / papers.length, subs: [...t.subs].sort(byCount) }))
+      .sort((a, b) => (a.name === null) - (b.name === null) || b.n - a.n || (a.name < b.name ? -1 : 1));
+    return { total: papers.length, recent: papers.filter((p) => p.day >= since).length, days: RECENT_DAYS, topics };
+  }
+
   // When a Write entry reached each state. `submitted_at` and `published_at` are set by the app when ticked;
   // `updated` stands in when they are missing.
   const stateAt = (e, k) => (e[k] ? (e[`${k}_at`] || e.updated || e.created) : null);
@@ -619,7 +644,7 @@
       + ` aria-label="${esc(state.stage)}: ${state.papers.length} papers, ${state.leaves.length} leaves, ${f(state.height)} m tall">${body}${hits}</svg>`;
   }
 
-  return { hash, rng, dayOf, addDays, hourOf, topicPath, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
+  return { hash, rng, dayOf, addDays, hourOf, topicPath, topicStats, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
     GULL, BIRD_INK, GULL_FILL, SAD_R, sadR, treeScale,
     STREAK_STEP, MAX_MULT, OAK_N, GROUND_M, spreadOf, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, FIRST_HEIGHT, YOUNG_P, youngScale, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
     derive, layout, walk, parts, svg };

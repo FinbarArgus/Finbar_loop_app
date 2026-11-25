@@ -374,3 +374,17 @@ test('crows and sad faces are drawn over the animals', () => {
   assert.ok(svg.indexOf('<g class="crow">') > lastAnimal);
   assert.ok(!svg.includes('class="sad"') || svg.indexOf('class="sad"') > lastAnimal);
 });
+
+test('the trunk shows topics read: by top-level collection, most read first, no collection last', () => {
+  const p = (day, name) => ({ day, path: G.topicPath(name ? { zotero: { name } } : {}) });
+  const papers = [p('2026-11-20', 'ROM / OpInf'), p('2026-11-21', 'ROM / OpInf'), p('2026-10-01', 'ROM / Beat maps'),
+    p('2026-11-25', 'ROM'), p('2026-09-01', 'Physiology'), p('2026-11-26', null), p('2026-11-26', null), p('2026-11-26', '_work')];
+  const st = G.topicStats(papers, '2026-11-26');
+  assert.equal(st.total, 8);
+  assert.equal(st.recent, 6);                                   // read on or after 2026-10-28
+  assert.deepEqual(st.topics.map((t) => [t.name, t.n, t.recent, t.last]), [
+    ['ROM', 4, 3, '2026-11-25'], ['Physiology', 1, 0, '2026-09-01'], [null, 3, 3, '2026-11-26']]);
+  assert.deepEqual(st.topics[0].subs, [['OpInf', 2], ['Beat maps', 1]]);   // a paper in ROM itself is no subtopic
+  assert.equal(st.topics[0].share, 0.5);
+  assert.deepEqual(G.topicStats([], '2026-11-26'), { total: 0, recent: 0, days: 30, topics: [] });
+});
