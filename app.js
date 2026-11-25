@@ -786,6 +786,21 @@
       el('div', { class: 'who' }, 'The reviewer predicts each bundled PR\'s verdict before you answer; nothing is accepted for you.'));
   }
 
+  // "Message <agent>": typed into its session by the loop. Used on Status and in the Tree tab (an anthome's info).
+  // Its draft is keyed by the agent's name, so one half-written message shows in both places.
+  function messageBox(r, open) {
+    return el('details', { class: 'detail amsg', 'data-agent': r.name, open: open || draftGet(`agent.${r.name}.message`) ? true : null },
+      el('summary', {}, `Message ${r.name}`),
+      composer({
+        placeholder: 'Guide this agent. It is typed into its session within seconds (or restarts it). Images welcome.',
+        enterSends: false,
+        sendLabel: 'Send',
+        urgent: true,
+        draft: `agent.${r.name}.message`,
+        onSend: async (text, imgs, o) => { await send('messages', r.job, { kind: 'message', to: r.name, text, ...(o.urgent ? { urgent: true } : {}) }, imgs); },
+      }));
+  }
+
   async function showStatus() {
     await useTree();
     const [st, plog, triage] = await Promise.all([getJSON('state/status.json'),
@@ -824,15 +839,7 @@
           el('div', { class: 'alinks' }, r.recent.map((x) => el('a', { href: `#/item/${x.id}`, class: 'alink' + (x.blocking_now ? ' blocking' : '') },
             el('b', {}, x.id), ` ${x.title.slice(0, 70)} `,
             el('span', { class: 'who' }, `${{ question: 'question', content: 'content', pr: 'review' }[x.tab] || x.tab}${['answered', 'closed'].includes(x.status) ? ' · ' + x.status : ''}`))))) : null,
-        el('details', { class: 'detail amsg', open: draftGet(`agent.${r.name}.message`) ? true : null }, el('summary', {}, `Message ${r.name}`),
-          composer({
-            placeholder: 'Guide this agent. It is typed into its session within seconds (or restarts it). Images welcome.',
-            enterSends: false,
-            sendLabel: 'Send',
-            urgent: true,
-            draft: `agent.${r.name}.message`,
-            onSend: async (text, imgs, o) => { await send('messages', r.job, { kind: 'message', to: r.name, text, ...(o.urgent ? { urgent: true } : {}) }, imgs); },
-          }))))
+        messageBox(r)))
         : el('p', { class: 'empty' }, 'None.')));
     await loadMine().catch(() => {});
     main().replaceChildren(deadlinesCard(), usage, ...sections, permissionsCard(plog), triageCard(triage),
@@ -1437,7 +1444,7 @@
   const usageLine = (u) => (!u ? null : el('div', { class: 'ausage' + (u.stale ? ' stale' : '') },
     u.stale ? `usage unknown (last: weekly usage ${Math.round(u.pct)}%)` : `weekly usage ${Math.round(u.pct)}%`,
     u.resets ? ` · resets ${String(u.resets).replace(/\s*\(.*\)$/, '').replace(',', '')}` : ''));
-  function hillInfo(hl, L) {
+  function hillInfo(hl, L, tapped) {
     const a = hl.agent;
     const titles = new Map(index.items.map((x) => [x.id, x.title]));
     const link = (id, title) => el('a', { href: `#/item/${id}`, class: 'alink' }, el('b', {}, id), title ? ` ${String(title).slice(0, 80)}` : '');
@@ -1453,7 +1460,8 @@
       a.working_on ? el('div', { class: 'adetail' }, el('span', { class: 'who' }, hl.mood === 'working' ? 'Working on: ' : 'Last: '), a.working_on) : null,
       (a.recent || []).length ? el('details', { class: 'arecent' }, el('summary', {}, `Its entries (${a.recent.length})`),
         el('div', { class: 'alinks' }, a.recent.map((x) => link(x.id, x.title)))) : null,
-      el('div', { class: 'who' }, a.updated ? `last active ${age(a.updated)} ago · ` : '', el('a', { href: '#/status' }, 'message it on Status')));
+      el('div', { class: 'who' }, a.updated ? `last active ${age(a.updated)} ago` : ''),
+      a.job ? messageBox(a, tapped) : null);
   }
 
   // A path's messages, newest first, one at a time: ◀ steps back to older ones, ▶ forward again.
@@ -1501,6 +1509,7 @@
   // It opens on the anthills and the trunk's foot; the tree is above, a drag (or "Whole tree") away.
 
   const SC = window.LoopScene;
+  let treePinnedAgent = null;                   // the agent whose anthome was tapped last (kept across redraws)
   let sceneCam = null, sceneDraw = null;
   let sdrag = null, sdragged = false;           // a mouse drag in progress, and whether the last one moved
   window.addEventListener('pointermove', (ev) => {
@@ -1622,6 +1631,7 @@
     let shown = null, pinned = false;
     const show = (t, tapped) => {
       if (pinned && !tapped) return;
+      if (tapped) treePinnedAgent = t && t.dataset.k === 'hill' ? (L.hills[+t.dataset.i] || {}).agent?.name || null : null;
       if (!t && tapped) {                           // a tap on open ground clears the info line
         shown = null; pinned = false;
         viewer.view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
@@ -1633,7 +1643,7 @@
       const k = t.dataset.k, i = t.dataset.i;
       const tree_ = ['seg', 'branch', 'creature'].includes(k);
       const body = tree_ ? growthInfo(state, k, i, t.dataset.b)
-        : k === 'path' ? pathInfo(L.paths[+i]) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L) : null;
+        : k === 'path' ? pathInfo(L.paths[+i]) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L, !!tapped) : null;
       if (!body) return;
       shown = t; pinned = !!tapped;
       viewer.view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
@@ -1677,6 +1687,9 @@
       el('section', { class: 'gloghead' }, el('h3', {}, 'Growth'), state.events.length ? log : el('p', { class: 'empty' }, 'Nothing has grown yet: tick a Read paper done.'), more),
       st ? el('p', { class: 'foot' }, `Agents as of ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`) : null);
     viewer.start();
+    // An anthome tapped before this redraw (a poll, coming back to the tab) stays open, with its message box.
+    const again = treePinnedAgent ? L.hills.findIndex((h) => h.agent && h.agent.name === treePinnedAgent) : -1;
+    if (again >= 0) show(viewer.view.querySelector(`.hits [data-k="hill"][data-i="${again}"]`), true);
     animateAnts(viewer.view, L.hills, L.paths);
     const key = () => [...tree.sha].filter(([x]) => x.startsWith('personal/') || ['state/citations.json', 'state/status.json', 'state/messages.json'].includes(x)).join();
     const before = key();
