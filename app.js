@@ -1410,6 +1410,15 @@
         el('div', { class: 'who' }, `Read ${dayText(p.day)} · ${p.mult.toFixed(1)}x`));
     }
     if (k === 'branch') return el('div', {}, el('b', {}, id), el('div', { class: 'who' }, 'A collection with papers only in its subcollections so far.'));
+    if (k === 'bird') {
+      const bd = (state.birds || []).find((x) => x.id === id);
+      if (!bd) return null;
+      const due = dueInfo(bd.deadline);
+      return el('div', {}, el('b', {}, bd.title || 'untitled'), el('div', {}, due.text),
+        el('div', { class: 'who' }, bd.evil ? 'Its deadline passed: the crow sits in the tree and saddens the animals near it until the entry is done.'
+          : 'A deadline flying in: it comes closer and grows as the day nears, and lands at the end of the dashed line.'),
+        bd.kind ? el('a', { href: `#/manual/${bd.kind}` }, 'Open in Manual') : null);
+    }
     if (k === 'creature') {
       const c = state.creatures.find((x) => x.id === id);
       if (!c) return null;
@@ -1691,7 +1700,7 @@
     const agents = (st && st.agents) || [];
     const state = growthState();
     const redraw = () => showTree();
-    const hint = 'Tap or hover a branch, an animal, an anthome (its usage), the food in it (its focus) or a tunnel (its messages).';
+    const hint = 'Tap or hover a branch, an animal, a bird (a deadline), an anthome (its usage), the food in it (its focus) or a tunnel (its messages).';
     const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, hint));
     const names = safeGet('loop.tree.names') === '1';
     // LOOP's food pile is the weekly usage left (the usage guard's figure, published by `loop status`); faded when stale.
@@ -1715,7 +1724,7 @@
       }
       if (!t || (t === shown && !tapped)) return;
       const k = t.dataset.k, i = t.dataset.i;
-      const tree_ = ['seg', 'branch', 'creature'].includes(k);
+      const tree_ = ['seg', 'branch', 'creature', 'bird'].includes(k);
       const body = tree_ ? growthInfo(state, k, i, t.dataset.b)
         : k === 'path' ? pathInfo(L.paths[+i]) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L, !!tapped) : null;
       if (!body) return;
@@ -1744,6 +1753,7 @@
       el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Dark'), ' stalled'),
       el('span', {}, el('b', {}, 'Fruit'), ' LOOP, at the tree\'s foot; in a home, its focus'),
       el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'),
+      el('span', {}, el('b', {}, 'Birds'), ' deadlines: nearer and bigger as they come due; a passed one is a crow in the tree'),
       night ? el('span', {}, el('b', {}, 'Night'), ' usage held until the reset: z\'s asleep; an urgent message wakes its agent') : null);
     const log = el('ol', { class: 'glog' }, state.events.slice(0, 40).map(growthEvent));
     const more = state.events.length > 40 ? el('button', { class: 'link', onclick: () => {

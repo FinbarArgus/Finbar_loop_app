@@ -716,6 +716,9 @@ def run(loop_bin, graph, shots):
                     dl = (_dt2.date.today() - _dt2.timedelta(days=days - 1)).isoformat() if k == 0 else None
                     seed(f'read-tree{k}', title=f'Tree paper {k}', done=True, done_at=at, deadline=dl,
                          **({'zotero': {'name': name}} if name else {}))
+                # Deadline birds: one open (a gull flying in), one passed ten days ago and not done (a crow on the tree).
+                seed('bird-soon', kind='other', title='Grant report', deadline=(_dt2.date.today() + _dt2.timedelta(days=5)).isoformat())
+                seed('bird-late', kind='other', title='Referee report', deadline=(_dt2.date.today() - _dt2.timedelta(days=10)).isoformat())
                 page.goto(base + '#/tree')
                 # The tree draws from the cached repo tree first, then redraws once the background reload sees the
                 # papers seeded above: wait for a seeded paper's segment, so the tap lands on the final drawing.
@@ -733,13 +736,28 @@ def run(loop_bin, graph, shots):
                 check(page, 'Paper 1 draft' in info and '12 citations' in info, f'Tree: tapping the animal shows its paper {info!r}', failures)
                 log = page.locator('.glog').inner_text()
                 check(page, 'Tree paper 0' in log and 'a leaf' in log and 'arrived' in log, 'Tree: growth log', failures)
+                birds = page.evaluate("""() => ({
+                  gull: !!document.querySelector('.gview .birds .bird[data-i="bird-soon"] line[stroke-dasharray]'),
+                  crowFlies: !!document.querySelector('.gview .birds .bird[data-i="bird-late"]'),
+                  crow: !!document.querySelector('.gview .tree .hits [data-k="bird"][data-i="bird-late"]'),
+                  legend: [...document.querySelectorAll('.hlegend span')].some((x) => x.textContent.startsWith('Birds')) })""")
+                check(page, birds == {'gull': True, 'crowFlies': False, 'crow': True, 'legend': True},
+                      f'Birds: an open deadline flies in with a dashed line, a passed one perches on the tree {birds}', failures)
+                page.locator('.gview .hits [data-k="bird"][data-i="bird-soon"]').dispatch_event('click')
+                info = page.locator('.ginfo').inner_text()
+                check(page, 'Grant report' in info and 'in 5 d' in info and 'flying in' in info, f'Birds: tapping a bird shows its deadline {info!r}', failures)
+                page.locator('.gview .tree .hits [data-k="bird"][data-i="bird-late"]').dispatch_event('click')
+                info = page.locator('.ginfo').inner_text()
+                check(page, 'Referee report' in info and '10 d overdue' in info and 'crow' in info, f'Birds: tapping the crow shows the passed deadline {info!r}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-birds.png')
                 # Real pointers on the young tree in the default view (Finbar's 1.9 m tree is ~4 px a paper on a phone): a tap (phone)
                 # or a hover (computer) on each paper's own spot selects it, and a point a finger's width off the tree still
                 # picks the tree, not the farm or nothing.
                 page.locator('.gzoom button', has_text='Reset').click()
                 segw = lambda: page.evaluate("""() => Math.max(...[...document.querySelectorAll('.gview .tree .hits [data-k="seg"]')]
                     .map((n) => n.getBoundingClientRect().width))""")
-                page.evaluate("document.querySelectorAll('.gview .tree .hits [data-k=creature]').forEach((n) => n.remove())")  # it covers this tree
+                page.evaluate("document.querySelectorAll('.gview .tree .hits [data-k=creature], .gview .tree .hits [data-k=bird]').forEach((n) => n.remove())")  # they cover this tree
                 v = page.locator('.gview').bounding_box()
                 if label == 'computer':
                     page.mouse.click(v['x'] + 3, v['y'] + 3)                                 # open ground: unpin
