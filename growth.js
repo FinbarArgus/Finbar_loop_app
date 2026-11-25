@@ -90,6 +90,13 @@
   const BEND = 0.08;
   const LEAN = 14 * DEG;
   const MAX_TILT = 62 * DEG;
+  // Spread (Finbar, 2026-11-24): the tree grows outwards with the papers read. The spread s = sqrt(n / WIDE_N) of n
+  // papers (at most 1) adds s WIDE_LEAN to every branch's lean and s WIDE_OFF to its angle off its parent, so a crown
+  // of a hundred papers leans out at 55 degrees. derive's `ground` (metres) caps the crown's width: the spread is
+  // eased back until the tree fits.
+  const WIDE_N = 100;
+  const WIDE_LEAN = 41 * DEG;
+  const WIDE_OFF = 15 * DEG;
   const ATTACH = { trunk: [0.12, 0.92], branch: [0.25, 0.92] };
   // Width: Leonardo's rule (area is conserved through each fork; Eloy 2011, "Leonardo's rule, self-similarity,
   // and wind-induced stresses in trees", Phys. Rev. Lett. 107, 258101, doi:10.1103/PhysRevLett.107.258101): a
@@ -129,7 +136,7 @@
 
   // Places every chain (parents before children): each segment's ends (x0, y0, x1, y1), and each branch's
   // `at`, the node of its parent it leaves from.
-  function geometry(order, seed) {
+  function geometry(order, seed, spread = 0) {
     const byId = new Map(order.map((c) => [c.id, c]));
     for (const c of order) {
       let x = 0, y = 0, ang = UP, side = 0, target = UP;
@@ -146,9 +153,9 @@
         x = g.x1; y = g.y1;
         if (p.firstSide == null) p.firstSide = hash(seed, 'side', p.id) % 2 ? 1 : -1;
         side = c.rank % 2 ? -p.firstSide : p.firstSide;
-        const off = p.parent ? (18 + 18 * c.off) * DEG : (25 + 20 * c.off) * DEG;
+        const off = (p.parent ? (18 + 18 * c.off) * DEG : (25 + 20 * c.off) * DEG) + spread * WIDE_OFF;
         ang = UP + Math.max(-MAX_TILT, Math.min(MAX_TILT, g.ang - UP + side * off));
-        target = UP + side * LEAN;
+        target = UP + side * (LEAN + spread * WIDE_LEAN);
       }
       c.side = side;
       c.segs.forEach((g, i) => {
@@ -167,7 +174,8 @@
   // entries: Mine entries ({id, kind, done, done_at, updated, created, deadline, title, zotero: {name}}; write
   // entries also {draft, submitted, submitted_at, published, published_at, doi}).
   // treeDoc: {seed, creatures: {<entry id>: {name, animal}}}. cites: {dois: {<doi>: {count}}}. now: Date|ISO.
-  function derive(entries, treeDoc = {}, cites = {}, now = new Date()) {
+  // opts.ground: the width (metres) the crown may spread to, e.g. the ant farm's under it.
+  function derive(entries, treeDoc = {}, cites = {}, now = new Date(), opts = {}) {
     const seed = String(treeDoc.seed || DEFAULT_SEED);
     const today = dayOf(now);
     const papers = [];
@@ -242,7 +250,18 @@
       }
       p.branch = host.id;
     }
-    geometry(order, seed);
+    const spanOf = () => { const xs = order.flatMap((c) => c.segs.flatMap((g) => [g.x0, g.x1])); return Math.max(...xs) - Math.min(...xs); };
+    let spread = Math.min(1, Math.sqrt(papers.length / WIDE_N));
+    geometry(order, seed, spread);
+    if (opts.ground > 0 && youngScale(grown) * spanOf() > opts.ground) {
+      let lo = 0, hi = spread;                               // the widest spread that fits the ground
+      for (let k = 0; k < 12; k++) {
+        spread = (lo + hi) / 2;
+        geometry(order, seed, spread);
+        if (youngScale(grown) * spanOf() > opts.ground) hi = spread; else lo = spread;
+      }
+      geometry(order, seed, spread = lo);
+    }
     // Widths: growth carried beyond each node (the chain's own later segments plus every branch leaving there
     // or later), so every segment tapers from its base to its tip.
     const total = new Map();
@@ -302,7 +321,7 @@
     const lastGood = goodDays[goodDays.length - 1];
     const streakNow = lastGood && (lastGood === today || lastGood === addDays(today, -1)) ? streak.get(lastGood) : 0;
     const scale = youngScale(grown);
-    return { seed, today, papers, leaves, passed, creatures, goodDays, events, chains: order, grown, scale,
+    return { seed, today, papers, leaves, passed, creatures, goodDays, events, chains: order, grown, scale, spread,
       height: scale * Math.max(...order.flatMap((c) => c.segs.map((g) => Math.max(g.y0, g.y1)))),
       streak: streakNow, mult: multOf(streakNow), multToday: multOfDay(today),
       stage: stageOf(grown) };
@@ -526,6 +545,6 @@
   }
 
   return { hash, rng, dayOf, addDays, hourOf, topicPath, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
-    STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, FIRST_HEIGHT, YOUNG_P, youngScale, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
+    STREAK_STEP, MAX_MULT, WIDE_N, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, FIRST_HEIGHT, YOUNG_P, youngScale, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
     derive, layout, walk, parts, svg };
 }));

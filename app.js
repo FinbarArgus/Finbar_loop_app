@@ -1331,7 +1331,9 @@
   // entries bring animals. The tree is derived from Manual every time; only names and animals are stored.
 
   const G = window.LoopGrowth;
-  const growthState = () => G.derive(mine.entries, growthDocs.tree, growthDocs.cites, new Date());
+  // The crown spreads at most over the ant farm under it (the last Status's agents).
+  const growthState = () => G.derive(mine.entries, growthDocs.tree, growthDocs.cites, new Date(),
+    { ground: lastStatus ? H.layout(lastStatus.agents || []).width / SC.SCALE : null });
   const dayText = (d) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const collName = (b) => (b === 'trunk' ? 'no collection (the trunk)' : b);
   const metres = (h) => (h < 1 ? `${Math.round(h * 100)} cm` : `${h < 10 ? h.toFixed(1) : Math.round(h)} m`);
