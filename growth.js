@@ -85,11 +85,28 @@
   const MIN_FRAME = Math.ceil(grownHeight(SAPLING) + 2);
   // Shape: the branches of one parent leave it in the order they were born, oldest lowest, spread over
   // ATTACH (fractions of the parent's length), alternately left and right, 25-45 degrees off the trunk
-  // (18-36 off a branch). Each segment turns BEND of the way towards LEAN off vertical on its side, so the
-  // tree grows upwards and stays narrow. As the tree grows the branches move up with their parent.
+  // (18-36 off a branch). Each segment turns BEND of the way towards LEAN off vertical on its side; a sapling grows
+  // upwards and stays narrow, and from there it widens into an oak (OAK_*). Branches move up with their parent.
   const BEND = 0.08;
   const LEAN = 14 * DEG;
   const MAX_TILT = 62 * DEG;
+  // An oak, not a poplar (Finbar, Q-0056): past the sapling stage the crown widens with growth, by the spread
+  // s = sqrt((grown - SAPLING) / OAK_N), at most 1. A paper's branch segment is (1 + OAK_LEN s) longer (until the
+  // crown spans the ground), its rise of
+  // the trunk (1 - OAK_SLOW s) of a poplar's, and every branch leans out s OAK_LEAN more (its angle off its parent s
+  // OAK_OFF more, tilting up to MAX_TILT + s OAK_TILT), and bends (1 + OAK_BEND s) faster towards its lean. Once the
+  // crown spans GROUND_M metres (the ground, fixed by Finbar) the trunk rises at the full rate again and the spread is
+  // eased back just enough to keep the crown within it, below 0 when need be (to -1: branches leave and lean at a
+  // fraction of a poplar's angles), so the tree grows up again.
+  const OAK_N = 60;
+  const OAK_LEN = 1.2;
+  const OAK_SLOW = 0.6;
+  const OAK_LEAN = 46 * DEG;
+  const OAK_OFF = 20 * DEG;
+  const OAK_TILT = 18 * DEG;
+  const OAK_BEND = 3;
+  const GROUND_M = 25;
+  const spreadOf = (grown) => Math.min(1, Math.sqrt(Math.max(0, grown - SAPLING) / OAK_N));
   const ATTACH = { trunk: [0.12, 0.92], branch: [0.25, 0.92] };
   // Width: Leonardo's rule (area is conserved through each fork; Eloy 2011, "Leonardo's rule, self-similarity,
   // and wind-induced stresses in trees", Phys. Rev. Lett. 107, 258101, doi:10.1103/PhysRevLett.107.258101): a
@@ -128,11 +145,11 @@
   // ---------------------------------------------------------------- geometry
 
   // Places every chain (parents before children): each segment's ends (x0, y0, x1, y1), and each branch's
-  // `at`, the node of its parent it leaves from.
-  function geometry(order, seed) {
+  // `at`, the node of its parent it leaves from. `spread` (0-1) widens the crown (OAK_*).
+  function geometry(order, seed, spread = 0) {
     const byId = new Map(order.map((c) => [c.id, c]));
     for (const c of order) {
-      let x = 0, y = 0, ang = UP, side = 0, target = UP;
+      let x = 0, y = 0, ang = UP, side = 0, target = UP, bend = BEND;
       if (c.parent) {
         const p = byId.get(c.parent);
         const sibs = p.kids;
@@ -146,13 +163,16 @@
         x = g.x1; y = g.y1;
         if (p.firstSide == null) p.firstSide = hash(seed, 'side', p.id) % 2 ? 1 : -1;
         side = c.rank % 2 ? -p.firstSide : p.firstSide;
-        const off = p.parent ? (18 + 18 * c.off) * DEG : (25 + 20 * c.off) * DEG;
-        ang = UP + Math.max(-MAX_TILT, Math.min(MAX_TILT, g.ang - UP + side * off));
-        target = UP + side * LEAN;
+        const base = p.parent ? (18 + 18 * c.off) * DEG : (25 + 20 * c.off) * DEG;
+        const off = spread >= 0 ? base + spread * OAK_OFF : base * (1 + 0.7 * spread);
+        const tilt = spread >= 0 ? MAX_TILT + spread * OAK_TILT : MAX_TILT * (1 + 0.5 * spread);
+        ang = UP + Math.max(-tilt, Math.min(tilt, g.ang - UP + side * off));
+        target = UP + side * (spread >= 0 ? LEAN + spread * OAK_LEAN : LEAN * (1 + spread));
+        bend = BEND * (1 + OAK_BEND * Math.abs(spread));
       }
       c.side = side;
       c.segs.forEach((g, i) => {
-        if (c.parent && i > 0) ang += (target - ang) * BEND;
+        if (c.parent && i > 0) ang += (target - ang) * bend;
         const a = c.parent ? ang + g.wob : UP;
         g.ang = a;
         g.x0 = x; g.y0 = y;
@@ -215,42 +235,66 @@
     // Branches: chains of segments, the trunk first. Growth builds the structure (each chain's segments, in
     // order, with their length, a seeded wobble, paper, weight and day); geometry() then places it.
     // chain: {id, parent, rank (birth order among its parent's branches), segs, papers, kids}.
-    const trunk = { id: 'trunk', parent: null, rank: 0, segs: [], papers: 0, kids: 0, born: null };
-    const chains = new Map([['trunk', trunk]]);
-    const order = [trunk];
     const seg = (c, len, r, paper, weight, day) => c.segs.push({ len, wob: r ? (r() - 0.5) * 8 * DEG : 0, paper, weight, day });
-    let grown = 0;
-    seg(trunk, trunkHeight(0), null, null, 0, null);
-    for (const p of papers) {
-      const r = rng(seed, 'paper', p.id);
-      p.mult = multOfDay(p.day);
-      const rise = trunkHeight(grown + p.mult) - trunkHeight(grown);
-      grown += p.mult;
-      let host = trunk;
-      for (const name of p.path) {
-        let c = chains.get(name);
-        if (!c) {
-          if (host !== trunk && host.kids > 0) seg(host, STUB, r, null, 0, p.day);   // room for another subtopic
-          c = { id: name, parent: host.id, rank: host.kids++, segs: [], papers: 0, kids: 0, born: p.day,
-            off: r(), at: r() };
-          chains.set(name, c);
-          order.push(c);
-          if (name !== p.path[p.path.length - 1]) seg(c, STUB, r, null, 0, p.day);
+    // The tree after the first n papers, an oak until `full` units grown (its trunk rises at the full rate after).
+    function build(n, full) {
+      const trunk = { id: 'trunk', parent: null, rank: 0, segs: [], papers: 0, kids: 0, born: null };
+      const chains = new Map([['trunk', trunk]]);
+      const order = [trunk];
+      let grown = 0;
+      seg(trunk, trunkHeight(0), null, null, 0, null);
+      for (const p of papers.slice(0, n)) {
+        const r = rng(seed, 'paper', p.id);
+        p.mult = multOfDay(p.day);
+        const s = spreadOf(Math.min(grown, full));
+        const rise = (trunkHeight(grown + p.mult) - trunkHeight(grown)) * (grown < full ? 1 - OAK_SLOW * s : 1);
+        grown += p.mult;
+        let host = trunk;
+        for (const name of p.path) {
+          let c = chains.get(name);
+          if (!c) {
+            if (host !== trunk && host.kids > 0) seg(host, STUB, r, null, 0, p.day);   // room for another subtopic
+            c = { id: name, parent: host.id, rank: host.kids++, segs: [], papers: 0, kids: 0, born: p.day,
+              off: r(), at: r() };
+            chains.set(name, c);
+            order.push(c);
+            if (name !== p.path[p.path.length - 1]) seg(c, STUB, r, null, 0, p.day);
+          }
+          host = c;
         }
-        host = c;
+        if (host === trunk) {
+          seg(trunk, rise, null, p.id, p.mult, p.day);             // an unsorted paper's wood stays in the trunk
+          p.len = rise;
+        } else {
+          seg(trunk, rise, null, p.id, 0, p.day);
+          p.len = SEG * p.mult * (grown - p.mult < full ? 1 + OAK_LEN * s : 1) / Math.sqrt(1 + host.papers / SEG_HALF);
+          seg(host, p.len, r, p.id, p.mult, p.day);
+          host.papers += 1;
+        }
+        p.branch = host.id;
       }
-      if (host === trunk) {
-        seg(trunk, rise, null, p.id, p.mult, p.day);             // an unsorted paper's wood stays in the trunk
-        p.len = rise;
-      } else {
-        seg(trunk, rise, null, p.id, 0, p.day);
-        p.len = SEG * p.mult / Math.sqrt(1 + host.papers / SEG_HALF);
-        seg(host, p.len, r, p.id, p.mult, p.day);
-        host.papers += 1;
-      }
-      p.branch = host.id;
+      const spread = spreadOf(Math.min(grown, full));
+      geometry(order, seed, spread);
+      return { trunk, order, grown, spread };
     }
-    geometry(order, seed);
+    // The crown's width on the ground's scale (true metres, a young tree drawn smaller).
+    const span = (t) => { const xs = t.order.flatMap((c) => c.segs.flatMap((g) => [g.x0, g.x1])); return youngScale(t.grown) * (Math.max(...xs) - Math.min(...xs)); };
+    let t = build(papers.length, Infinity);
+    if (span(t) > GROUND_M) {
+      let lo = 0, hi = papers.length;                         // hi: the first paper count whose oak spans the ground
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (span(build(m, Infinity)) > GROUND_M) hi = m; else lo = m; }
+      t = build(papers.length, build(hi, Infinity).grown);
+      if (span(t) > GROUND_M) {                               // ease the spread back until the crown fits
+        let a = -1, b = t.spread;
+        for (let k = 0; k < 14; k++) {
+          const m = (a + b) / 2;
+          geometry(t.order, seed, m);
+          if (span(t) > GROUND_M) b = m; else a = m;
+        }
+        geometry(t.order, seed, t.spread = a);
+      }
+    }
+    const { trunk, order, grown, spread } = t;
     // Widths: growth carried beyond each node (the chain's own later segments plus every branch leaving there
     // or later), so every segment tapers from its base to its tip.
     const total = new Map();
@@ -310,7 +354,7 @@
     const lastGood = goodDays[goodDays.length - 1];
     const streakNow = lastGood && (lastGood === today || lastGood === addDays(today, -1)) ? streak.get(lastGood) : 0;
     const scale = youngScale(grown);
-    return { seed, today, papers, leaves, passed, creatures, birds, goodDays, events, chains: order, grown, scale,
+    return { seed, today, papers, leaves, passed, creatures, birds, goodDays, events, chains: order, grown, scale, spread,
       height: scale * Math.max(...order.flatMap((c) => c.segs.map((g) => Math.max(g.y0, g.y1)))),
       streak: streakNow, mult: multOf(streakNow), multToday: multOfDay(today),
       stage: stageOf(grown) };
@@ -441,8 +485,13 @@
   // A young tree (state.scale < 1) is drawn at full size and scaled down as a whole: x0, y0, w, h and the hits
   // are in true tree units, and the height scale is labelled in true metres. With nothing grown nothing is drawn but
   // the scale, in the first paper's frame.
-  // How far a crow's torment reaches (tree units), from layout(): a quarter of the tree's height, at least SAD_R.
-  const sadR = (L) => Math.max(SAD_R, Math.max(...[...L.graph.nodes.values()].map((p) => p.y)) / 4);
+  // How far a crow's torment reaches (tree units), from layout(): a quarter of the tree's height or its crown's width,
+  // whichever is larger (an oak's crows reach across its crown), at least SAD_R.
+  const sadR = (L) => {
+    const ps = [...L.graph.nodes.values()];
+    const xs = ps.map((p) => p.x);
+    return Math.max(SAD_R, Math.max(Math.max(...ps.map((p) => p.y)), Math.max(...xs) - Math.min(...xs)) / 4);
+  };
   // The factor a tree is drawn at (a young one smaller; with nothing grown, the first paper's).
   const treeScale = (state) => (state.scale == null ? 1 : state.scale > 0 ? state.scale : youngScale(1));
   function parts(state, opts = {}) {
@@ -572,6 +621,6 @@
 
   return { hash, rng, dayOf, addDays, hourOf, topicPath, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
     GULL, BIRD_INK, GULL_FILL, SAD_R, sadR, treeScale,
-    STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, FIRST_HEIGHT, YOUNG_P, youngScale, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
+    STREAK_STEP, MAX_MULT, OAK_N, GROUND_M, spreadOf, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, FIRST_HEIGHT, YOUNG_P, youngScale, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
     derive, layout, walk, parts, svg };
 }));

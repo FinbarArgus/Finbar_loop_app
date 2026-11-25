@@ -102,7 +102,26 @@ test("each paper grows one segment on its collection's branch, which hangs from 
   assert.doesNotMatch(svg, /data-k="leaf"/);
 });
 
-test('it grows upwards: after five years the tree is taller than it is wide', () => {
+test('an oak (Q-0056): the crown widens past the sapling stage to the ground, then the tree grows up again', () => {
+  const span = (s) => { const xs = s.chains.flatMap((c) => c.segs.flatMap((g) => [g.x0, g.x1])); return s.scale * (Math.max(...xs) - Math.min(...xs)); };
+  // Five years of estimated use (tools/tree_examples.js), the first n papers read.
+  const reads = EX.history(5 * 365).entries.filter((e) => e.kind === 'read').sort((a, b) => a.done_at.localeCompare(b.done_at));
+  const at = (n) => G.derive(reads.slice(0, n), {}, {}, '2032-01-01T12:00:00');
+  assert.equal(at(5).spread, 0, 'a sapling is narrow');
+  const s20 = at(20), s40 = at(40);
+  assert.ok(s40.spread > 0.5 && span(s40) > 1.2 * span(s20), `wider with papers: ${span(s20)} -> ${span(s40)} m`);
+  for (const n of [40, 80, 200, 1000]) {
+    const s = at(n);
+    assert.ok(span(s) <= G.GROUND_M + 1e-6, `${n} papers: ${span(s)} m wide, within the ground`);
+    assert.ok(s.height < G.trunkHeight(s.grown), `${n} papers: ${s.height} m, shorter than a poplar (${G.trunkHeight(s.grown)} m)`);
+  }
+  assert.ok(Math.abs(span(at(80)) - G.GROUND_M) < 0.01, 'by 80 papers the crown spans the ground');
+  const [a, b] = [200, 400].map(at);
+  assert.ok(b.height - a.height > 0.5 * (G.trunkHeight(b.grown) - G.trunkHeight(a.grown)),
+    `at the ground's width it grows up at the full rate again: ${a.height} -> ${b.height} m`);
+});
+
+test('it grows up again: after five years the tree is taller than it is wide', () => {
   const { entries } = EX.history(5 * 365);
   const s = G.derive(entries, {}, {}, '2031-11-22T12:00:00');
   const xs = s.chains.flatMap((c) => c.segs.flatMap((g) => [g.x0, g.x1]));
@@ -265,7 +284,7 @@ test('a young tree is the same tree scaled down (Q-0036): 0 m, 5 cm after 1 pape
   assert.ok(h(1) >= 0.04 && h(1) <= 0.06, `1 paper: ${h(1)} m`);
   assert.ok(h(5) > 0.9 && h(5) < 1.3, `5 papers: ${h(5)} m`);
   assert.ok(Math.abs(h(20) - G.trunkHeight(20)) < 0.5, `20 papers: ${h(20)} m`);
-  assert.ok(Math.abs(h(100) - G.trunkHeight(100)) < 0.5, `100 papers: ${h(100)} m`);
+  assert.ok(h(100) > h(20) && h(100) < G.trunkHeight(100) - 5, `100 papers: ${h(100)} m, an oak, shorter than a poplar`);
   for (let n = 0; n < 25; n++) assert.ok(h(n + 1) > h(n), `rises from ${n} papers`);
   assert.equal(G.youngScale(0), 0);
   assert.equal(G.youngScale(G.SAPLING), 1);
@@ -342,7 +361,8 @@ test('a passed deadline\'s crow perches on the tree; animals within sadR of it g
   // An open (flying) deadline is drawn by the scene, not on the tree.
   assert.doesNotMatch(G.svg({ ...grown(120), birds: [{ id: 'x', deadline: '2027-01-01', days: 20, evil: false }] }), /data-k="bird"/);
   const tall = G.layout(grown(2 * 365));
-  assert.equal(G.sadR(tall), Math.max(...[...tall.graph.nodes.values()].map((p) => p.y)) / 4, 'a quarter of a tall tree');
+  const ps = [...tall.graph.nodes.values()], xs = ps.map((p) => p.x);
+  assert.equal(G.sadR(tall), Math.max(Math.max(...ps.map((p) => p.y)), Math.max(...xs) - Math.min(...xs)) / 4, 'a quarter of the tree, tall or wide');
   assert.equal(G.sadR(G.layout(G.derive([], {}, {}, NOW))), G.SAD_R, 'at least SAD_R');
 });
 
