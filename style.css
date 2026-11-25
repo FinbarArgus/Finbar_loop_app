@@ -432,6 +432,10 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .hnav[disabled] { opacity: .4; cursor: default; }
 .badge.plib { color: var(--ok); }
 .plibbtn { font-size: 12px; padding: 1px 8px; }
+.mdelbtn { font-size: 12px; padding: 1px 8px; color: var(--muted); }
+.mdelask { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--bad); }
+.mdelyes { background: var(--bad); color: #fff; border: 0; padding: 2px 10px; font-size: 12px; }
+.mdeleting .mrow { opacity: .7; }
 .plibpick { display: grid; gap: 6px; margin-top: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
 .plibpick[hidden] { display: none; }
 .plibopts { display: grid; gap: 2px; max-height: 240px; overflow-y: auto; }

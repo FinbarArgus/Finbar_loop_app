@@ -16,6 +16,7 @@ import http.server
 import json
 import re
 import os
+import shutil
 import socketserver
 import subprocess
 import sys
@@ -676,6 +677,48 @@ def run(loop_bin, graph, shots):
                 page.wait_for_selector('details.history >> text=Done (1)')
                 w = rj(wid)
                 check(page, w['published'] and w.get('published_at') and w['done'] and w.get('done_at'), 'Write: published is done', failures)
+
+                # Delete (requests 6, 7): a confirm step (Cancel goes back), then delete_requests/<id>.json; the entry leaves
+                # the lists at once and shows under Deleting (with the loop's reason while it waits) until the loop removes it.
+                page.goto(base + '#/manual/read')
+                drow = page.locator('.mrow', has_text='Desktop paper')
+                drow.locator('.mdelbtn').click()
+                ask = drow.locator('.mdelask')
+                check(page, "Zotero's trash" in ask.inner_text() and not (repo / 'delete_requests/read-desk.json').exists(),
+                      f'Delete: a paper in Zotero asks first, naming the trash: {ask.inner_text()!r}', failures)
+                if shots:
+                    drow.screenshot(path=f'{shots}/{label}-delete-confirm.png')
+                ask.locator('button', has_text='Cancel').click()
+                check(page, drow.locator('.mdelbtn').count() == 1 and drow.locator('.mdelask').count() == 0, 'Delete: Cancel goes back', failures)
+                drow.locator('.mdelbtn').click()
+                drow.locator('.mdelyes').click()
+                page.locator('.mdeleting .mrow', has_text='Desktop paper').wait_for()
+                req = json.loads((repo / 'delete_requests/read-desk.json').read_text())
+                check(page, req['entry'] == 'read-desk' and req['kind'] == 'read'
+                      and page.locator('.mgroup .mrow', has_text='Desktop paper').count() == 0,
+                      f'Delete: request written, the paper leaves the list {req}', failures)
+                (repo / 'delete_requests/read-desk.waiting').write_text(json.dumps({'status': 'waiting', 'why': 'Zotero unreachable'}))
+                page.reload()
+                page.locator('.mdeleting .status', has_text='Waiting: Zotero unreachable').wait_for()
+                if shots:
+                    page.locator('.mdeleting').screenshot(path=f'{shots}/{label}-deleting.png')
+                shutil.rmtree(repo / 'personal/read-desk')                 # what `loop delete` does
+                shutil.rmtree(repo / 'delete_requests')
+                page.reload()
+                page.locator('.mrow', has_text='Lib paper').wait_for()
+                check(page, page.locator('.mdeleting').count() == 0 and page.locator('.mrow', has_text='Desktop paper').count() == 0,
+                      'Delete: gone once the loop removed it', failures)
+                seed('write-old', kind='write', title='Old essay', submitted=True)
+                page.goto(base + '#/manual/write')
+                orow = page.locator('.mrow', has_text='Old essay')
+                orow.locator('.mdelbtn').click()
+                check(page, 'animal leaves the tree' in orow.locator('.mdelask').inner_text(), 'Delete: a submitted Write entry says its animal leaves', failures)
+                orow.locator('.mdelyes').click()
+                page.locator('.mdeleting .mrow', has_text='Old essay').wait_for()
+                check(page, json.loads((repo / 'delete_requests/write-old.json').read_text())['kind'] == 'write',
+                      'Delete: a Write entry is deleted the same way', failures)
+                shutil.rmtree(repo / 'personal/write-old')
+                shutil.rmtree(repo / 'delete_requests')
 
                 # A young tree (one paper so far, Q-0036): a few centimetres tall beside the fruit pile. The default view shows
                 # a marker with its height over the trunk's foot; tapping it zooms onto the tree, its wood seen up close.
