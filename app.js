@@ -312,18 +312,35 @@
     return el('i', { class: 'rdot', style: `background:${H.LIGHTS[role]}`, title: role === 'loop' ? 'LOOP' : H.ROLE_TEXT[role] });
   };
 
-  async function showList(tab) {
-    await refreshIndex();
+  // The board's items by section, each in board order.
+  function boardGroups() {
     const groups = Object.fromEntries(SECTIONS.map(([k]) => [k, []]));
     index.items.forEach((it) => { const s = sectionOf(it); if (groups[s]) groups[s].push(it); });
     Object.values(groups).forEach((g) => g.sort(byRole));
-    const nblock = (k) => groups[k].filter((x) => x.blocking_now).length;
-    tab = SECTIONS.some(([k]) => k === tab) ? tab
-      : SECTIONS.map(([k]) => k).find((k) => nblock(k)) || SECTIONS.map(([k]) => k).find((k) => groups[k].length) || 'question';
-    const tabs = el('nav', { class: 'tabs' }, SECTIONS.map(([k, label]) => el('a', {
+    return groups;
+  }
+  const nblockIn = (groups, k) => groups[k].filter((x) => x.blocking_now).length;
+
+  // The Agents tab row: Permission (sessions waiting on an approval, "Perm" on a phone), then the board's sections.
+  function boardTabs(tab, groups, nPerm) {
+    const perm = el('a', { href: '#/permission', class: 'tperm' + (tab === 'permission' ? ' on' : ''), title: 'Permission' },
+      el('span', { class: 'wide' }, 'Permission'), el('span', { class: 'narrow' }, 'Perm'),
+      nPerm ? el('span', { class: 'nb', title: 'waiting for an approval' }, String(nPerm)) : el('span', { class: 'n' }, '0'));
+    return el('nav', { class: 'tabs' }, perm, ...SECTIONS.map(([k, label]) => el('a', {
       href: `#/list/${k}`, class: k === tab ? 'on' : '',
     }, label, el('span', { class: 'n' }, String(groups[k].length)),
-    nblock(k) ? el('span', { class: 'nb', title: 'blocking' }, String(nblock(k))) : null)));
+    nblockIn(groups, k) ? el('span', { class: 'nb', title: 'blocking' }, String(nblockIn(groups, k))) : null)));
+  }
+
+  async function showList(tab) {
+    await refreshIndex();
+    const groups = boardGroups();
+    const nblock = (k) => nblockIn(groups, k);
+    tab = SECTIONS.some(([k]) => k === tab) ? tab
+      : SECTIONS.map(([k]) => k).find((k) => nblock(k)) || SECTIONS.map(([k]) => k).find((k) => groups[k].length) || 'question';
+    await useTree();
+    const waiting = await permissionWaiting().catch(() => null);
+    const tabs = boardTabs(tab, groups, waiting ? waiting.n : 0);
     // Filters inside a tab; an item can match several (a ready entry that blocks is under Blocking and Ready).
     const FILTERS = {
       blocking: ['Blocking', (x) => x.blocking_now],
@@ -876,9 +893,9 @@
       el('div', { class: 'awhy' }, p.why), btns, msg);
   }
 
-  async function showPermission() {
-    await useTree();
-    const [st] = await Promise.all([getJSON('state/status.json'), refreshIndex()]);
+  // Who waits on an approval: hook prompts (open `permission` items), usage-guard denials, and other dialogs.
+  async function permissionWaiting() {
+    const st = await getJSON('state/status.json');
     const asks = await Promise.all(index.items.filter((x) => isPermission(x) && x.status === 'open')
       .map((x) => getJSON(`items/${x.id}/item.json`).catch(() => null)));
     const items = asks.filter(Boolean);
@@ -886,6 +903,12 @@
     const asked = (r) => items.some((it) => it.from.job === r.job || it.from.name === r.name);
     const dialogs = rows.filter((r) => r.permission.kind === 'dialog' && !asked(r));
     const guards = rows.filter((r) => r.permission.kind === 'guard');
+    return { st, items, guards, dialogs, n: items.length + guards.length + dialogs.length };
+  }
+
+  async function showPermission() {
+    await Promise.all([useTree(), refreshIndex()]);
+    const { st, items, guards, dialogs } = await permissionWaiting();
     const itemCard = (it) => el('section', { class: 'status-card permwait', 'data-item': it.id },
       el('div', { class: 'arow' }, el('span', { class: 'badge perm' }, 'prompt'), roleDot(it.from.name), el('b', {}, it.from.name),
         el('span', { class: 'who' }, ` · ${it.permission.tool}`), el('span', { class: 'grow' }), el('span', { class: 'who' }, `waiting ${age(it.created)}`)),
@@ -897,7 +920,8 @@
         el('span', { class: 'grow' }), el('span', { class: 'who' }, r.updated ? `waiting ${age(r.updated)}` : '')),
       el('div', { class: 'awhy' }, 'At a permission prompt the loop did not post: answer it in the session.'));
     const cards = [...items.map(itemCard), ...guards.map(guardCard), ...dialogs.map(dialogCard)];
-    main().replaceChildren(el('h2', { class: 'permh' }, 'Waiting for permission ', el('span', { class: 'n' }, String(cards.length))),
+    main().replaceChildren(boardTabs('permission', boardGroups(), cards.length),
+      el('h2', { class: 'permh' }, 'Waiting for permission ', el('span', { class: 'n' }, String(cards.length))),
       ...(cards.length ? cards : [el('p', { class: 'empty' }, 'No session is waiting for an approval.')]),
       el('p', { class: 'foot' }, `Status updated ${new Date(st.generated).toLocaleString()}`));
     setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/permission')) await showPermission(); }, 60_000);
@@ -1906,7 +1930,7 @@
     if (!quiet) justSent = null;
     treeWasCached = false;
     try {
-      const meta = ['status', 'permission', 'manual', 'tree'].includes(h[0]) ? h[0] : 'work';
+      const meta = ['status', 'manual', 'tree'].includes(h[0]) ? h[0] : 'work';     // Permission is a tab under Agents
       document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'status') await showStatus();

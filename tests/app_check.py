@@ -274,8 +274,12 @@ def run(loop_bin, graph, shots):
                 page.goto(base + '#/list')
                 page.wait_for_selector('.card')
                 tabs = page.locator('.tabs a').all_inner_texts()
-                check(page, [t[:4] for t in tabs] == ['Ques', 'Cont', 'Revi'] and tabs[0].endswith('31'),
-                      f'board tabs Questions/Content/Review, with the blocking count {tabs}', failures)
+                perm_label = 'Perm' if label == 'phone' else 'Permission'
+                check(page, [t.rstrip('0123456789') for t in tabs[:1]] == [perm_label] and [t[:4] for t in tabs[1:]] == ['Ques', 'Cont', 'Revi']
+                      and tabs[1].endswith('31') and page.locator('.meta a[data-meta="permission"]').count() == 0,
+                      f'Agents tabs: {perm_label} left of Questions/Content/Review (blocking count), not in the header {tabs}', failures)
+                if shots:
+                    page.locator('.tabs').screenshot(path=f'{shots}/{label}-agents-tabs.png')
                 check(page, page.locator('.card .id').first.inner_text() == 'Q-0001', 'blocking question listed first', failures)
                 page.locator('.switch button', has_text=re.compile(r'^Blocking')).click()
                 page.wait_for_selector('.switch button.on >> text=Blocking')
@@ -424,7 +428,7 @@ def run(loop_bin, graph, shots):
                     pass
                 check(page, 'Questions history (2)' in page.locator('details.history > summary').inner_text(),
                       'answered questions move to the Questions history', failures)
-                check(page, page.locator('.tabs a').count() == 3, 'three tabs, history below', failures)
+                check(page, page.locator('.tabs a').count() == 4, 'four tabs, history below', failures)
                 page.goto(base + '#/list/content')
                 page.wait_for_selector('.switch button >> text=In progress')
                 labels = page.locator('.switch button').all_inner_texts()
@@ -952,7 +956,9 @@ def run(loop_bin, graph, shots):
                 page.reload()
                 page.locator('.agent', has_text='MED-guarded').locator('a.permlink').click()
                 page.wait_for_selector('.permwait')
-                check(page, page.locator('.meta a.on').get_attribute('data-meta') == 'permission', 'Permission: its own tab, reached from a blocked Status row', failures)
+                check(page, page.locator('.meta a.on').get_attribute('data-meta') == 'work' and page.locator('.tabs a.on').get_attribute('href') == '#/permission'
+                      and page.locator('.tabs a.on .nb').inner_text() == '3',
+                      'Permission: a tab under Agents, with its count, reached from a blocked Status row', failures)
                 check(page, page.locator(f'.permwait[data-item="{pid}"]').count() == 1
                       and page.locator('.permwait[data-agent="HIGH-session-a"]').count() == 0,
                       'Permission: a hook prompt is listed once, as its item', failures)

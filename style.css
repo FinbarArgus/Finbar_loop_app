@@ -201,7 +201,7 @@ details.revisit { margin: 4px 0 0; }
 .meta { display: flex; gap: 2px; margin-left: 10px; background: #2a3347; border-radius: 999px; padding: 2px; }
 .meta a { color: #c9d3ea; text-decoration: none; padding: 4px 12px; border-radius: 999px; font-size: 14px; }
 .meta a.on { background: #fff; color: #1d2433; font-weight: 600; }
-.meta .narrow { display: none; }
+.tabs .narrow { display: none; }
 .status-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 12px 0; }
 .status-card h3 { margin: 0 0 8px; font-size: 16px; }
 .status-card h3 .n { color: var(--muted); font-weight: 400; }
@@ -411,8 +411,8 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
   .bar .brand { display: none; }           /* Work opens the same board */
   .meta { margin-left: 0; }
   .meta a { padding: 4px 6px; font-size: 13px; }
-  .meta .wide { display: none; }
-  .meta .narrow { display: inline; }
+  .tabs .wide { display: none; }
+  .tabs .narrow { display: inline; }
 }
 
 /* The ant farm under the tree: every agent as an anthill */
