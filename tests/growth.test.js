@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const G = require('../growth.js');
 const EX = require('../tools/tree_examples.js');
+const grown = (days) => { const { entries, writes } = EX.history(days); return EX.snapshot(entries, writes, days).s; };
 
 const read = (id, day, extra = {}) => ({ id, kind: 'read', done: true, created: `${day}T09:00:00`, done_at: `${day}T15:00:00`, ...extra });
 const inZ = (name) => ({ zotero: { name } });
@@ -304,4 +305,48 @@ test("the frame holds every label: an animal's name wider than the animal, and b
       }
     }
   }
+});
+
+test('deadline birds: each open deadline is a bird, days to the end of its day; passed ones are evil, done ones leave', () => {
+  const due = (id, deadline, extra = {}) => ({ id, kind: 'task', created: '2026-12-01T09:00:00', deadline, title: id, ...extra });
+  const st = G.derive([due('soon', '2026-12-12'), due('late', '2026-12-08'), due('met', '2026-12-11', { done: true, done_at: '2026-12-09T10:00:00' }),
+    due('lateDone', '2026-12-05', { done: true, done_at: '2026-12-07T10:00:00' }), due('far', '2027-02-01')], {}, {}, NOW);
+  assert.deepEqual(st.birds.map((b) => [b.id, b.evil]), [['late', true], ['soon', false], ['far', false]]);
+  const soon = st.birds.find((b) => b.id === 'soon');
+  assert.equal(soon.days, 2.5);                                  // noon on the 10th to the end of the 12th
+  assert.equal(st.birds.find((b) => b.id === 'late').days, -1.5);
+  const L = G.layout(st);
+  const ys = [...L.graph.nodes.values()].map((p) => p.y).sort((a, b) => b - a);
+  for (const b of L.birds) assert.ok(b.y >= ys[Math.max(0, Math.ceil(ys.length / 4) - 1)], `${b.id} lands in the crown`);
+  assert.deepEqual(G.layout(st).birds, L.birds, 'the same deadline always lands on the same node');
+});
+
+test('a passed deadline\'s crow perches on the tree; animals within SAD_R of it get a sad face', () => {
+  const st = grown(2 * 365);
+  assert.ok(st.creatures.length >= 2, 'needs animals');
+  const hour = G.hourOf(NOW);
+  const L0 = G.layout(st);
+  const spots = st.creatures.map((c) => L0.graph.nodes.get(G.walk(L0.graph, st.seed, c.id, c.startHour, hour).node));
+  const none = G.svg({ ...st, birds: [] }, { hour });
+  assert.doesNotMatch(none, /data-k="bird"|class="sad"/);
+  // One crow per animal's deadline id until one lands near an animal and another lands far from every one.
+  let near = null, far = null;
+  for (let n = 0; n < 200 && !(near && far); n++) {
+    const s = { ...st, birds: [{ id: `d${n}`, deadline: '2026-12-01', title: 't', days: -3, evil: true }] };
+    const b = G.layout(s).birds[0];
+    const d = Math.min(...spots.map((p) => Math.hypot(p.x - b.x, p.y - b.y)));
+    if (d <= G.SAD_R && !near) near = s; else if (d > G.SAD_R && !far) far = s;
+  }
+  assert.ok(near && far, 'found crows near and far');
+  for (const s of [near, far]) {
+    const svg = G.svg(s, { hour });
+    assert.match(svg, /data-k="bird" data-i="d\d+"/);
+    const b = G.layout(s).birds[0];
+    st.creatures.forEach((c, i) => {
+      const sad = Math.hypot(spots[i].x - b.x, spots[i].y - b.y) <= G.SAD_R;
+      assert.equal(svg.includes(`class="sad" data-i="${c.id}"`), sad, `${c.id} sad: ${sad}`);
+    });
+  }
+  // An open (flying) deadline is drawn by the scene, not on the tree.
+  assert.doesNotMatch(G.svg({ ...st, birds: [{ id: 'x', deadline: '2027-01-01', days: 20, evil: false }] }, { hour }), /data-k="bird"/);
 });
