@@ -16,6 +16,7 @@
   const BLOCK_M = 0.125;        // a farm block, in metres (the tree's units)
   const SCALE = 1 / BLOCK_M;    // farm blocks per tree unit
   const SKY = '#f3f2ea';        // the farm's sky
+  const NIGHT = { sky: '#1d2340', shade: '#0d1230', star: '#fff6d8', moon: '#f4efd2' };
   const HOME_SKY = 16;          // blocks of sky above the surface in the default view (the anthills and the trunk's foot)
   const GAP = 12;               // the least open surface the tree stands in; it widens with the trunk (trunk + 8)
   const SMALL = 4;              // a tree shorter than this (blocks) gets a marker at its foot, and Whole tree frames it alone
@@ -51,7 +52,9 @@
       hit: `<rect x="${f(bd.x - hw)}" y="${f(bd.y - hh)}" width="${f(2 * hw)}" height="${f(2 * hh)}" data-k="bird" data-i="${esc(bd.id)}" fill="#000" fill-opacity="0"/>` };
   }
 
-  // state: growth.derive(); agents: status.json agents[]; opts: {messages, t, branchNames, hour}.
+  // state: growth.derive(); agents: status.json agents[]; opts: {messages, t, branchNames, hour, usage, night}.
+  // opts.night ({woken: [names]}, while state/usage.json is held): a night sky with stars and a moon, the tree and
+  // the farm in shade, and z's from every asleep anthill (anthills.js) drawn over the shade.
   // -> {svg, L (the farm's layout), box (the whole scene), home (the default view: the farm and the trunk's foot),
   //     tree (the tree, over the scene's width, and the ground it stands on; a small tree's own frame)}; each box is
   //     {x0, y0, x1, y1} in blocks. A small tree (a young one, drawn smaller) has a marker above its foot in the
@@ -85,17 +88,44 @@
     const home = { x0: 0, y0: L.surface - HOME_SKY, x1: L.width, y1: L.height };
     const place = `translate(${f(fx)} ${f(L.surface)}) scale(${SCALE})`;
     const counts = ['blocked', 'working', 'quiet'].map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
+    const skyTop = box.y0 - (box.y1 - box.y0), sky = opts.night ? NIGHT.sky : SKY;
+    const night = !opts.night ? null : {
+      sky: nightSky(span, skyTop, L.surface - 6, home),
+      shade: `<rect class="nightshade" x="${f(span[0])}" y="${f(skyTop)}" width="${f(span[1] - span[0])}" height="${f(L.height - skyTop)}"`
+        + ` fill="${NIGHT.shade}" fill-opacity="0.42" pointer-events="none"/>${farm.zz}`,
+    };
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${f(home.x0)} ${f(home.y0)} ${f(home.x1 - home.x0)} ${f(home.y1 - home.y0)}"`
-      + ` class="scene" role="img" aria-label="${state.stage}, ${f(state.height)} m tall, over ${L.hills.length} agents: ${counts}">`
-      + `<rect x="${f(span[0])}" y="${f(box.y0 - (box.y1 - box.y0))}" width="${f(span[1] - span[0])}" height="${f(L.surface - box.y0 + (box.y1 - box.y0))}" fill="${SKY}"/>`
+      + ` class="scene${night ? ' night' : ''}" role="img" aria-label="${state.stage}, ${f(state.height)} m tall, over ${L.hills.length} agents: ${counts}`
+      + `${night ? ', at night (usage held)' : ''}">`
+      + `<rect x="${f(span[0])}" y="${f(skyTop)}" width="${f(span[1] - span[0])}" height="${f(L.surface - skyTop)}" fill="${sky}"/>`
+      + (night ? night.sky : '')
       // A grown tree's foot stands in LOOP's pile (the farm drawn over it); a young one is drawn over the farm's grass.
       + (small ? `<g class="farm">${farm.body}</g><g class="tree" transform="${place}" shape-rendering="crispEdges">${T.body}</g>`
         : `<g class="tree" transform="${place}" shape-rendering="crispEdges">${T.body}</g><g class="farm">${farm.body}</g>`)
-      + sprout + (flying.length ? `<g class="birds">${flying.map((b) => b.draw).join('')}</g>` : '')
+      + (flying.length ? `<g class="birds">${flying.map((b) => b.draw).join('')}</g>` : '')
+      + (night ? night.shade : '')
+      + sprout
       + `<g class="tree" transform="${place}">${T.hits}</g>`
       + (sproutHit || flying.length ? `<g class="hits">${sproutHit}${flying.map((b) => b.hit).join('')}</g>` : '') + '</svg>';
     return { svg, L, box, home, tree };
   }
 
-  return { scene, birds, SCALE, HOME_SKY, GAP, SMALL, BIRD_NEAR, BIRD_PER_DAY, BIRD_DAYS, BIRD_SMALL, BIRD_GROW };
+  // Stars over the sky [x0, x1] x [y0, y1] (a fixed pattern, thicker in the default view), and a crescent moon in the default view's top right.
+  function nightSky([x0, x1], y0, y1, home) {
+    const r = H.rng('stars');
+    let out = '<g class="stars">';
+    const scatter = (n, ax, bx, ay, by) => {
+      for (let k = 0; k < n; k++) {
+        const s = r() < 0.15 ? 0.5 : 0.3;
+        out += `<rect x="${f(ax + r() * (bx - ax))}" y="${f(ay + r() * (by - ay))}" width="${s}" height="${s}" fill="${NIGHT.star}"/>`;
+      }
+    };
+    scatter(30, home.x0, home.x1, home.y0, y1);                                   // the default view's sky
+    scatter(Math.min(240, Math.round((x1 - x0) * Math.max(0, y1 - y0) / 70)), x0, x1, y0, y1);
+    const mx = home.x1 - 7, my = home.y0 + 5;
+    return out + `</g><g class="moon"><circle cx="${f(mx)}" cy="${f(my)}" r="2.6" fill="${NIGHT.moon}"/>`
+      + `<circle cx="${f(mx + 1.2)}" cy="${f(my - 0.7)}" r="2.3" fill="${NIGHT.sky}"/></g>`;
+  }
+
+  return { scene, birds, NIGHT, SCALE, HOME_SKY, GAP, SMALL, BIRD_NEAR, BIRD_PER_DAY, BIRD_DAYS, BIRD_SMALL, BIRD_GROW };
 }));

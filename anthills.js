@@ -76,7 +76,7 @@
     { name: 'clay', base: '#a98a6a', dark: '#866b50', light: '#c2a687' },
   ];
   const C = {
-    sky: '#f3f2ea', grass: '#6f8a55', grassLight: '#87a068', topsoil: '#7d5e42', soil: ['#6e5139', '#634832', '#57402d'],
+    sky: '#f3f2ea', snore: '#e9ecff', grass: '#6f8a55', grassLight: '#87a068', topsoil: '#7d5e42', soil: ['#6e5139', '#634832', '#57402d'],
     pebble: '#8d8378', pebbleDark: '#6f675d', room: '#c9a77e', roomFloor: '#b99569', wall: '#9c7a57', tunnel: '#b8956b',
     trail: '#a89068', ant: '#1f1610', egg: '#f2ece0', seed: '#d2b483', seedDark: '#a8885b', larva: '#efe3c7', fungus: '#d9dccb',
     fungusDark: '#b5b9a3', root: '#3c2c1f', crumb: '#e2c46e', leaf: '#7f9a5c', fruit: '#c8553d', fruitDark: '#9a3d2c', fruitGold: '#e39a3b', off: '#6d665e',
@@ -127,13 +127,15 @@
   // right and left of the food in turn, by priority, then blocked before working before quiet, then by name;
   // neighbouring homes sit at alternating depths. opts.messages: state/messages.json ({messages: [{at, from, to}],
   // pairs: [{a, b, count, last}]}); agents named there but missing from the status are drawn as stalled homes
-  // (ghost: true). opts.fit is accepted for the app and does not change the layout.
+  // (ghost: true). opts.fit is accepted for the app and does not change the layout. opts.night ({woken: [names]}, while
+  // the usage hold is on): every hill is asleep (hl.asleep) except a woken one whose session is working.
   // An anthome's size is the session's tokens since the weekly reset (agent.week_tokens.total): its width runs from
   // HOME_W[0] to HOME_W[1] with the square root of its share of the largest session's tokens, so its area follows
   // the tokens and a small session stays visible. Without token figures it is NO_TOKENS_W wide. hl.food is
   // the food pile on its floor (a box), hl.tokens its tokens.
   function layout(agents, opts = {}) {
     const all = (agents || []).filter((a) => a && a.name);
+    const woken = new Set((opts.night && opts.night.woken) || []);
     const known = new Set(all.map((a) => a.name));
     for (const pr of (opts.messages || {}).pairs || []) {
       for (const n of [pr.a, pr.b]) {
@@ -143,7 +145,8 @@
     const list = all.map((agent) => {
       const size = sizeOf(agent), mood = moodOf(agent), role = roleOf(agent);
       return { name: agent.name, agent, size, role, mood, kind: role === 'loop' ? 'food' : 'home', design: design(agent.name),
-        ants: mood === 'working' ? ANTS[size] : 0, rock: mood === 'blocked' };
+        ants: mood === 'working' ? ANTS[size] : 0, rock: mood === 'blocked',
+        asleep: !!opts.night && !(mood === 'working' && woken.has(agent.name)) };
     }).sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size)
       || ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || MOOD_ORDER.indexOf(a.mood) - MOOD_ORDER.indexOf(b.mood) || a.name.localeCompare(b.name));
     const homes = list.filter((h) => h.kind === 'home');
@@ -449,8 +452,11 @@
   // are <circle class="glow" data-role=<role>>; tap targets are data-k="hill" (a group per hill, data-i its index
   // in layout().hills), data-k="food" (the food in an anthome: data-i its hill index) and data-k="path" (data-i its
   // index in layout().paths).
-  // The farm's drawing without its <svg> wrapper: {body, L}, in blocks (y down, the surface at L.surface).
+  // The farm's drawing without its <svg> wrapper: {body, L, zz}, in blocks (y down, the surface at L.surface).
   // opts.scene (for scene.js): no sky (the scene draws it), and the soil and grass run over opts.span [x0, x1].
+  // opts.night (see layout): an asleep hill's ants stand still (data-still, the app leaves them), as do the tunnels'
+  // ants, and zz holds the z's rising from each asleep anthill (<g class="zz" data-h=<hill index>>), for the scene to
+  // draw over its night shade.
   function parts(agents, opts = {}) {
     const L = layout(agents, opts);
     const [sx0, sx1] = opts.span || [0, L.width];
@@ -475,16 +481,18 @@
     for (const hl of homes) paintHome(hl, px, carved);
     for (const hl of homes) paintMound(hl, px, L.surface);
     for (const hl of L.hills.filter((h) => h.kind === 'food')) paintFood(hl, L, px, opts.usage);
-    let ants = '', labels = '', hits = '', glow = '', foods = '';
+    let ants = '', labels = '', hits = '', glow = '', foods = '', zz = '';
+    const still = (hl) => (opts.night && hl.asleep !== false ? ' data-still="1"' : '');     // a tunnel's ants sleep too
     L.paths.forEach((pa, n) => {
-      for (let k = 0; k < pa.ants; k++) ants += `<g class="ant" data-p="${n}" data-a="${k}" transform="${antPose(antAt(pa, k, opts.t || 0))}">${ANT}</g>`;
+      for (let k = 0; k < pa.ants; k++) ants += `<g class="ant" data-p="${n}" data-a="${k}"${still(pa)} transform="${antPose(antAt(pa, k, opts.t || 0))}">${ANT}</g>`;
       if (!opts.mini) {
         hits += `<polyline data-k="path" data-i="${n}" points="${pa.trail.map((q) => `${f(q.x)},${f(q.y)}`).join(' ')}"`
           + ` fill="none" stroke="#000" stroke-opacity="0" stroke-width="${f(Math.max(2.5, pa.w + 1))}"/>`;
       }
     });
     L.hills.forEach((hl, n) => {
-      for (let k = 0; k < hl.ants; k++) ants += `<g class="ant" data-h="${n}" data-a="${k}" transform="${antPose(antAt(hl, k, opts.t || 0))}">${ANT}</g>`;
+      for (let k = 0; k < hl.ants; k++) ants += `<g class="ant" data-h="${n}" data-a="${k}"${still(hl)} transform="${antPose(antAt(hl, k, opts.t || 0))}">${ANT}</g>`;
+      if (hl.asleep) zz += snores(hl, n, L);
       if (hl.mood !== 'quiet') {
         hl.lights.forEach((l, j) => {
           glow += `<circle class="glow" data-role="${hl.role}" cx="${f(Math.floor(l.x) + 0.5)}" cy="${f(Math.floor(l.y) + 0.5)}" r="1.25"`
@@ -514,14 +522,25 @@
       + `<g shape-rendering="crispEdges">${rects(px)}</g>`
       + `<g class="glows" opacity="0.38">${glow}</g>${labels}<g class="ants">${ants}</g>`
       + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}${foods}</g>`);
-    return { body, L };
+    return { body, L, zz };
+  }
+
+  // Three z's rising from an asleep anthill's top (LOOP's: beside its pile), each fading as it rises (style.css .zz).
+  function snores(hl, n, L) {
+    const x = hl.kind === 'food' ? L.food.cx + L.food.w / 2 : hl.x + 1;
+    const y = L.surface - (hl.kind === 'food' ? 6 : hl.mound.h + 1);
+    const delay = -((hash('zz', hl.name) % 24) / 10);
+    return `<g class="zz" data-h="${n}" pointer-events="none" font-family="ui-monospace, Menlo, Consolas, monospace" font-weight="700" fill="${C.snore}"`
+      + ` stroke="#1d2236" stroke-width="0.3" paint-order="stroke">`
+      + [0, 1, 2].map((j) => `<text x="${f(x + 1.2 * j)}" y="${f(y - 2 * j)}" font-size="${f(1.4 + 0.5 * j)}"`
+        + ` style="animation-delay:${f(delay - 0.8 * j)}s">z</text>`).join('') + '</g>';
   }
 
   function svg(agents, opts = {}) {
-    const { body, L } = parts(agents, opts);
+    const { body, L, zz } = parts(agents, opts);
     const counts = MOOD_ORDER.map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L.width} ${L.height}" class="anthills" role="img"`
-      + ` aria-label="${L.hills.length} agents: ${counts}">${body}</svg>`;
+      + ` aria-label="${L.hills.length} agents: ${counts}">${body}${zz}</svg>`;
   }
 
   return { foodLeft, pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, parts, svg, label,
