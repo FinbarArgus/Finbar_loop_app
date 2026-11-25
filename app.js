@@ -1507,6 +1507,8 @@
     return el('div', {},
       el('div', { class: 'arow' }, el('b', {}, a.name), el('span', { class: `badge hmood ${hl.mood}` }, MOOD_TEXT[hl.mood]),
         el('span', { class: 'who' }, hl.kind === 'food' ? ' · the food source (LOOP)' : ` · ${H.ROLE_TEXT[hl.role]} anthome`)),
+      hl.asleep != null ? el('div', { class: 'who hsleep' }, hl.asleep ? 'Asleep: the usage hold is on until the reset.'
+        : 'Awake: woken by an urgent message, while its session works.') : null,
       hl.kind === 'food' ? usageLine(foodUsage) : null,
       hl.kind === 'food' ? sessionLine() : null,
       L ? usageInfo(hl, L) : null,
@@ -1544,7 +1546,7 @@
   function animateAnts(view, hills, paths) {
     cancelAnimationFrame(hillsFrame);
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const ants = [...view.querySelectorAll('.ant')].map((g) => ({ g, hl: g.dataset.p != null ? paths[+g.dataset.p] : hills[+g.dataset.h], k: +g.dataset.a }));
+    const ants = [...view.querySelectorAll('.ant:not([data-still])')].map((g) => ({ g, hl: g.dataset.p != null ? paths[+g.dataset.p] : hills[+g.dataset.h], k: +g.dataset.a }));
     if (!ants.length) return;
     let last = 0;
     const step = (now) => {
@@ -1694,7 +1696,9 @@
     const names = safeGet('loop.tree.names') === '1';
     // LOOP's food pile is the weekly usage left (the usage guard's figure, published by `loop status`); faded when stale.
     foodUsage = gu && gu.pct != null ? { pct: gu.pct, resets: gu.resets, stale: Date.now() / 1000 - gu.at > 2 * 3600 } : null;
-    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: foodUsage });
+    // Night while the usage hold is on (state/usage.json held): every anthill asleep but those woken by an urgent message.
+    const night = gu && gu.held ? { woken: gu.woken || [] } : null;
+    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: foodUsage, night });
     const L = sc.L;
     // Hover or tap: the info line. Every segment of the same paper lights up. A tap pins it, so the mouse can cross
     // the scene to its buttons; a tap on open ground unpins it.
@@ -1739,7 +1743,8 @@
       el('span', {}, el('b', {}, 'Size'), ' tokens since the weekly reset'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
       el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Dark'), ' stalled'),
       el('span', {}, el('b', {}, 'Fruit'), ' LOOP, at the tree\'s foot; in a home, its focus'),
-      el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'));
+      el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'),
+      night ? el('span', {}, el('b', {}, 'Night'), ' usage held until the reset: z\'s asleep; an urgent message wakes its agent') : null);
     const log = el('ol', { class: 'glog' }, state.events.slice(0, 40).map(growthEvent));
     const more = state.events.length > 40 ? el('button', { class: 'link', onclick: () => {
       log.replaceChildren(...state.events.map(growthEvent)); more.remove();
@@ -1761,7 +1766,7 @@
     const again = treePinnedAgent ? L.hills.findIndex((h) => h.agent && h.agent.name === treePinnedAgent) : -1;
     if (again >= 0) show(viewer.view.querySelector(`.hits [data-k="hill"][data-i="${again}"]`), true);
     animateAnts(viewer.view, L.hills, L.paths);
-    const key = () => [...tree.sha].filter(([x]) => x.startsWith('personal/') || ['state/citations.json', 'state/status.json', 'state/messages.json'].includes(x)).join();
+    const key = () => [...tree.sha].filter(([x]) => x.startsWith('personal/') || ['state/citations.json', 'state/status.json', 'state/messages.json', 'state/usage.json'].includes(x)).join();
     const before = key();
     setPoll(async () => {
       await loadTree();
