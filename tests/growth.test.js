@@ -321,32 +321,27 @@ test('deadline birds: each open deadline is a bird, days to the end of its day; 
   assert.deepEqual(G.layout(st).birds, L.birds, 'the same deadline always lands on the same node');
 });
 
-test('a passed deadline\'s crow perches on the tree; animals within SAD_R of it get a sad face', () => {
-  const st = grown(2 * 365);
-  assert.ok(st.creatures.length >= 2, 'needs animals');
-  const hour = G.hourOf(NOW);
-  const L0 = G.layout(st);
-  const spots = st.creatures.map((c) => L0.graph.nodes.get(G.walk(L0.graph, st.seed, c.id, c.startHour, hour).node));
-  const none = G.svg({ ...st, birds: [] }, { hour });
-  assert.doesNotMatch(none, /data-k="bird"|class="sad"/);
-  // One crow per animal's deadline id until one lands near an animal and another lands far from every one.
-  let near = null, far = null;
-  for (let n = 0; n < 200 && !(near && far); n++) {
-    const s = { ...st, birds: [{ id: `d${n}`, deadline: '2026-12-01', title: 't', days: -3, evil: true }] };
-    const b = G.layout(s).birds[0];
-    const d = Math.min(...spots.map((p) => Math.hypot(p.x - b.x, p.y - b.y)));
-    if (d <= G.SAD_R && !near) near = s; else if (d > G.SAD_R && !far) far = s;
+test('a passed deadline\'s crow perches on the tree; animals within sadR of it get a sad face', () => {
+  let sadSeen = 0, calmSeen = 0;
+  for (const days of [120, 2 * 365]) {
+    const st = grown(days);
+    const hour = Math.max(...st.creatures.map((c) => c.startHour)) + 300;   // every animal has walked a while
+    assert.ok(st.creatures.length, 'needs animals');
+    assert.doesNotMatch(G.svg({ ...st, birds: [] }, { hour }), /data-k="bird"|class="sad"/);
+    const s = { ...st, birds: [{ id: 'crow', deadline: '2026-12-01', title: 't', days: -3, evil: true }] };
+    const L = G.layout(s), b = L.birds[0], svg = G.svg(s, { hour });
+    assert.match(svg, /data-k="bird" data-i="crow"/);
+    for (const c of st.creatures) {
+      const p = L.graph.nodes.get(G.walk(L.graph, st.seed, c.id, c.startHour, hour).node);
+      const sad = Math.hypot(p.x - b.x, p.y - b.y) <= G.sadR(L);
+      assert.equal(svg.includes(`class="sad" data-i="${c.id}"`), sad, `${days} d, ${c.id} sad: ${sad}`);
+      if (sad) sadSeen++; else calmSeen++;
+    }
   }
-  assert.ok(near && far, 'found crows near and far');
-  for (const s of [near, far]) {
-    const svg = G.svg(s, { hour });
-    assert.match(svg, /data-k="bird" data-i="d\d+"/);
-    const b = G.layout(s).birds[0];
-    st.creatures.forEach((c, i) => {
-      const sad = Math.hypot(spots[i].x - b.x, spots[i].y - b.y) <= G.SAD_R;
-      assert.equal(svg.includes(`class="sad" data-i="${c.id}"`), sad, `${c.id} sad: ${sad}`);
-    });
-  }
+  assert.ok(sadSeen && calmSeen, `both cases met: ${sadSeen} sad, ${calmSeen} calm`);
   // An open (flying) deadline is drawn by the scene, not on the tree.
-  assert.doesNotMatch(G.svg({ ...st, birds: [{ id: 'x', deadline: '2027-01-01', days: 20, evil: false }] }, { hour }), /data-k="bird"/);
+  assert.doesNotMatch(G.svg({ ...grown(120), birds: [{ id: 'x', deadline: '2027-01-01', days: 20, evil: false }] }), /data-k="bird"/);
+  const tall = G.layout(grown(2 * 365));
+  assert.equal(G.sadR(tall), Math.max(...[...tall.graph.nodes.values()].map((p) => p.y)) / 4, 'a quarter of a tall tree');
+  assert.equal(G.sadR(G.layout(G.derive([], {}, {}, NOW))), G.SAD_R, 'at least SAD_R');
 });

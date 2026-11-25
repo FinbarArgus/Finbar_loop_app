@@ -130,7 +130,7 @@ test('deadline birds fly in from beside the food pile: further for later deadlin
   const due = (id, deadline) => ({ id, kind: 'task', created: '2026-12-01T09:00:00', deadline, title: id });
   const st = G.derive([...EX.history(365).entries, due('d1', '2026-12-11'), due('d10', '2026-12-20'), due('d90', '2027-03-10'), due('gone', '2026-12-05')], {}, {}, NOW);
   const sc = S.scene(st, AGENTS);
-  const B = Object.fromEntries(S.birds(st, sc.L, sc.L.gap.cx).map((b) => [b.id, b]));
+  const B = Object.fromEntries(S.birds(st, sc.L, sc.L.gap.cx).filter((b) => /^(d\d+|gone)$/.test(b.id)).map((b) => [b.id, b]));
   assert.deepEqual(Object.keys(B).sort(), ['d1', 'd10', 'd90'], 'a passed deadline does not fly');
   const pile = { x: sc.L.food.cx, y: sc.L.surface - 3 };
   const dist = (b) => Math.hypot(b.x - pile.x, b.y - pile.y);

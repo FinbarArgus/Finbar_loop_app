@@ -393,7 +393,7 @@
   const GULL = ['##     ##', ' ##   ## ', '  ## ##  ', '   #o#   '];
   const CROW = ['  ##    ', ' #o##   ', '#####   ', ' #######', '  ######', '  #  #  '];
   const BIRD_INK = '#3d3a40', GULL_FILL = '#e8e4d8', CROW_INK = '#26222a', CROW_EYE = '#c8553d';
-  // A sad face over each animal within SAD_R tree units of a crow.
+  // A sad face beside each animal within sadR of a crow: a quarter of the tree's height, at least SAD_R tree units.
   const SAD = [' ##### ', '#ooooo#', '#o#o#o#', '#ooooo#', '#oo#oo#', '#o#o#o#', ' ##### '];
   const SAD_INK = '#4f6a86', SAD_FILL = '#dbe4ee', SAD_R = 8;
 
@@ -434,13 +434,15 @@
   // opts: {hour, mini (no names, no tap targets), branchNames (each collection's last name at its branch tip)}. Tap targets: data-k="seg" with data-i = the paper's entry id
   // and data-b = its branch ('trunk' or the collection name), data-k="branch" on a collection's stub, and
   // data-k="creature" with data-i = the Write entry id, and data-k="bird" (a passed deadline's crow) with data-i = its
-  // entry id. Leaves have none. An animal within SAD_R of a crow has a sad face beside it (<g class="sad">).
+  // entry id. Leaves have none. An animal within sadR of a crow has a sad face beside it (<g class="sad">).
   // The tree's drawing without its <svg> wrapper: {body, hits, x0, y0, w, h} (hits: its tap targets), in tree units with y down (the ground at
   // y = 0, the tree above it at negative y). opts.scene (for scene.js): no background and no ground, labels haloed
   // in opts.paper, and the height scale at x = opts.scaleX (true tree units) with its labels to its right.
   // A young tree (state.scale < 1) is drawn at full size and scaled down as a whole: x0, y0, w, h and the hits
   // are in true tree units, and the height scale is labelled in true metres. With nothing grown nothing is drawn but
   // the scale, in the first paper's frame.
+  // How far a crow's torment reaches (tree units), from layout(): a quarter of the tree's height, at least SAD_R.
+  const sadR = (L) => Math.max(SAD_R, Math.max(...[...L.graph.nodes.values()].map((p) => p.y)) / 4);
   // The factor a tree is drawn at (a young one smaller; with nothing grown, the first paper's).
   const treeScale = (state) => (state.scale == null ? 1 : state.scale > 0 ? state.scale : youngScale(1));
   function parts(state, opts = {}) {
@@ -487,6 +489,7 @@
     let labels = '', critters = '';
     // Crows: each passed deadline's bird perches where it landed. Animals near one are sad.
     const crows = L.birds.filter((b, n) => state.birds[n].evil);
+    const reach = sadR(L);
     crows.forEach((b) => {
       const [i, j] = cell(b.x, b.y).split(',').map(Number);
       const ink = new Set(), eye = new Set();
@@ -501,7 +504,7 @@
       const [i, j] = cell(p.x, p.y).split(',').map(Number);
       const ink = new Set(), fill = new Set();
       const b = stamp(c.sprite, i, j + 1, c.size, ink, fill);
-      if (crows.some((w) => Math.hypot(w.x - p.x, w.y - p.y) <= SAD_R)) {
+      if (crows.some((w) => Math.hypot(w.x - p.x, w.y - p.y) <= reach)) {
         const sInk = new Set(), sFill = new Set();
         stamp(SAD, b.i0 + b.w + 3, b.j0 + b.h, 1, sInk, sFill);
         critCells.push(...sInk, ...sFill);
@@ -568,7 +571,7 @@
   }
 
   return { hash, rng, dayOf, addDays, hourOf, topicPath, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
-    GULL, BIRD_INK, GULL_FILL, SAD_R, treeScale,
+    GULL, BIRD_INK, GULL_FILL, SAD_R, sadR, treeScale,
     STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, FIRST_HEIGHT, YOUNG_P, youngScale, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
     derive, layout, walk, parts, svg };
 }));
