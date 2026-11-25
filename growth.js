@@ -90,13 +90,6 @@
   const BEND = 0.08;
   const LEAN = 14 * DEG;
   const MAX_TILT = 62 * DEG;
-  // Spread (Finbar, 2026-11-24): the tree grows outwards with the papers read. The spread s = sqrt(n / WIDE_N) of n
-  // papers (at most 1) adds s WIDE_LEAN to every branch's lean and s WIDE_OFF to its angle off its parent, so a crown
-  // of a hundred papers leans out at 55 degrees. derive's `ground` (metres) caps the crown's width: the spread is
-  // eased back until the tree fits.
-  const WIDE_N = 100;
-  const WIDE_LEAN = 41 * DEG;
-  const WIDE_OFF = 15 * DEG;
   const ATTACH = { trunk: [0.12, 0.92], branch: [0.25, 0.92] };
   // Width: Leonardo's rule (area is conserved through each fork; Eloy 2011, "Leonardo's rule, self-similarity,
   // and wind-induced stresses in trees", Phys. Rev. Lett. 107, 258101, doi:10.1103/PhysRevLett.107.258101): a
@@ -136,7 +129,7 @@
 
   // Places every chain (parents before children): each segment's ends (x0, y0, x1, y1), and each branch's
   // `at`, the node of its parent it leaves from.
-  function geometry(order, seed, spread = 0) {
+  function geometry(order, seed) {
     const byId = new Map(order.map((c) => [c.id, c]));
     for (const c of order) {
       let x = 0, y = 0, ang = UP, side = 0, target = UP;
@@ -153,9 +146,9 @@
         x = g.x1; y = g.y1;
         if (p.firstSide == null) p.firstSide = hash(seed, 'side', p.id) % 2 ? 1 : -1;
         side = c.rank % 2 ? -p.firstSide : p.firstSide;
-        const off = (p.parent ? (18 + 18 * c.off) * DEG : (25 + 20 * c.off) * DEG) + spread * WIDE_OFF;
+        const off = p.parent ? (18 + 18 * c.off) * DEG : (25 + 20 * c.off) * DEG;
         ang = UP + Math.max(-MAX_TILT, Math.min(MAX_TILT, g.ang - UP + side * off));
-        target = UP + side * (LEAN + spread * WIDE_LEAN);
+        target = UP + side * LEAN;
       }
       c.side = side;
       c.segs.forEach((g, i) => {
@@ -174,14 +167,14 @@
   // entries: Mine entries ({id, kind, done, done_at, updated, created, deadline, title, zotero: {name}}; write
   // entries also {draft, submitted, submitted_at, published, published_at, doi}).
   // treeDoc: {seed, creatures: {<entry id>: {name, animal}}}. cites: {dois: {<doi>: {count}}}. now: Date|ISO.
-  // opts.ground: the width (metres) the crown may spread to, e.g. the ant farm's under it.
-  function derive(entries, treeDoc = {}, cites = {}, now = new Date(), opts = {}) {
+  function derive(entries, treeDoc = {}, cites = {}, now = new Date()) {
     const seed = String(treeDoc.seed || DEFAULT_SEED);
     const today = dayOf(now);
     const papers = [];
     const leaves = [];
     const passed = [];
     const creatures = [];
+    const birds = [];
     const upTo = (iso) => (iso && dayOf(iso) <= today ? iso : null);   // a state reached after `now` is not reached yet
     for (const e of entries || []) {
       if (e.created && dayOf(e.created) > today) continue;               // not made yet at `now`
@@ -195,6 +188,12 @@
         if (doneDay && doneDay <= e.deadline) leaves.push({ id: e.id, day: doneDay, at: doneAt, deadline: e.deadline, title: e.title || '' });
         const pd = addDays(e.deadline, 1);       // a deadline passes when its day ends
         if (pd <= today && (!doneDay || doneDay > e.deadline)) passed.push({ id: e.id, day: pd, deadline: e.deadline, title: e.title || '' });
+        // A deadline not yet met is a bird: `days` to the end of its day (negative once passed, when it turns evil).
+        if (!doneDay) {
+          const [y, m, d] = e.deadline.split('-').map(Number);
+          const days = (new Date(y, m - 1, d + 1) - new Date(now)) / 864e5;
+          birds.push({ id: e.id, deadline: e.deadline, title: e.title || '', kind: e.kind || null, days, evil: days <= 0 });
+        }
       }
       const sub = e.kind === 'write' ? upTo(stateAt(e, 'submitted')) : null;
       if (sub) {
@@ -204,6 +203,7 @@
     }
     const byTime = (a, b) => a.day.localeCompare(b.day) || String(a.at || '').localeCompare(String(b.at || '')) || a.id.localeCompare(b.id);
     [papers, leaves, passed, creatures].forEach((l) => l.sort(byTime));
+    birds.sort((a, b) => a.deadline.localeCompare(b.deadline) || a.id.localeCompare(b.id));
 
     // Good days and streaks: consecutive calendar days, each with a paper read and no deadline passing.
     const passedDays = new Set(passed.map((p) => p.day));
@@ -250,18 +250,7 @@
       }
       p.branch = host.id;
     }
-    const spanOf = () => { const xs = order.flatMap((c) => c.segs.flatMap((g) => [g.x0, g.x1])); return Math.max(...xs) - Math.min(...xs); };
-    let spread = Math.min(1, Math.sqrt(papers.length / WIDE_N));
-    geometry(order, seed, spread);
-    if (opts.ground > 0 && youngScale(grown) * spanOf() > opts.ground) {
-      let lo = 0, hi = spread;                               // the widest spread that fits the ground
-      for (let k = 0; k < 12; k++) {
-        spread = (lo + hi) / 2;
-        geometry(order, seed, spread);
-        if (youngScale(grown) * spanOf() > opts.ground) hi = spread; else lo = spread;
-      }
-      geometry(order, seed, spread = lo);
-    }
+    geometry(order, seed);
     // Widths: growth carried beyond each node (the chain's own later segments plus every branch leaving there
     // or later), so every segment tapers from its base to its tip.
     const total = new Map();
@@ -321,7 +310,7 @@
     const lastGood = goodDays[goodDays.length - 1];
     const streakNow = lastGood && (lastGood === today || lastGood === addDays(today, -1)) ? streak.get(lastGood) : 0;
     const scale = youngScale(grown);
-    return { seed, today, papers, leaves, passed, creatures, goodDays, events, chains: order, grown, scale, spread,
+    return { seed, today, papers, leaves, passed, creatures, birds, goodDays, events, chains: order, grown, scale,
       height: scale * Math.max(...order.flatMap((c) => c.segs.map((g) => Math.max(g.y0, g.y1)))),
       streak: streakNow, mult: multOf(streakNow), multToday: multOfDay(today),
       stage: stageOf(grown) };
@@ -361,7 +350,14 @@
       });
     }
     const graph = { start: 'trunk#0', nodes, adj: new Map([...adj].map(([k, v]) => [k, [...v].sort()])) };
-    return { leaves, graph };
+    // Birds land on a node in the crown: the top quarter of the walk graph's nodes, one chosen per deadline.
+    const top = [...nodes].sort((a, b) => b[1].y - a[1].y || a[0].localeCompare(b[0]));
+    const crown = top.slice(0, Math.max(1, Math.ceil(top.length / 4)));
+    const birds = (state.birds || []).map((b) => {
+      const [node, p] = crown[Math.floor(rng(state.seed, 'bird', b.id)() * crown.length)];
+      return { id: b.id, node, x: p.x, y: p.y };
+    });
+    return { leaves, graph, birds };
   }
 
   // ---------------------------------------------------------------- the hourly walk
@@ -392,6 +388,14 @@
   const INK = '#3b2a1c', PAPER0 = '#fff', SCALE = '#b8b8b8';
   // Leaves: a diamond outline of cells, 3 wide (5 at a 1.6x multiplier or more).
   const LEAF = [[' # ', '#o#', ' # '], ['  #  ', ' #o# ', '#ooo#', ' #o# ', '  #  ']];
+
+  // Deadline birds (scene.js draws the flying ones): a gull flying in; a passed deadline's crow, red-eyed, perched.
+  const GULL = ['##     ##', ' ##   ## ', '  ## ##  ', '   #o#   '];
+  const CROW = ['  ##    ', ' #o##   ', '#####   ', ' #######', '  ######', '  #  #  '];
+  const BIRD_INK = '#3d3a40', GULL_FILL = '#e8e4d8', CROW_INK = '#26222a', CROW_EYE = '#c8553d';
+  // A sad face beside each animal within sadR of a crow: a quarter of the tree's height, at least SAD_R tree units.
+  const SAD = [' ##### ', '#ooooo#', '#o#o#o#', '#ooooo#', '#oo#oo#', '#o#o#o#', ' ##### '];
+  const SAD_INK = '#4f6a86', SAD_FILL = '#dbe4ee', SAD_R = 8;
 
   // Cells (integer i, j; j up) -> SVG rects, one per horizontal run.
   function runs(cells, fill, extra = '') {
@@ -429,15 +433,20 @@
   // The tree as an SVG string, drawn in CELL-sized blocks, with a height scale on its left.
   // opts: {hour, mini (no names, no tap targets), branchNames (each collection's last name at its branch tip)}. Tap targets: data-k="seg" with data-i = the paper's entry id
   // and data-b = its branch ('trunk' or the collection name), data-k="branch" on a collection's stub, and
-  // data-k="creature" with data-i = the Write entry id. Leaves have none.
+  // data-k="creature" with data-i = the Write entry id, and data-k="bird" (a passed deadline's crow) with data-i = its
+  // entry id. Leaves have none. An animal within sadR of a crow has a sad face beside it (<g class="sad">).
   // The tree's drawing without its <svg> wrapper: {body, hits, x0, y0, w, h} (hits: its tap targets), in tree units with y down (the ground at
   // y = 0, the tree above it at negative y). opts.scene (for scene.js): no background and no ground, labels haloed
   // in opts.paper, and the height scale at x = opts.scaleX (true tree units) with its labels to its right.
   // A young tree (state.scale < 1) is drawn at full size and scaled down as a whole: x0, y0, w, h and the hits
   // are in true tree units, and the height scale is labelled in true metres. With nothing grown nothing is drawn but
   // the scale, in the first paper's frame.
+  // How far a crow's torment reaches (tree units), from layout(): a quarter of the tree's height, at least SAD_R.
+  const sadR = (L) => Math.max(SAD_R, Math.max(...[...L.graph.nodes.values()].map((p) => p.y)) / 4);
+  // The factor a tree is drawn at (a young one smaller; with nothing grown, the first paper's).
+  const treeScale = (state) => (state.scale == null ? 1 : state.scale > 0 ? state.scale : youngScale(1));
   function parts(state, opts = {}) {
-    const k = state.scale == null ? 1 : state.scale > 0 ? state.scale : youngScale(1);
+    const k = treeScale(state);
     const L = layout(state);
     const PAPER = opts.paper || PAPER0;
     const hour = opts.hour != null ? opts.hour : hourOf(Date.now());
@@ -477,13 +486,30 @@
       const half = Math.ceil(text.length * 0.6 * size / 2);
       labelCells.push(`${Math.floor(cx - half)},${Math.floor(base)}`, `${Math.ceil(cx + half)},${Math.ceil(base + size)}`);
     };
-    let labels = '', critters = '';
+    let labels = '', critters = '', over = '';              // over: crows and sad faces, drawn over the animals
+    // Crows: each passed deadline's bird perches where it landed. Animals near one are sad.
+    const crows = L.birds.filter((b, n) => state.birds[n].evil);
+    const reach = sadR(L);
+    crows.forEach((b) => {
+      const [i, j] = cell(b.x, b.y).split(',').map(Number);
+      const ink = new Set(), eye = new Set();
+      const s = stamp(CROW, i, j + 1, 1, ink, eye);
+      critCells.push(...ink, ...eye);
+      over += `<g class="crow">${runs(eye, CROW_EYE)}${runs(ink, CROW_INK)}</g>`;
+      if (!opts.mini) hits.push(`<rect x="${f(s.i0 * CELL)}" y="${f(-(s.j0 + s.h) * CELL)}" width="${f(s.w * CELL)}" height="${f(s.h * CELL)}" data-k="bird" data-i="${esc(b.id)}"/>`);
+    });
     state.creatures.forEach((c) => {
       const { node } = walk(L.graph, state.seed, c.id, c.startHour, hour);
       const p = L.graph.nodes.get(node);
       const [i, j] = cell(p.x, p.y).split(',').map(Number);
       const ink = new Set(), fill = new Set();
       const b = stamp(c.sprite, i, j + 1, c.size, ink, fill);
+      if (crows.some((w) => Math.hypot(w.x - p.x, w.y - p.y) <= reach)) {
+        const sInk = new Set(), sFill = new Set();
+        stamp(SAD, b.i0 + b.w + 3, b.j0 + b.h, 1, sInk, sFill);
+        critCells.push(...sInk, ...sFill);
+        over += `<g class="sad" data-i="${esc(c.id)}">${runs(sFill, SAD_FILL)}${runs(sInk, SAD_INK)}</g>`;
+      }
       critCells.push(...ink, ...fill);
       critters += runs(fill, c.fill) + runs(ink, c.ink);
       if (opts.mini) return;
@@ -501,7 +527,7 @@
           + ` text-anchor="middle" fill="#666" stroke="${PAPER}" stroke-width="${f(CELL * 0.6)}" paint-order="stroke">${esc(c.id.split(' / ').pop())}</text>`;
       }
     }
-    if (!(state.scale > 0) && state.scale != null) { wood.clear(); leafInk.clear(); leafPaper.clear(); critCells.length = 0; labelCells.length = 0; critters = ''; labels = ''; hits.length = 0; }
+    if (!(state.scale > 0) && state.scale != null) { wood.clear(); leafInk.clear(); leafPaper.clear(); critCells.length = 0; labelCells.length = 0; critters = ''; over = ''; labels = ''; hits.length = 0; }
     const all = [...wood, ...leafInk, ...leafPaper, ...critCells, ...labelCells, '0,0'].map((c) => c.split(',').map(Number));
     const is = all.map((c) => c[0]), js = all.map((c) => c[1]);
     const margin = opts.mini ? 2 : 4;
@@ -532,7 +558,7 @@
     const inner = (opts.scene ? '' : `<rect x="${f(x0)}" y="${f(y0)}" width="${f(w)}" height="${f(h)}" fill="${PAPER}"/>`)
       + `<g class="scale">${runs(rule, SCALE)}${scaleText}</g>`
       + runs(ground, GROUND) + runs(wood, WOOD) + runs(leafPaper, LEAF_FILL) + runs(leafInk, LEAF_INK)
-      + critters + labels;
+      + critters + over + labels;
     const wrap = (s) => (k === 1 ? s : `<g transform="scale(${k})">${s}</g>`);
     const hitG = opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${wrap(hits.join(''))}</g>`;
     return { body: wrap(inner), hits: hitG, x0: x0 * k, y0: y0 * k, w: w * k, h: h * k };
@@ -545,6 +571,7 @@
   }
 
   return { hash, rng, dayOf, addDays, hourOf, topicPath, multOf, trunkHeight, stageOf, STAGES, ANIMALS,
-    STREAK_STEP, MAX_MULT, WIDE_N, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, FIRST_HEIGHT, YOUNG_P, youngScale, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
+    GULL, BIRD_INK, GULL_FILL, SAD_R, sadR, treeScale,
+    STREAK_STEP, MAX_MULT, SEG, SEG_HALF, STUB, TRUNK_BASE, TRUNK_K, SEEDLING, SAPLING, MIN_FRAME, FIRST_HEIGHT, YOUNG_P, youngScale, BEND, LEAN, WIDTH_K, DEFAULT_SEED, CELL,
     derive, layout, walk, parts, svg };
 }));

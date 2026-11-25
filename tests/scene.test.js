@@ -125,3 +125,61 @@ test('anthomes are about 1 m on the tree\'s height scale (Finbar, C-0007), and L
   assert.ok(sc.L.hills.filter((x) => x.mound).every((h) => m(h.mound.h) <= 1), 'mounds under 1 m');
   assert.ok(!sc.svg.includes('#b89b55'), 'no crown');
 });
+
+test('deadline birds fly in from beside the food pile: further for later deadlines, bigger when near, a dashed line to where they land', () => {
+  const due = (id, deadline) => ({ id, kind: 'task', created: '2026-12-01T09:00:00', deadline, title: id });
+  const st = G.derive([...EX.history(365).entries, due('d1', '2026-12-11'), due('d10', '2026-12-20'), due('d90', '2027-03-10'), due('gone', '2026-12-05')], {}, {}, NOW);
+  const sc = S.scene(st, AGENTS);
+  const B = Object.fromEntries(S.birds(st, sc.L, sc.L.gap.cx).filter((b) => /^(d\d+|gone)$/.test(b.id)).map((b) => [b.id, b]));
+  assert.deepEqual(Object.keys(B).sort(), ['d1', 'd10', 'd90'], 'a passed deadline does not fly');
+  const pile = { x: sc.L.food.cx, y: sc.L.surface - 3 };
+  const dist = (b) => Math.hypot(b.x - pile.x, b.y - pile.y);
+  assert.ok(Math.abs(dist(B.d1) - (S.BIRD_NEAR + S.BIRD_PER_DAY * 1.5)) < 1e-9);
+  assert.ok(Math.abs(dist(B.d10) - (S.BIRD_NEAR + S.BIRD_PER_DAY * 10.5)) < 1e-9);
+  assert.ok(Math.abs(dist(B.d90) - (S.BIRD_NEAR + S.BIRD_PER_DAY * S.BIRD_DAYS)) < 1e-9, 'counted up to BIRD_DAYS');
+  assert.ok(B.d1.size > B.d10.size && B.d10.size > B.d90.size && B.d90.size === S.BIRD_SMALL);
+  for (const b of Object.values(B)) {
+    assert.ok(b.x < pile.x && b.y < pile.y, `${b.id} up and left of the pile`);
+    assert.ok(within(b, sc.box), `${b.id} inside the scene`);
+    const lb = G.layout(st).birds.find((x) => x.id === b.id), k = G.treeScale(st);
+    assert.deepEqual(b.land, { x: sc.L.gap.cx + S.SCALE * k * lb.x, y: sc.L.surface - S.SCALE * k * lb.y });
+    assert.match(sc.svg, new RegExp(`<g class="bird" data-i="${b.id}"><line [^>]*x2="${Math.round(b.land.x * 100) / 100}" y2="${Math.round(b.land.y * 100) / 100}"[^>]*stroke-dasharray`));
+    assert.match(sc.svg, new RegExp(`<g class="hits">.*data-k="bird" data-i="${b.id}"`));
+  }
+  assert.match(sc.svg, /data-k="bird" data-i="gone"/, 'the passed one perches on the tree');
+  // At night the birds are shaded with the rest of the scene, and their tap targets stay above the shade.
+  const dark = S.scene(st, AGENTS, { night: { woken: [] } }), at = (x) => dark.svg.indexOf(x);
+  assert.ok(at('<g class="birds">') < at('nightshade') && at('nightshade') < dark.svg.lastIndexOf('data-k="bird"'));
+});
+
+test('night (usage held): a dark sky with stars and a moon in the default view, the scene shaded, z\'s over the shade', () => {
+  const day = S.scene(young(), AGENTS);
+  assert.doesNotMatch(day.svg, /nightshade|class="zz"|data-still|class="stars"/);
+  const sc = S.scene(young(), AGENTS, { night: { woken: [] } });
+  assert.match(sc.svg, /class="scene night"/);
+  assert.match(sc.svg, new RegExp(`fill="${S.NIGHT.sky}"`));
+  const stars = [...sc.svg.matchAll(/<rect x="([-\d.]+)" y="([-\d.]+)" width="0\.[35]" height="0\.[35]" fill="#fff6d8"/g)]
+    .map((m) => ({ x: +m[1], y: +m[2] }));
+  assert.ok(stars.filter((p) => within(p, sc.home)).length >= 20, 'stars in the default view');
+  const moon = /<g class="moon"><circle cx="([-\d.]+)" cy="([-\d.]+)"/.exec(sc.svg);
+  assert.ok(within({ x: +moon[1], y: +moon[2] }, sc.home) && +moon[2] < sc.L.surface, 'the moon in the default view\'s sky');
+  // The shade comes after the tree and the farm, the z's after the shade, the tree's tap targets last; taps pass the shade.
+  const at = (s) => sc.svg.indexOf(s);
+  assert.ok(at('<g class="farm">') < at('nightshade') && at('nightshade') < at('class="zz"') && at('class="zz"') < sc.svg.lastIndexOf('<g class="tree"'));
+  assert.match(sc.svg, /class="nightshade"[^>]*pointer-events="none"/);
+  // Every anthill sleeps: one set of z's per hill (LOOP's pile too), every ant still.
+  assert.equal((sc.svg.match(/class="zz"/g) || []).length, sc.L.hills.length);
+  assert.equal((sc.svg.match(/class="ant"/g) || []).length, (sc.svg.match(/class="ant"[^>]*data-still="1"/g) || []).length);
+});
+
+test('night: an urgent message wakes only that agent while its session works; it sleeps again when idle', () => {
+  const woke = S.scene(young(), AGENTS, { night: { woken: ['HIGH-a', 'MED-c'] } });   // MED-c stalled: asleep again
+  const hill = (sc, name) => sc.L.hills.findIndex((h) => h.name === name);
+  const zzOf = (sc, name) => sc.svg.includes(`class="zz" data-h="${hill(sc, name)}"`);
+  assert.ok(!zzOf(woke, 'HIGH-a') && zzOf(woke, 'MED-c') && zzOf(woke, 'LOW-d') && zzOf(woke, 'LOOP'));
+  const ants = (sc, name) => [...sc.svg.matchAll(new RegExp(`<g class="ant" data-h="${hill(sc, name)}"[^>]*>`, 'g'))].map((m) => m[0]);
+  assert.ok(ants(woke, 'HIGH-a').length > 0 && ants(woke, 'HIGH-a').every((a) => !a.includes('data-still')), 'the woken hill\'s ants move');
+  assert.ok(ants(woke, 'LOW-d').length > 0 && ants(woke, 'LOW-d').every((a) => a.includes('data-still')), 'a working, unwoken hill\'s ants stand still');
+  const idle = S.scene(young(), AGENTS.map((a) => (a.name === 'HIGH-a' ? { ...a, state: 'idle' } : a)), { night: { woken: ['HIGH-a'] } });
+  assert.ok(zzOf(idle, 'HIGH-a'), 'woken but idle: asleep again');
+});

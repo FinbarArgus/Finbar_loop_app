@@ -786,6 +786,21 @@
       el('div', { class: 'who' }, 'The reviewer predicts each bundled PR\'s verdict before you answer; nothing is accepted for you.'));
   }
 
+  // "Message <agent>": typed into its session by the loop. Used on Status and in the Tree tab (an anthome's info).
+  // Its draft is keyed by the agent's name, so one half-written message shows in both places.
+  function messageBox(r, open) {
+    return el('details', { class: 'detail amsg', 'data-agent': r.name, open: open || draftGet(`agent.${r.name}.message`) ? true : null },
+      el('summary', {}, `Message ${r.name}`),
+      composer({
+        placeholder: 'Guide this agent. It is typed into its session within seconds (or restarts it). Images welcome.',
+        enterSends: false,
+        sendLabel: 'Send',
+        urgent: true,
+        draft: `agent.${r.name}.message`,
+        onSend: async (text, imgs, o) => { await send('messages', r.job, { kind: 'message', to: r.name, text, ...(o.urgent ? { urgent: true } : {}) }, imgs); },
+      }));
+  }
+
   async function showStatus() {
     await useTree();
     const [st, plog, triage] = await Promise.all([getJSON('state/status.json'),
@@ -818,26 +833,74 @@
         r.items && r.items.length ? el('div', { class: 'alinks' }, r.state === 'blocked' ? 'Waiting on: ' : 'Will need (soon blocking): ', r.items.map((id) =>
           el('a', { href: `#/item/${id}`, class: 'alink' }, el('b', {}, id), titles.has(id) ? ` ${titles.get(id).slice(0, 70)}` : ''))) : null,
         r.why && !(r.items && r.items.length) ? el('div', { class: 'awhy' }, r.why) : null,
+        r.permission ? el('a', { href: '#/permission', class: 'alink permlink' }, 'Approve or deny it in Permission →') : null,
         r.working_on ? el('div', { class: 'adetail' }, el('span', { class: 'who' }, r.state === 'working' ? 'Working on: ' : 'Last: '), r.working_on) : null,
         el('div', { class: 'who' }, r.running ? '' : 'not running · ', r.updated ? `last active ${age(r.updated)} ago` : ''),
         (r.recent || []).length ? el('details', { class: 'arecent' }, el('summary', {}, `Its entries (${r.recent.length})`),
           el('div', { class: 'alinks' }, r.recent.map((x) => el('a', { href: `#/item/${x.id}`, class: 'alink' + (x.blocking_now ? ' blocking' : '') },
             el('b', {}, x.id), ` ${x.title.slice(0, 70)} `,
             el('span', { class: 'who' }, `${{ question: 'question', content: 'content', pr: 'review' }[x.tab] || x.tab}${['answered', 'closed'].includes(x.status) ? ' · ' + x.status : ''}`))))) : null,
-        el('details', { class: 'detail amsg', open: draftGet(`agent.${r.name}.message`) ? true : null }, el('summary', {}, `Message ${r.name}`),
-          composer({
-            placeholder: 'Guide this agent. It is typed into its session within seconds (or restarts it). Images welcome.',
-            enterSends: false,
-            sendLabel: 'Send',
-            urgent: true,
-            draft: `agent.${r.name}.message`,
-            onSend: async (text, imgs, o) => { await send('messages', r.job, { kind: 'message', to: r.name, text, ...(o.urgent ? { urgent: true } : {}) }, imgs); },
-          }))))
+        messageBox(r)))
         : el('p', { class: 'empty' }, 'None.')));
     await loadMine().catch(() => {});
     main().replaceChildren(deadlinesCard(), usage, ...sections, permissionsCard(plog), triageCard(triage),
       el('p', { class: 'foot' }, `Updated ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
     setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/status')) await showStatus(); }, 60_000);
+  }
+
+  // Permission: every session waiting on an approval. Hook prompts are `permission` items (Approve/Deny typed into
+  // the dialog); a usage-guard denial (status row permission.kind 'guard') is approved by sending the session
+  // "approve", which the guard counts as the approval, and the session retries the call; other dialogs are
+  // answered in the session.
+  function guardCard(r) {
+    const p = r.permission;
+    const msg = el('div', { class: 'status' });
+    const pick = (text, done) => async () => {
+      [...btns.children].forEach((b) => { b.disabled = true; });
+      msg.textContent = 'Sending…';
+      try {
+        await send('messages', r.job, { kind: 'message', to: r.name, text, urgent: true }, []);
+        msg.textContent = `${done}: sent to ${r.name}, typed into its session within seconds.`;
+      } catch (e) {
+        msg.textContent = `Not sent: ${e.message || e}`;
+        [...btns.children].forEach((b) => { b.disabled = false; });
+      }
+    };
+    const btns = el('div', { class: 'permbtns' },
+      el('button', { class: 'perm-yes', onclick: pick('approve', 'Approved') }, 'Approve'),
+      el('button', { class: 'perm-no', onclick: pick(`deny: do not run that ${p.tool} call; go on without it, or ask in LOOP.`, 'Denied') }, 'Deny'));
+    return el('section', { class: 'status-card permwait', 'data-agent': r.name },
+      el('div', { class: 'arow' }, el('span', { class: 'badge perm' }, 'usage guard'), roleDot(r.name), el('b', {}, r.name),
+        el('span', { class: 'who' }, ` · ${p.tool}`), el('span', { class: 'grow' }), el('span', { class: 'who' }, p.since ? `waiting ${age(p.since)}` : '')),
+      el('code', { class: 'ptarget' }, p.target.length > 600 ? p.target.slice(0, 600) + '…' : p.target),
+      el('div', { class: 'awhy' }, p.why), btns, msg);
+  }
+
+  async function showPermission() {
+    await useTree();
+    const [st] = await Promise.all([getJSON('state/status.json'), refreshIndex()]);
+    const asks = await Promise.all(index.items.filter((x) => isPermission(x) && x.status === 'open')
+      .map((x) => getJSON(`items/${x.id}/item.json`).catch(() => null)));
+    const items = asks.filter(Boolean);
+    const rows = (st.agents || []).filter((r) => r.permission);
+    const asked = (r) => items.some((it) => it.from.job === r.job || it.from.name === r.name);
+    const dialogs = rows.filter((r) => r.permission.kind === 'dialog' && !asked(r));
+    const guards = rows.filter((r) => r.permission.kind === 'guard');
+    const itemCard = (it) => el('section', { class: 'status-card permwait', 'data-item': it.id },
+      el('div', { class: 'arow' }, el('span', { class: 'badge perm' }, 'prompt'), roleDot(it.from.name), el('b', {}, it.from.name),
+        el('span', { class: 'who' }, ` · ${it.permission.tool}`), el('span', { class: 'grow' }), el('span', { class: 'who' }, `waiting ${age(it.created)}`)),
+      el('code', { class: 'ptarget' }, it.permission.target),
+      el('div', { class: 'awhy' }, `Flagged because: ${it.permission.reason}`, el('a', { href: `#/item/${it.id}`, class: 'alink' }, ` ${it.id}`)),
+      permissionBar(it, showPermission));
+    const dialogCard = (r) => el('section', { class: 'status-card permwait', 'data-agent': r.name },
+      el('div', { class: 'arow' }, el('span', { class: 'badge perm' }, 'dialog'), roleDot(r.name), el('b', {}, r.name),
+        el('span', { class: 'grow' }), el('span', { class: 'who' }, r.updated ? `waiting ${age(r.updated)}` : '')),
+      el('div', { class: 'awhy' }, 'At a permission prompt the loop did not post: answer it in the session.'));
+    const cards = [...items.map(itemCard), ...guards.map(guardCard), ...dialogs.map(dialogCard)];
+    main().replaceChildren(el('h2', { class: 'permh' }, 'Waiting for permission ', el('span', { class: 'n' }, String(cards.length))),
+      ...(cards.length ? cards : [el('p', { class: 'empty' }, 'No session is waiting for an approval.')]),
+      el('p', { class: 'foot' }, `Status updated ${new Date(st.generated).toLocaleString()}`));
+    setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/permission')) await showPermission(); }, 60_000);
   }
 
   // ------------------------------------------------------------ Manual: Read, Write, Students, Other
@@ -1331,9 +1394,7 @@
   // entries bring animals. The tree is derived from Manual every time; only names and animals are stored.
 
   const G = window.LoopGrowth;
-  // The crown spreads at most over the ant farm under it (the last Status's agents).
-  const growthState = () => G.derive(mine.entries, growthDocs.tree, growthDocs.cites, new Date(),
-    { ground: lastStatus ? H.layout(lastStatus.agents || []).width / SC.SCALE : null });
+  const growthState = () => G.derive(mine.entries, growthDocs.tree, growthDocs.cites, new Date());
   const dayText = (d) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const collName = (b) => (b === 'trunk' ? 'no collection (the trunk)' : b);
   const metres = (h) => (h < 1 ? `${Math.round(h * 100)} cm` : `${h < 10 ? h.toFixed(1) : Math.round(h)} m`);
@@ -1349,6 +1410,15 @@
         el('div', { class: 'who' }, `Read ${dayText(p.day)} · ${p.mult.toFixed(1)}x`));
     }
     if (k === 'branch') return el('div', {}, el('b', {}, id), el('div', { class: 'who' }, 'A collection with papers only in its subcollections so far.'));
+    if (k === 'bird') {
+      const bd = (state.birds || []).find((x) => x.id === id);
+      if (!bd) return null;
+      const due = dueInfo(bd.deadline);
+      return el('div', {}, el('b', {}, bd.title || 'untitled'), el('div', {}, due.text),
+        el('div', { class: 'who' }, bd.evil ? 'Its deadline passed: the crow sits in the tree and saddens the animals near it until the entry is done.'
+          : 'A deadline flying in: it comes closer and grows as the day nears, and lands at the end of the dashed line.'),
+        bd.kind ? el('a', { href: `#/manual/${bd.kind}` }, 'Open in Manual') : null);
+    }
     if (k === 'creature') {
       const c = state.creatures.find((x) => x.id === id);
       if (!c) return null;
@@ -1439,13 +1509,15 @@
   const usageLine = (u) => (!u ? null : el('div', { class: 'ausage' + (u.stale ? ' stale' : '') },
     u.stale ? `usage unknown (last: weekly usage ${Math.round(u.pct)}%)` : `weekly usage ${Math.round(u.pct)}%`,
     u.resets ? ` · resets ${String(u.resets).replace(/\s*\(.*\)$/, '').replace(',', '')}` : ''));
-  function hillInfo(hl, L) {
+  function hillInfo(hl, L, tapped) {
     const a = hl.agent;
     const titles = new Map(index.items.map((x) => [x.id, x.title]));
     const link = (id, title) => el('a', { href: `#/item/${id}`, class: 'alink' }, el('b', {}, id), title ? ` ${String(title).slice(0, 80)}` : '');
     return el('div', {},
       el('div', { class: 'arow' }, el('b', {}, a.name), el('span', { class: `badge hmood ${hl.mood}` }, MOOD_TEXT[hl.mood]),
         el('span', { class: 'who' }, hl.kind === 'food' ? ' · the food source (LOOP)' : ` · ${H.ROLE_TEXT[hl.role]} anthome`)),
+      hl.asleep != null ? el('div', { class: 'who hsleep' }, hl.asleep ? 'Asleep: the usage hold is on until the reset.'
+        : 'Awake: woken by an urgent message, while its session works.') : null,
       hl.kind === 'food' ? usageLine(foodUsage) : null,
       hl.kind === 'food' ? sessionLine() : null,
       L ? usageInfo(hl, L) : null,
@@ -1455,7 +1527,8 @@
       a.working_on ? el('div', { class: 'adetail' }, el('span', { class: 'who' }, hl.mood === 'working' ? 'Working on: ' : 'Last: '), a.working_on) : null,
       (a.recent || []).length ? el('details', { class: 'arecent' }, el('summary', {}, `Its entries (${a.recent.length})`),
         el('div', { class: 'alinks' }, a.recent.map((x) => link(x.id, x.title)))) : null,
-      el('div', { class: 'who' }, a.updated ? `last active ${age(a.updated)} ago · ` : '', el('a', { href: '#/status' }, 'message it on Status')));
+      el('div', { class: 'who' }, a.updated ? `last active ${age(a.updated)} ago` : ''),
+      a.job ? messageBox(a, tapped) : null);
   }
 
   // A path's messages, newest first, one at a time: ◀ steps back to older ones, ▶ forward again.
@@ -1482,7 +1555,7 @@
   function animateAnts(view, hills, paths) {
     cancelAnimationFrame(hillsFrame);
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const ants = [...view.querySelectorAll('.ant')].map((g) => ({ g, hl: g.dataset.p != null ? paths[+g.dataset.p] : hills[+g.dataset.h], k: +g.dataset.a }));
+    const ants = [...view.querySelectorAll('.ant:not([data-still])')].map((g) => ({ g, hl: g.dataset.p != null ? paths[+g.dataset.p] : hills[+g.dataset.h], k: +g.dataset.a }));
     if (!ants.length) return;
     let last = 0;
     const step = (now) => {
@@ -1503,6 +1576,7 @@
   // It opens on the anthills and the trunk's foot; the tree is above, a drag (or "Whole tree") away.
 
   const SC = window.LoopScene;
+  let treePinnedAgent = null;                   // the agent whose anthome was tapped last (kept across redraws)
   let sceneCam = null, sceneDraw = null;
   let sdrag = null, sdragged = false;           // a mouse drag in progress, and whether the last one moved
   window.addEventListener('pointermove', (ev) => {
@@ -1626,18 +1700,21 @@
     const agents = (st && st.agents) || [];
     const state = growthState();
     const redraw = () => showTree();
-    const hint = 'Tap or hover a branch, an animal, an anthome (its usage), the food in it (its focus) or a tunnel (its messages).';
+    const hint = 'Tap or hover a branch, an animal, a bird (a deadline), an anthome (its usage), the food in it (its focus) or a tunnel (its messages).';
     const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, hint));
     const names = safeGet('loop.tree.names') === '1';
     // LOOP's food pile is the weekly usage left (the usage guard's figure, published by `loop status`); faded when stale.
     foodUsage = gu && gu.pct != null ? { pct: gu.pct, resets: gu.resets, stale: Date.now() / 1000 - gu.at > 2 * 3600 } : null;
-    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: foodUsage });
+    // Night while the usage hold is on (state/usage.json held): every anthill asleep but those woken by an urgent message.
+    const night = gu && gu.held ? { woken: gu.woken || [] } : null;
+    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: foodUsage, night });
     const L = sc.L;
     // Hover or tap: the info line. Every segment of the same paper lights up. A tap pins it, so the mouse can cross
     // the scene to its buttons; a tap on open ground unpins it.
     let shown = null, pinned = false;
     const show = (t, tapped) => {
       if (pinned && !tapped) return;
+      if (tapped) treePinnedAgent = t && t.dataset.k === 'hill' ? (L.hills[+t.dataset.i] || {}).agent?.name || null : null;
       if (!t && tapped) {                           // a tap on open ground clears the info line
         shown = null; pinned = false;
         viewer.view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
@@ -1647,9 +1724,9 @@
       }
       if (!t || (t === shown && !tapped)) return;
       const k = t.dataset.k, i = t.dataset.i;
-      const tree_ = ['seg', 'branch', 'creature'].includes(k);
+      const tree_ = ['seg', 'branch', 'creature', 'bird'].includes(k);
       const body = tree_ ? growthInfo(state, k, i, t.dataset.b)
-        : k === 'path' ? pathInfo(L.paths[+i]) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L) : null;
+        : k === 'path' ? pathInfo(L.paths[+i]) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L, !!tapped) : null;
       if (!body) return;
       shown = t; pinned = !!tapped;
       viewer.view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
@@ -1675,7 +1752,9 @@
       el('span', {}, el('b', {}, 'Size'), ' tokens since the weekly reset'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
       el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Dark'), ' stalled'),
       el('span', {}, el('b', {}, 'Fruit'), ' LOOP, at the tree\'s foot; in a home, its focus'),
-      el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'));
+      el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'),
+      el('span', {}, el('b', {}, 'Birds'), ' deadlines: nearer and bigger as they come due; a passed one is a crow in the tree'),
+      night ? el('span', {}, el('b', {}, 'Night'), ' usage held until the reset: z\'s asleep; an urgent message wakes its agent') : null);
     const log = el('ol', { class: 'glog' }, state.events.slice(0, 40).map(growthEvent));
     const more = state.events.length > 40 ? el('button', { class: 'link', onclick: () => {
       log.replaceChildren(...state.events.map(growthEvent)); more.remove();
@@ -1693,8 +1772,11 @@
       el('section', { class: 'gloghead' }, el('h3', {}, 'Growth'), state.events.length ? log : el('p', { class: 'empty' }, 'Nothing has grown yet: tick a Read paper done.'), more),
       st ? el('p', { class: 'foot' }, `Agents as of ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`) : null);
     viewer.start();
+    // An anthome tapped before this redraw (a poll, coming back to the tab) stays open, with its message box.
+    const again = treePinnedAgent ? L.hills.findIndex((h) => h.agent && h.agent.name === treePinnedAgent) : -1;
+    if (again >= 0) show(viewer.view.querySelector(`.hits [data-k="hill"][data-i="${again}"]`), true);
     animateAnts(viewer.view, L.hills, L.paths);
-    const key = () => [...tree.sha].filter(([x]) => x.startsWith('personal/') || ['state/citations.json', 'state/status.json', 'state/messages.json'].includes(x)).join();
+    const key = () => [...tree.sha].filter(([x]) => x.startsWith('personal/') || ['state/citations.json', 'state/status.json', 'state/messages.json', 'state/usage.json'].includes(x)).join();
     const before = key();
     setPoll(async () => {
       await loadTree();
@@ -1788,10 +1870,11 @@
     if (!quiet) justSent = null;
     treeWasCached = false;
     try {
-      const meta = ['status', 'manual', 'tree'].includes(h[0]) ? h[0] : 'work';
+      const meta = ['status', 'permission', 'manual', 'tree'].includes(h[0]) ? h[0] : 'work';
       document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'status') await showStatus();
+      else if (h[0] === 'permission') await showPermission();
       else if (h[0] === 'manual') await showMine(h[1]);
       else if (h[0] === 'tree') await showTree();
       else if (h[0] === 'settings') showSettings();

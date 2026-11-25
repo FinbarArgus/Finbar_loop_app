@@ -716,6 +716,9 @@ def run(loop_bin, graph, shots):
                     dl = (_dt2.date.today() - _dt2.timedelta(days=days - 1)).isoformat() if k == 0 else None
                     seed(f'read-tree{k}', title=f'Tree paper {k}', done=True, done_at=at, deadline=dl,
                          **({'zotero': {'name': name}} if name else {}))
+                # Deadline birds: one open (a gull flying in), one passed ten days ago and not done (a crow on the tree).
+                seed('bird-soon', kind='other', title='Grant report', deadline=(_dt2.date.today() + _dt2.timedelta(days=5)).isoformat())
+                seed('bird-late', kind='other', title='Referee report', deadline=(_dt2.date.today() - _dt2.timedelta(days=10)).isoformat())
                 page.goto(base + '#/tree')
                 # The tree draws from the cached repo tree first, then redraws once the background reload sees the
                 # papers seeded above: wait for a seeded paper's segment, so the tap lands on the final drawing.
@@ -733,13 +736,28 @@ def run(loop_bin, graph, shots):
                 check(page, 'Paper 1 draft' in info and '12 citations' in info, f'Tree: tapping the animal shows its paper {info!r}', failures)
                 log = page.locator('.glog').inner_text()
                 check(page, 'Tree paper 0' in log and 'a leaf' in log and 'arrived' in log, 'Tree: growth log', failures)
+                birds = page.evaluate("""() => ({
+                  gull: !!document.querySelector('.gview .birds .bird[data-i="bird-soon"] line[stroke-dasharray]'),
+                  crowFlies: !!document.querySelector('.gview .birds .bird[data-i="bird-late"]'),
+                  crow: !!document.querySelector('.gview .tree .hits [data-k="bird"][data-i="bird-late"]'),
+                  legend: [...document.querySelectorAll('.hlegend span')].some((x) => x.textContent.startsWith('Birds')) })""")
+                check(page, birds == {'gull': True, 'crowFlies': False, 'crow': True, 'legend': True},
+                      f'Birds: an open deadline flies in with a dashed line, a passed one perches on the tree {birds}', failures)
+                page.locator('.gview .hits [data-k="bird"][data-i="bird-soon"]').dispatch_event('click')
+                info = page.locator('.ginfo').inner_text()
+                check(page, 'Grant report' in info and 'in 5 d' in info and 'flying in' in info, f'Birds: tapping a bird shows its deadline {info!r}', failures)
+                page.locator('.gview .tree .hits [data-k="bird"][data-i="bird-late"]').dispatch_event('click')
+                info = page.locator('.ginfo').inner_text()
+                check(page, 'Referee report' in info and '10 d overdue' in info and 'crow' in info, f'Birds: tapping the crow shows the passed deadline {info!r}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-birds.png')
                 # Real pointers on the young tree in the default view (Finbar's 1.9 m tree is ~4 px a paper on a phone): a tap (phone)
                 # or a hover (computer) on each paper's own spot selects it, and a point a finger's width off the tree still
                 # picks the tree, not the farm or nothing.
                 page.locator('.gzoom button', has_text='Reset').click()
                 segw = lambda: page.evaluate("""() => Math.max(...[...document.querySelectorAll('.gview .tree .hits [data-k="seg"]')]
                     .map((n) => n.getBoundingClientRect().width))""")
-                page.evaluate("document.querySelectorAll('.gview .tree .hits [data-k=creature]').forEach((n) => n.remove())")  # it covers this tree
+                page.evaluate("document.querySelectorAll('.gview .tree .hits [data-k=creature], .gview .tree .hits [data-k=bird]').forEach((n) => n.remove())")  # they cover this tree
                 v = page.locator('.gview').bounding_box()
                 if label == 'computer':
                     page.mouse.click(v['x'] + 3, v['y'] + 3)                                 # open ground: unpin
@@ -872,6 +890,42 @@ def run(loop_bin, graph, shots):
                 check(page, narrow(), 'status with permissions: no sideways scroll', failures)
                 if shots:
                     page.locator('.perms').screenshot(path=f'{shots}/{label}-permissions.png')
+                # The Permission view (ledger: status rows carry `permission`; patched in for the installed loop): hook
+                # prompts, usage-guard denials (Approve sends the session an urgent "approve") and other dialogs.
+                stp = repo / 'state/status.json'
+                st = json.loads(stp.read_text())
+                for r in st['agents']:
+                    if r['name'] == 'HIGH-session-a':
+                        r['permission'] = {'kind': 'dialog'}          # covered by its permission item: listed once
+                guard = {'kind': 'guard', 'tool': 'Bash', 'target': 'python run_calibration.py --seeds 5',
+                         'why': "USAGE GUARD: weekly usage is at 96%. Running a command needs the user's approval until the weekly reset.",
+                         'since': '2026-11-24T00:00:00Z'}
+                st['agents'] += [
+                    {'name': 'MED-guarded', 'job': 'bbbb0002', 'state': 'blocked', 'why': 'waiting for approval: Bash python run_calibration.py --seeds 5',
+                     'running': True, 'items': [], 'recent': [], 'updated': '2026-11-24T00:00:00Z', 'permission': guard},
+                    {'name': 'LOW-dialog', 'job': 'bbbb0003', 'state': 'blocked', 'why': 'permission prompt in the session',
+                     'running': True, 'items': [], 'recent': [], 'updated': '2026-11-24T00:00:00Z', 'permission': {'kind': 'dialog'}}]
+                stp.write_text(json.dumps(st))
+                page.reload()
+                page.locator('.agent', has_text='MED-guarded').locator('a.permlink').click()
+                page.wait_for_selector('.permwait')
+                check(page, page.locator('.meta a.on').get_attribute('data-meta') == 'permission', 'Permission: its own tab, reached from a blocked Status row', failures)
+                check(page, page.locator(f'.permwait[data-item="{pid}"]').count() == 1
+                      and page.locator('.permwait[data-agent="HIGH-session-a"]').count() == 0,
+                      'Permission: a hook prompt is listed once, as its item', failures)
+                g = page.locator('.permwait[data-agent="MED-guarded"]')
+                check(page, 'python run_calibration.py --seeds 5' in g.inner_text() and 'weekly usage is at 96%' in g.inner_text()
+                      and 'usage guard' in g.inner_text(), 'Permission: a guard denial shows the session, the call and why', failures)
+                check(page, 'answer it in the session' in page.locator('.permwait[data-agent="LOW-dialog"]').inner_text(),
+                      'Permission: another dialog says to answer it in the session', failures)
+                check(page, narrow(), 'permission view: no sideways scroll', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-permission-view.png', full_page=True)
+                g.locator('.perm-yes').click()
+                g.locator('.status', has_text='Approved').wait_for()
+                sent = [json.loads(f.read_text()) for f in (repo / 'messages/bbbb0002').glob('*.json')]
+                check(page, len(sent) == 1 and sent[0]['text'] == 'approve' and sent[0]['urgent'] is True and sent[0]['to'] == 'MED-guarded',
+                      f'Permission: Approve sends the session an urgent "approve" {sent}', failures)
                 # A PR-review bundle (ledger: spec "bundle"; the installed loop may predate it, so it is patched in): a row per PR
                 # with its class and why, Approve all low, Changes with a note, sent as per-PR verdicts; Status shows triage accuracy.
                 sec = lambda k: {'type': 'section', 'id': f'ca-{k}', 'title': f'CA #{k}', 'summary': f'what #{k} does',
@@ -1079,6 +1133,35 @@ def run(loop_bin, graph, shots):
                 new = [json.loads(f.read_text()) for f in set((repo / 'messages' / jb).glob('*.json')) - old]
                 check(page, len(new) == 1 and new[0].get('urgent') is True and new[0]['text'] == 'urgent one',
                       f'Held: a message ticked Urgent is saved as urgent {new}', failures)
+                # Night while held: z's from every anthill, ants still; an urgent message woke HIGH-paper (working), so its
+                # z's stop and its ants move. A woken session that is idle sleeps again (scene.test.js).
+                (repo / 'state/usage.json').write_text(json.dumps({'pct': 95, 'resets': 'Nov 26, 7am (Pacific/Auckland)', 'at': int(time.time()),
+                                                                   'held': True, 'woken': ['HIGH-paper']}))
+                page.goto(base + '#/tree')
+                page.reload()
+                page.wait_for_selector('.gview svg.scene.night .zz')
+                night = page.evaluate("""async () => {
+                  const hills = [...document.querySelectorAll('.gview .farm .hits g[data-k="hill"]')].length;
+                  const zz = [...document.querySelectorAll('.gview .zz')].map((g) => +g.dataset.h);
+                  const pose = () => Object.fromEntries([...document.querySelectorAll('.gview .ant[data-h]')]
+                    .map((g) => [`${g.dataset.h}.${g.dataset.a}`, g.getAttribute('transform')]));
+                  const a = pose();
+                  await new Promise((r) => setTimeout(r, 400));
+                  const b = pose();
+                  const moved = [...new Set(Object.keys(a).filter((k) => a[k] !== b[k]).map((k) => +k.split('.')[0]))];
+                  const ants = [...new Set(Object.keys(a).map((k) => +k.split('.')[0]))];
+                  return { hills, zz, moved, ants, legend: [...document.querySelectorAll('.hlegend span')].some((x) => x.textContent.startsWith('Night')) };
+                }""")
+                awake = [i for i in range(night['hills']) if i not in night['zz']]
+                check(page, len(awake) == 1 and night['moved'] == awake and len(night['ants']) > 1 and night['legend'],
+                      f'Night: z\'s from every anthill but the woken one, whose ants alone move {night}', failures)
+                page.locator(f'.gview .farm .hits g[data-k="hill"][data-i="{awake[0]}"] rect').last.dispatch_event('click')
+                txt = page.locator('.hinfo').inner_text()
+                check(page, 'HIGH-paper' in txt and 'Awake: woken by an urgent message' in txt, f'Night: the woken anthill is HIGH-paper, awake {txt[:120]!r}', failures)
+                page.locator(f'.gview .farm .hits g[data-k="hill"][data-i="{night["zz"][-1]}"] rect').last.dispatch_event('click')
+                check(page, 'Asleep: the usage hold is on' in page.locator('.hinfo').inner_text(), 'Night: an asleep anthill says so', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-night.png')
                 (repo / 'state/usage.json').write_text(json.dumps({'pct': 50, 'resets': 'x', 'at': int(time.time()), 'held': False}))
                 page.reload()
                 page.wait_for_timeout(500)
@@ -1088,6 +1171,9 @@ def run(loop_bin, graph, shots):
                 check(page, page.locator('#held').is_hidden() and page.locator('input.urgent').count() == 0,
                       'Held: no banner and no Urgent tick when not held', failures)
                 page.goto(base + '#/tree')
+                page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
+                check(page, page.locator('.gview svg.scene.night, .gview .zz, .gview .ant[data-still]').count() == 0,
+                      'Day again once the hold lifts: no night, no z\'s, no still ants', failures)
                 food_at(50, age_s=3 * 3600)
                 page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
                 lab = page.locator('.hinfo .ausage:not(.session)').inner_text()
@@ -1172,6 +1258,43 @@ def run(loop_bin, graph, shots):
                     page.locator('.hinfo').scroll_into_view_if_needed()
                     page.screenshot(path=f'{shots}/{label}-scene-path.png')
                     page.evaluate('scrollTo(0, 0)')
+                # Tapping an anthome opens "Message <agent>" (Finbar 2026-11-24): the Status box, its send and its draft (shared
+                # with Status by the agent's name). Zoom, pan and redraws keep it open with the text; send reaches that agent.
+                ha = names.index('HIGH-session-a')
+                ha_job = next(a['job'] for a in json.loads((repo / 'state/status.json').read_text())['agents'] if a['name'] == 'HIGH-session-a')
+                page.locator(f'{F} .hits g[data-k="hill"][data-i="{ha}"] rect').last.dispatch_event('click')
+                mb = page.locator('.hinfo details.amsg[data-agent="HIGH-session-a"]')
+                check(page, mb.count() == 1 and mb.get_attribute('open') is not None and 'Message HIGH-session-a' in mb.inner_text(),
+                      'Farm: tapping an anthome opens a message box for that agent', failures)
+                mb.locator('textarea').fill('from the tree')
+                page.locator('.gzoom button', has_text='+').click()
+                page.evaluate("""() => document.querySelector('.gview').dispatchEvent(new WheelEvent('wheel',
+                    { deltaY: 120, shiftKey: true, bubbles: true, cancelable: true }))""")
+                page.evaluate('window.LoopApp.route({ quiet: true })')
+                page.wait_for_selector('.hinfo details.amsg[data-agent="HIGH-session-a"] textarea')
+                mb = page.locator('.hinfo details.amsg[data-agent="HIGH-session-a"]')
+                fits = page.evaluate("""() => { const r = document.querySelector('.hinfo details.amsg').getBoundingClientRect();
+                    return r.left >= 0 && r.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; }""")
+                check(page, mb.get_attribute('open') is not None and mb.locator('textarea').input_value() == 'from the tree' and fits,
+                      'Farm: the message box stays open with its text through zoom, pan and a redraw, and fits the screen', failures)
+                if shots:
+                    page.locator('.hinfo').scroll_into_view_if_needed()
+                    page.screenshot(path=f'{shots}/{label}-scene-message.png')
+                    page.evaluate('scrollTo(0, 0)')
+                page.goto(base + '#/status')
+                page.wait_for_selector('details.amsg[data-agent="HIGH-session-a"] textarea')
+                check(page, page.locator('details.amsg[data-agent="HIGH-session-a"] textarea').input_value() == 'from the tree',
+                      'Farm: the draft is shared with the Status tab', failures)
+                page.goto(base + '#/tree')
+                page.wait_for_selector('.hinfo details.amsg[data-agent="HIGH-session-a"] textarea')
+                before_msgs = set((repo / 'messages' / ha_job).glob('*.json')) if (repo / 'messages' / ha_job).exists() else set()
+                page.locator('.hinfo details.amsg button.primary').click()
+                page.wait_for_selector('.hinfo details.amsg .status >> text=Sent')
+                sent = [json.loads(f.read_text()) for f in set((repo / 'messages' / ha_job).glob('*.json')) - before_msgs]
+                check(page, len(sent) == 1 and sent[0]['to'] == 'HIGH-session-a' and sent[0]['text'] == 'from the tree',
+                      f'Farm: Send from the anthome delivers to that agent {sent}', failures)
+                page.locator('.gview svg').first.dispatch_event('click')          # open ground: unpin
+                page.locator('.gzoom button', has_text='Reset').click()
                 check(page, page.locator(f'{F} rect[fill="#686a66"]').count() > 0, 'Farm: a rock on the blocked hill', failures)
                 t0 = page.locator(f'{F} .ant').first.get_attribute('transform')
                 page.wait_for_timeout(400)
