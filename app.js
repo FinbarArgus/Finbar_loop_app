@@ -340,6 +340,7 @@
       : SECTIONS.map(([k]) => k).find((k) => nblock(k)) || SECTIONS.map(([k]) => k).find((k) => groups[k].length) || 'question';
     await useTree();
     const waiting = await permissionWaiting().catch(() => null);
+    backTo = { hash: `#/list/${tab}`, label: SECTIONS.find(([k]) => k === tab)[1] };
     const tabs = boardTabs(tab, groups, waiting ? waiting.n : 0);
     // Filters inside a tab; an item can match several (a ready entry that blocks is under Blocking and Ready).
     const FILTERS = {
@@ -461,6 +462,21 @@
     const rest = list.slice(k + 1).concat(list.slice(0, Math.max(k, 0))).filter((x) => x.id !== id);
     return { next: rest[0] || null, pos: k >= 0 ? k + 1 : null, total: list.length };
   }
+  // Where an item page's back links go: the last view shown that is not an item (a board tab, Permission, Status, Manual,
+  // the Tree), set by route() and showList(). An item opened straight from a link goes back to its own board tab.
+  let backTo = null;
+  const VIEW_NAMES = { permission: 'Permission', status: 'Status', manual: 'Manual', tree: 'Tree' };
+  function backOf(row) {
+    if (backTo) return backTo;
+    const tab = SECTIONS.find(([k]) => k === sectionOf(row));
+    return tab ? { hash: `#/list/${tab[0]}`, label: tab[1] } : { hash: '#/list', label: 'Board' };
+  }
+
+  const backLink = (id) => {
+    const b = backOf(index.items.find((x) => x.id === id) || {});
+    return el('a', { href: b.hash }, `Back to ${b.label}`);
+  };
+
   function nextLink(id, label) {
     const { next } = nextAfter(id);
     return next ? el('a', { class: 'next', href: `#/item/${next.id}` }, `${label} → ${next.id}`) : null;
@@ -480,7 +496,7 @@
     const { pos, total } = nextAfter(id);
     const row = index.items.find((x) => x.id === id) || {};
     const head = el('header', { class: 'item-head' },
-      el('div', { class: 'navrow' }, el('a', { href: '#/list', class: 'back' }, '← Board'),
+      el('div', { class: 'navrow' }, el('a', { href: backOf(row).hash, class: 'back' }, `← ${backOf(row).label}`),
         el('span', { class: 'grow' }), pos ? el('span', { class: 'pos' }, `${pos} of ${total}`) : null,
         nextLink(id, 'Next')),
       el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
@@ -739,7 +755,7 @@
     }
     const sent = el('div', { class: 'after' });
     if (justSent === it.id) {
-      sent.append(el('span', {}, 'Sent. '), nextLink(it.id, 'Next item') || el('a', { href: '#/list' }, 'Back to the board'));
+      sent.append(el('span', {}, 'Sent. '), nextLink(it.id, 'Next item') || backLink(it.id));
     }
     const comp = composer({
       placeholder: it.kind === 'review' ? 'Comments for the agent (optional). Images welcome.'
@@ -1955,6 +1971,7 @@
     try {
       const meta = ['status', 'manual', 'tree'].includes(h[0]) ? h[0] : 'work';     // Permission is a tab under Agents
       document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
+      if (VIEW_NAMES[h[0]]) backTo = { hash, label: VIEW_NAMES[h[0]] };
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'status') await showStatus();
       else if (h[0] === 'permission') await showPermission();
