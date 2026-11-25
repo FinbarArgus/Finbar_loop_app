@@ -1459,14 +1459,35 @@
   const collName = (b) => (b === 'trunk' ? 'no collection (the trunk)' : b);
   const metres = (h) => (h < 1 ? `${Math.round(h * 100)} cm` : `${h < 10 ? h.toFixed(1) : Math.round(h)} m`);
 
-  // What a tapped or hovered part of the tree is: a paper's segment, a collection's stub, or an animal.
+  // The trunk: what has been read, by topic (G.topicStats); the branches name the papers.
+  function trunkInfo(state) {
+    const st = G.topicStats(state.papers, state.today);
+    if (!st.total) return el('div', {}, el('b', {}, 'The trunk'), el('div', { class: 'who' }, 'No papers read yet: tick a Read paper done.'));
+    const short = (d) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const named = st.topics.filter((t) => t.name !== null).length;
+    return el('div', {}, el('b', {}, 'The trunk: what you have read'),
+      el('div', { class: 'who' }, `${st.total} paper${st.total === 1 ? '' : 's'} in ${named} topic${named === 1 ? '' : 's'} · ${st.recent} in the last ${st.days} days`),
+      el('ol', { class: 'gtopics' }, st.topics.map((t) => {
+        const pct = Math.round(100 * t.share);
+        const subs = t.subs.slice(0, 4).map(([n, c]) => `${n} ${c}`).join(' · ') + (t.subs.length > 4 ? ` · ${t.subs.length - 4} more` : '');
+        return el('li', {}, el('i', { class: 'gbar', style: `width:${pct}%` }),
+          el('b', {}, t.name === null ? 'No collection' : t.name), ` ${t.n} (${pct}%)`,
+          el('span', { class: 'who' }, ` · ${t.recent} in ${st.days} d · last ${short(t.last)}`),
+          subs ? el('div', { class: 'who' }, subs) : null);
+      })),
+      el('div', { class: 'who' }, 'Each branch names its papers: tap or hover one.'));
+  }
+
+  // What a tapped or hovered part of the tree is: the trunk (topics read), a paper's segment on a branch, a
+  // collection's stub, or an animal.
   function growthInfo(state, k, id, b) {
+    if ((k === 'seg' && b === 'trunk') || (k === 'branch' && id === 'trunk')) return trunkInfo(state);
     if (k === 'seg') {
       const p = state.papers.find((x) => x.id === id);
       if (!p) return null;
       return el('div', {}, el('b', {}, p.title || 'untitled paper'), paperSub(p),
         el('div', {}, `Collection: ${collName(p.branch)}`),
-        b && b !== p.branch ? el('div', { class: 'who' }, b === 'trunk' ? 'This trunk segment is the rise it caused.' : `This segment is the length it added to ${b}, a collection above its own.`) : null,
+        b && b !== p.branch ? el('div', { class: 'who' }, `This segment is the length it added to ${b}, a collection above its own.`) : null,
         el('div', { class: 'who' }, `Read ${dayText(p.day)} · ${p.mult.toFixed(1)}x`));
     }
     if (k === 'branch') return el('div', {}, el('b', {}, id), el('div', { class: 'who' }, 'A collection with papers only in its subcollections so far.'));
@@ -1760,7 +1781,7 @@
     const agents = (st && st.agents) || [];
     const state = growthState();
     const redraw = () => showTree();
-    const hint = 'Tap or hover a branch, an animal, a bird (a deadline), an anthome (its usage), the food in it (its focus) or a tunnel (its messages).';
+    const hint = 'Tap or hover the trunk (the topics you have read), a branch (its papers), an animal, a bird (a deadline), an anthome (its usage), the food in it (its focus) or a tunnel (its messages).';
     const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, hint));
     const names = safeGet('loop.tree.names') === '1';
     // LOOP's food pile is the weekly usage left (the usage guard's figure, published by `loop status`); faded when stale.
@@ -1790,7 +1811,9 @@
       if (!body) return;
       shown = t; pinned = !!tapped;
       viewer.view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
-      (k === 'seg' ? viewer.view.querySelectorAll(`[data-k="seg"][data-i="${CSS.escape(i)}"]`) : [t]).forEach((n) => n.classList.add('on'));
+      const lit = t.dataset.b === 'trunk' && (k === 'seg' || k === 'branch') ? '.hits [data-b="trunk"]'      // the whole trunk
+        : k === 'seg' ? `.hits [data-k="seg"][data-i="${CSS.escape(i)}"]:not([data-b="trunk"])` : null;   // the paper, on the branches
+      (lit ? viewer.view.querySelectorAll(lit) : [t]).forEach((n) => n.classList.add('on'));
       info.replaceChildren(body);
       info.classList.add('on');
     };

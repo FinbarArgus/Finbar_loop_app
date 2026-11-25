@@ -388,6 +388,9 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .gzoom { position: absolute; right: 8px; top: 8px; display: flex; gap: 4px; }
 .gzoom button { background: rgba(255, 255, 255, .92); color: #111; border-color: #bbb; min-width: 34px; }
 .ginfo { min-height: 3.2em; margin: 8px 0; padding: 8px 12px; border-radius: 10px; background: var(--soft); font-size: 15px; }
+.gtopics { list-style: none; margin: 6px 0; padding: 0; }
+.gtopics li { position: relative; padding: 3px 6px; margin: 2px 0; }
+.gtopics .gbar { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); opacity: .14; border-radius: 4px; }
 .gcreature { border-top: 1px solid var(--line); padding: 8px 0; }
 .gcreature .row { gap: 6px; flex-wrap: wrap; }
 .gcreature input, .gcreature select { font: inherit; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
