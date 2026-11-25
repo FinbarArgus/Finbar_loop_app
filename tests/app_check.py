@@ -1049,6 +1049,35 @@ def run(loop_bin, graph, shots):
                 new = [json.loads(f.read_text()) for f in set((repo / 'messages' / jb).glob('*.json')) - old]
                 check(page, len(new) == 1 and new[0].get('urgent') is True and new[0]['text'] == 'urgent one',
                       f'Held: a message ticked Urgent is saved as urgent {new}', failures)
+                # Night while held: z's from every anthill, ants still; an urgent message woke HIGH-paper (working), so its
+                # z's stop and its ants move. A woken session that is idle sleeps again (scene.test.js).
+                (repo / 'state/usage.json').write_text(json.dumps({'pct': 95, 'resets': 'Nov 26, 7am (Pacific/Auckland)', 'at': int(time.time()),
+                                                                   'held': True, 'woken': ['HIGH-paper']}))
+                page.goto(base + '#/tree')
+                page.reload()
+                page.wait_for_selector('.gview svg.scene.night .zz')
+                night = page.evaluate("""async () => {
+                  const hills = [...document.querySelectorAll('.gview .farm .hits g[data-k="hill"]')].length;
+                  const zz = [...document.querySelectorAll('.gview .zz')].map((g) => +g.dataset.h);
+                  const pose = () => Object.fromEntries([...document.querySelectorAll('.gview .ant[data-h]')]
+                    .map((g) => [`${g.dataset.h}.${g.dataset.a}`, g.getAttribute('transform')]));
+                  const a = pose();
+                  await new Promise((r) => setTimeout(r, 400));
+                  const b = pose();
+                  const moved = [...new Set(Object.keys(a).filter((k) => a[k] !== b[k]).map((k) => +k.split('.')[0]))];
+                  const ants = [...new Set(Object.keys(a).map((k) => +k.split('.')[0]))];
+                  return { hills, zz, moved, ants, legend: [...document.querySelectorAll('.hlegend span')].some((x) => x.textContent.startsWith('Night')) };
+                }""")
+                awake = [i for i in range(night['hills']) if i not in night['zz']]
+                check(page, len(awake) == 1 and night['moved'] == awake and len(night['ants']) > 1 and night['legend'],
+                      f'Night: z\'s from every anthill but the woken one, whose ants alone move {night}', failures)
+                page.locator(f'.gview .farm .hits g[data-k="hill"][data-i="{awake[0]}"] rect').last.dispatch_event('click')
+                txt = page.locator('.hinfo').inner_text()
+                check(page, 'HIGH-paper' in txt and 'Awake: woken by an urgent message' in txt, f'Night: the woken anthill is HIGH-paper, awake {txt[:120]!r}', failures)
+                page.locator(f'.gview .farm .hits g[data-k="hill"][data-i="{night["zz"][-1]}"] rect').last.dispatch_event('click')
+                check(page, 'Asleep: the usage hold is on' in page.locator('.hinfo').inner_text(), 'Night: an asleep anthill says so', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-night.png')
                 (repo / 'state/usage.json').write_text(json.dumps({'pct': 50, 'resets': 'x', 'at': int(time.time()), 'held': False}))
                 page.reload()
                 page.wait_for_timeout(500)
@@ -1058,6 +1087,9 @@ def run(loop_bin, graph, shots):
                 check(page, page.locator('#held').is_hidden() and page.locator('input.urgent').count() == 0,
                       'Held: no banner and no Urgent tick when not held', failures)
                 page.goto(base + '#/tree')
+                page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
+                check(page, page.locator('.gview svg.scene.night, .gview .zz, .gview .ant[data-still]').count() == 0,
+                      'Day again once the hold lifts: no night, no z\'s, no still ants', failures)
                 food_at(50, age_s=3 * 3600)
                 page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
                 lab = page.locator('.hinfo .ausage:not(.session)').inner_text()

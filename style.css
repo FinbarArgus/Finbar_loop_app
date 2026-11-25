@@ -476,3 +476,7 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .bverdict .choice-btn.sent { border-style: dashed; }
 .ausage { font-weight: 600; } .ausage.stale { color: var(--muted); font-weight: 400; }
 .heldbanner { background: color-mix(in srgb, var(--ask) 22%, var(--bg)); color: var(--ink); padding: 8px 16px; font-size: 14px; font-weight: 600; text-align: center; }
+/* Night (the usage hold): z's rise from each asleep anthill and fade. */
+.scene .zz text { animation: hzz 2.4s linear infinite; }
+@keyframes hzz { 0% { opacity: 0; transform: translateY(0.6px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(-1.6px); } }
+@media (prefers-reduced-motion: reduce) { .scene .zz text { animation: none; } }
