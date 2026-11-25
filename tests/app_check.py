@@ -261,7 +261,7 @@ def run(loop_bin, graph, shots):
                 (tmp / label).mkdir()
                 repo = make_fixture(loop_bin, tmp / label, graph)
                 tmp_l = tmp / label
-                ctx = browser.new_context(viewport=vp)
+                ctx = browser.new_context(viewport=vp, has_touch=label == 'phone')
                 ctx.add_init_script("localStorage.setItem('loop.token','test-token');localStorage.setItem('loop.repo','me/loop');")
                 ctx.route('https://api.github.com/**', fake_github(repo))
                 page = ctx.new_page()
@@ -733,6 +733,36 @@ def run(loop_bin, graph, shots):
                 check(page, 'Paper 1 draft' in info and '12 citations' in info, f'Tree: tapping the animal shows its paper {info!r}', failures)
                 log = page.locator('.glog').inner_text()
                 check(page, 'Tree paper 0' in log and 'a leaf' in log and 'arrived' in log, 'Tree: growth log', failures)
+                # Real pointers on the young tree in the default view (Finbar's 1.9 m tree is ~4 px a paper on a phone): a tap (phone)
+                # or a hover (computer) on each paper's own spot selects it, and a point a finger's width off the tree still
+                # picks the tree, not the farm or nothing.
+                page.locator('.gzoom button', has_text='Reset').click()
+                segw = lambda: page.evaluate("""() => Math.max(...[...document.querySelectorAll('.gview .tree .hits [data-k="seg"]')]
+                    .map((n) => n.getBoundingClientRect().width))""")
+                page.evaluate("document.querySelectorAll('.gview .tree .hits [data-k=creature]').forEach((n) => n.remove())")  # it covers this tree
+                v = page.locator('.gview').bounding_box()
+                if label == 'computer':
+                    page.mouse.click(v['x'] + 3, v['y'] + 3)                                 # open ground: unpin
+                segs = page.evaluate("""() => [...document.querySelectorAll('.gview .tree .hits [data-k="seg"]')].map((n) => {
+                    const b = n.getBoundingClientRect(), x = (b.left + b.right) / 2, y = (b.top + b.bottom) / 2;
+                    const t = document.elementFromPoint(x, y); const h = t && t.closest('[data-k]');
+                    return { i: n.dataset.i, x, y, own: !!h && h.dataset.i === n.dataset.i, l: b.left, r: b.right, top: b.top, bottom: b.bottom }; })""")
+                def point(x, y, tap=label == 'phone'):
+                    if tap:
+                        page.touchscreen.tap(x, y) if label == 'phone' else page.mouse.click(x, y)
+                    else:
+                        page.mouse.move(x, y)
+                    on = page.evaluate("[...document.querySelectorAll('.gview .hits .on')].map((n) => n.dataset.k + ':' + n.dataset.i)")
+                    return on[0] if on else None
+                spots = {s['i']: s for s in segs if s['own']}
+                got = {i for i, s in spots.items() if point(s['x'], s['y']) == f'seg:{i}'}
+                off = 12 if label == 'phone' else 7
+                edge = max(segs, key=lambda s: s['r'])
+                near = point(edge['r'] + off, (edge['top'] + edge['bottom']) / 2, tap=True)   # a click: hover never clears
+                check(page, len(spots) >= 2 and got == set(spots) and near and near.split(':')[0] in ('seg', 'branch'),
+                      f'Tree: each paper ({segw():.0f} px wide) is picked by a real {"tap" if label == "phone" else "hover"},'
+                      f' and the tree {off} px off it {len(spots)} {sorted(set(spots) - got)} {near}', failures)
+                page.locator('.gzoom button', has_text='Reset').click()                          # redraws, the animal back
                 cr = page.locator(f'.gcreature[data-i="{wid}"]')
                 cr.locator('input').fill('Hopper')
                 cr.locator('select').select_option('owl')

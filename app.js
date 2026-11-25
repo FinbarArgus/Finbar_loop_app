@@ -1640,10 +1640,24 @@
       pinch = p;
     };
     for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) view.addEventListener(t, touch, { passive: false });
-    svgEl.addEventListener('pointerover', (ev) => { if (ev.pointerType === 'mouse') show(ev.target.closest('[data-k]')); });
+    // A young tree's papers are a few pixels wide on screen: the nearest tree target within REACH px (a finger's or
+    // a pointer's width) is picked, over the farm's. The young tree's marker keeps its own tap (it zooms to the tree).
+    const pick = (ev) => {
+      const direct = ev.target.closest('[data-k]');
+      if (direct && (direct.dataset.k === 'sprout' || direct.closest('.tree'))) return direct;
+      const reach = ev.pointerType === 'mouse' ? 12 : 22;
+      let best = null, bd = reach;
+      svgEl.querySelectorAll('.tree .hits [data-k]').forEach((n) => {
+        const b = n.getBoundingClientRect();
+        const d = Math.hypot(Math.max(b.left - ev.clientX, 0, ev.clientX - b.right), Math.max(b.top - ev.clientY, 0, ev.clientY - b.bottom));
+        if (d <= bd) { best = n; bd = d; }
+      });
+      return best || direct;
+    };
+    svgEl.addEventListener('pointermove', (ev) => { if (ev.pointerType === 'mouse') show(pick(ev)); });
     svgEl.addEventListener('click', (ev) => {
       if (sdragged) { sdragged = false; return; }
-      const t = ev.target.closest('[data-k]');
+      const t = pick(ev);
       if (t && t.dataset.k === 'sprout') { goto(sc.tree); return; }     // a young tree's marker: zoom to the tree
       show(t, true);
     });
