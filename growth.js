@@ -486,7 +486,7 @@
       const half = Math.ceil(text.length * 0.6 * size / 2);
       labelCells.push(`${Math.floor(cx - half)},${Math.floor(base)}`, `${Math.ceil(cx + half)},${Math.ceil(base + size)}`);
     };
-    let labels = '', critters = '';
+    let labels = '', critters = '', over = '';              // over: crows and sad faces, drawn over the animals
     // Crows: each passed deadline's bird perches where it landed. Animals near one are sad.
     const crows = L.birds.filter((b, n) => state.birds[n].evil);
     const reach = sadR(L);
@@ -495,7 +495,7 @@
       const ink = new Set(), eye = new Set();
       const s = stamp(CROW, i, j + 1, 1, ink, eye);
       critCells.push(...ink, ...eye);
-      critters += runs(eye, CROW_EYE) + runs(ink, CROW_INK);
+      over += `<g class="crow">${runs(eye, CROW_EYE)}${runs(ink, CROW_INK)}</g>`;
       if (!opts.mini) hits.push(`<rect x="${f(s.i0 * CELL)}" y="${f(-(s.j0 + s.h) * CELL)}" width="${f(s.w * CELL)}" height="${f(s.h * CELL)}" data-k="bird" data-i="${esc(b.id)}"/>`);
     });
     state.creatures.forEach((c) => {
@@ -508,7 +508,7 @@
         const sInk = new Set(), sFill = new Set();
         stamp(SAD, b.i0 + b.w + 3, b.j0 + b.h, 1, sInk, sFill);
         critCells.push(...sInk, ...sFill);
-        critters += `<g class="sad" data-i="${esc(c.id)}">${runs(sFill, SAD_FILL)}${runs(sInk, SAD_INK)}</g>`;
+        over += `<g class="sad" data-i="${esc(c.id)}">${runs(sFill, SAD_FILL)}${runs(sInk, SAD_INK)}</g>`;
       }
       critCells.push(...ink, ...fill);
       critters += runs(fill, c.fill) + runs(ink, c.ink);
@@ -527,7 +527,7 @@
           + ` text-anchor="middle" fill="#666" stroke="${PAPER}" stroke-width="${f(CELL * 0.6)}" paint-order="stroke">${esc(c.id.split(' / ').pop())}</text>`;
       }
     }
-    if (!(state.scale > 0) && state.scale != null) { wood.clear(); leafInk.clear(); leafPaper.clear(); critCells.length = 0; labelCells.length = 0; critters = ''; labels = ''; hits.length = 0; }
+    if (!(state.scale > 0) && state.scale != null) { wood.clear(); leafInk.clear(); leafPaper.clear(); critCells.length = 0; labelCells.length = 0; critters = ''; over = ''; labels = ''; hits.length = 0; }
     const all = [...wood, ...leafInk, ...leafPaper, ...critCells, ...labelCells, '0,0'].map((c) => c.split(',').map(Number));
     const is = all.map((c) => c[0]), js = all.map((c) => c[1]);
     const margin = opts.mini ? 2 : 4;
@@ -558,7 +558,7 @@
     const inner = (opts.scene ? '' : `<rect x="${f(x0)}" y="${f(y0)}" width="${f(w)}" height="${f(h)}" fill="${PAPER}"/>`)
       + `<g class="scale">${runs(rule, SCALE)}${scaleText}</g>`
       + runs(ground, GROUND) + runs(wood, WOOD) + runs(leafPaper, LEAF_FILL) + runs(leafInk, LEAF_INK)
-      + critters + labels;
+      + critters + over + labels;
     const wrap = (s) => (k === 1 ? s : `<g transform="scale(${k})">${s}</g>`);
     const hitG = opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${wrap(hits.join(''))}</g>`;
     return { body: wrap(inner), hits: hitG, x0: x0 * k, y0: y0 * k, w: w * k, h: h * k };

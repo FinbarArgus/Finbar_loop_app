@@ -345,3 +345,12 @@ test('a passed deadline\'s crow perches on the tree; animals within sadR of it g
   assert.equal(G.sadR(tall), Math.max(...[...tall.graph.nodes.values()].map((p) => p.y)) / 4, 'a quarter of a tall tree');
   assert.equal(G.sadR(G.layout(G.derive([], {}, {}, NOW))), G.SAD_R, 'at least SAD_R');
 });
+
+test('crows and sad faces are drawn over the animals', () => {
+  const st = grown(120);
+  const hour = Math.max(...st.creatures.map((c) => c.startHour)) + 300;
+  const svg = G.svg({ ...st, birds: [{ id: 'crow', deadline: '2026-12-01', title: 't', days: -3, evil: true }] }, { hour });
+  const lastAnimal = Math.max(...st.creatures.map((c) => svg.lastIndexOf(`fill="${c.ink}"`)));
+  assert.ok(svg.indexOf('<g class="crow">') > lastAnimal);
+  assert.ok(!svg.includes('class="sad"') || svg.indexOf('class="sad"') > lastAnimal);
+});
