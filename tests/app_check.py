@@ -842,6 +842,42 @@ def run(loop_bin, graph, shots):
                 check(page, narrow(), 'status with permissions: no sideways scroll', failures)
                 if shots:
                     page.locator('.perms').screenshot(path=f'{shots}/{label}-permissions.png')
+                # The Permission view (ledger: status rows carry `permission`; patched in for the installed loop): hook
+                # prompts, usage-guard denials (Approve sends the session an urgent "approve") and other dialogs.
+                stp = repo / 'state/status.json'
+                st = json.loads(stp.read_text())
+                for r in st['agents']:
+                    if r['name'] == 'HIGH-session-a':
+                        r['permission'] = {'kind': 'dialog'}          # covered by its permission item: listed once
+                guard = {'kind': 'guard', 'tool': 'Bash', 'target': 'python run_calibration.py --seeds 5',
+                         'why': "USAGE GUARD: weekly usage is at 96%. Running a command needs the user's approval until the weekly reset.",
+                         'since': '2026-11-24T00:00:00Z'}
+                st['agents'] += [
+                    {'name': 'MED-guarded', 'job': 'bbbb0002', 'state': 'blocked', 'why': 'waiting for approval: Bash python run_calibration.py --seeds 5',
+                     'running': True, 'items': [], 'recent': [], 'updated': '2026-11-24T00:00:00Z', 'permission': guard},
+                    {'name': 'LOW-dialog', 'job': 'bbbb0003', 'state': 'blocked', 'why': 'permission prompt in the session',
+                     'running': True, 'items': [], 'recent': [], 'updated': '2026-11-24T00:00:00Z', 'permission': {'kind': 'dialog'}}]
+                stp.write_text(json.dumps(st))
+                page.reload()
+                page.locator('.agent', has_text='MED-guarded').locator('a.permlink').click()
+                page.wait_for_selector('.permwait')
+                check(page, page.locator('.meta a.on').get_attribute('data-meta') == 'permission', 'Permission: its own tab, reached from a blocked Status row', failures)
+                check(page, page.locator(f'.permwait[data-item="{pid}"]').count() == 1
+                      and page.locator('.permwait[data-agent="HIGH-session-a"]').count() == 0,
+                      'Permission: a hook prompt is listed once, as its item', failures)
+                g = page.locator('.permwait[data-agent="MED-guarded"]')
+                check(page, 'python run_calibration.py --seeds 5' in g.inner_text() and 'weekly usage is at 96%' in g.inner_text()
+                      and 'usage guard' in g.inner_text(), 'Permission: a guard denial shows the session, the call and why', failures)
+                check(page, 'answer it in the session' in page.locator('.permwait[data-agent="LOW-dialog"]').inner_text(),
+                      'Permission: another dialog says to answer it in the session', failures)
+                check(page, narrow(), 'permission view: no sideways scroll', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-permission-view.png', full_page=True)
+                g.locator('.perm-yes').click()
+                g.locator('.status', has_text='Approved').wait_for()
+                sent = [json.loads(f.read_text()) for f in (repo / 'messages/bbbb0002').glob('*.json')]
+                check(page, len(sent) == 1 and sent[0]['text'] == 'approve' and sent[0]['urgent'] is True and sent[0]['to'] == 'MED-guarded',
+                      f'Permission: Approve sends the session an urgent "approve" {sent}', failures)
                 # A PR-review bundle (ledger: spec "bundle"; the installed loop may predate it, so it is patched in): a row per PR
                 # with its class and why, Approve all low, Changes with a note, sent as per-PR verdicts; Status shows triage accuracy.
                 sec = lambda k: {'type': 'section', 'id': f'ca-{k}', 'title': f'CA #{k}', 'summary': f'what #{k} does',

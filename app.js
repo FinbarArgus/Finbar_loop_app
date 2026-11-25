@@ -833,6 +833,7 @@
         r.items && r.items.length ? el('div', { class: 'alinks' }, r.state === 'blocked' ? 'Waiting on: ' : 'Will need (soon blocking): ', r.items.map((id) =>
           el('a', { href: `#/item/${id}`, class: 'alink' }, el('b', {}, id), titles.has(id) ? ` ${titles.get(id).slice(0, 70)}` : ''))) : null,
         r.why && !(r.items && r.items.length) ? el('div', { class: 'awhy' }, r.why) : null,
+        r.permission ? el('a', { href: '#/permission', class: 'alink permlink' }, 'Approve or deny it in Permission →') : null,
         r.working_on ? el('div', { class: 'adetail' }, el('span', { class: 'who' }, r.state === 'working' ? 'Working on: ' : 'Last: '), r.working_on) : null,
         el('div', { class: 'who' }, r.running ? '' : 'not running · ', r.updated ? `last active ${age(r.updated)} ago` : ''),
         (r.recent || []).length ? el('details', { class: 'arecent' }, el('summary', {}, `Its entries (${r.recent.length})`),
@@ -845,6 +846,61 @@
     main().replaceChildren(deadlinesCard(), usage, ...sections, permissionsCard(plog), triageCard(triage),
       el('p', { class: 'foot' }, `Updated ${new Date(st.generated).toLocaleString()} · refreshed every 2 min by the loop`));
     setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/status')) await showStatus(); }, 60_000);
+  }
+
+  // Permission: every session waiting on an approval. Hook prompts are `permission` items (Approve/Deny typed into
+  // the dialog); a usage-guard denial (status row permission.kind 'guard') is approved by sending the session
+  // "approve", which the guard counts as the approval, and the session retries the call; other dialogs are
+  // answered in the session.
+  function guardCard(r) {
+    const p = r.permission;
+    const msg = el('div', { class: 'status' });
+    const pick = (text, done) => async () => {
+      [...btns.children].forEach((b) => { b.disabled = true; });
+      msg.textContent = 'Sending…';
+      try {
+        await send('messages', r.job, { kind: 'message', to: r.name, text, urgent: true }, []);
+        msg.textContent = `${done}: sent to ${r.name}, typed into its session within seconds.`;
+      } catch (e) {
+        msg.textContent = `Not sent: ${e.message || e}`;
+        [...btns.children].forEach((b) => { b.disabled = false; });
+      }
+    };
+    const btns = el('div', { class: 'permbtns' },
+      el('button', { class: 'perm-yes', onclick: pick('approve', 'Approved') }, 'Approve'),
+      el('button', { class: 'perm-no', onclick: pick(`deny: do not run that ${p.tool} call; go on without it, or ask in LOOP.`, 'Denied') }, 'Deny'));
+    return el('section', { class: 'status-card permwait', 'data-agent': r.name },
+      el('div', { class: 'arow' }, el('span', { class: 'badge perm' }, 'usage guard'), roleDot(r.name), el('b', {}, r.name),
+        el('span', { class: 'who' }, ` · ${p.tool}`), el('span', { class: 'grow' }), el('span', { class: 'who' }, p.since ? `waiting ${age(p.since)}` : '')),
+      el('code', { class: 'ptarget' }, p.target.length > 600 ? p.target.slice(0, 600) + '…' : p.target),
+      el('div', { class: 'awhy' }, p.why), btns, msg);
+  }
+
+  async function showPermission() {
+    await useTree();
+    const [st] = await Promise.all([getJSON('state/status.json'), refreshIndex()]);
+    const asks = await Promise.all(index.items.filter((x) => isPermission(x) && x.status === 'open')
+      .map((x) => getJSON(`items/${x.id}/item.json`).catch(() => null)));
+    const items = asks.filter(Boolean);
+    const rows = (st.agents || []).filter((r) => r.permission);
+    const asked = (r) => items.some((it) => it.from.job === r.job || it.from.name === r.name);
+    const dialogs = rows.filter((r) => r.permission.kind === 'dialog' && !asked(r));
+    const guards = rows.filter((r) => r.permission.kind === 'guard');
+    const itemCard = (it) => el('section', { class: 'status-card permwait', 'data-item': it.id },
+      el('div', { class: 'arow' }, el('span', { class: 'badge perm' }, 'prompt'), roleDot(it.from.name), el('b', {}, it.from.name),
+        el('span', { class: 'who' }, ` · ${it.permission.tool}`), el('span', { class: 'grow' }), el('span', { class: 'who' }, `waiting ${age(it.created)}`)),
+      el('code', { class: 'ptarget' }, it.permission.target),
+      el('div', { class: 'awhy' }, `Flagged because: ${it.permission.reason}`, el('a', { href: `#/item/${it.id}`, class: 'alink' }, ` ${it.id}`)),
+      permissionBar(it, showPermission));
+    const dialogCard = (r) => el('section', { class: 'status-card permwait', 'data-agent': r.name },
+      el('div', { class: 'arow' }, el('span', { class: 'badge perm' }, 'dialog'), roleDot(r.name), el('b', {}, r.name),
+        el('span', { class: 'grow' }), el('span', { class: 'who' }, r.updated ? `waiting ${age(r.updated)}` : '')),
+      el('div', { class: 'awhy' }, 'At a permission prompt the loop did not post: answer it in the session.'));
+    const cards = [...items.map(itemCard), ...guards.map(guardCard), ...dialogs.map(dialogCard)];
+    main().replaceChildren(el('h2', { class: 'permh' }, 'Waiting for permission ', el('span', { class: 'n' }, String(cards.length))),
+      ...(cards.length ? cards : [el('p', { class: 'empty' }, 'No session is waiting for an approval.')]),
+      el('p', { class: 'foot' }, `Status updated ${new Date(st.generated).toLocaleString()}`));
+    setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/permission')) await showPermission(); }, 60_000);
   }
 
   // ------------------------------------------------------------ Manual: Read, Write, Students, Other
@@ -1785,10 +1841,11 @@
     if (!quiet) justSent = null;
     treeWasCached = false;
     try {
-      const meta = ['status', 'manual', 'tree'].includes(h[0]) ? h[0] : 'work';
+      const meta = ['status', 'permission', 'manual', 'tree'].includes(h[0]) ? h[0] : 'work';
       document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'status') await showStatus();
+      else if (h[0] === 'permission') await showPermission();
       else if (h[0] === 'manual') await showMine(h[1]);
       else if (h[0] === 'tree') await showTree();
       else if (h[0] === 'settings') showSettings();
