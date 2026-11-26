@@ -493,6 +493,7 @@ def run(loop_bin, graph, shots):
                 ago = lambda h: (_dtt.datetime.now(_dtt.timezone.utc) - _dtt.timedelta(hours=h)).isoformat()
                 T = lambda i, title, who, status, **kw: {'id': i, 'title': title, 'for': who, 'by': 'LOOP', 'source': None, 'status': status,
                                                         'waiting_on': None, 'created': ago(30), 'updated': ago(2), 'note': None, **kw}
+                open_q = next(i['id'] for i in json.loads((repo / 'index.json').read_text())['items'] if i['section'] == 'question')
                 (repo / 'state/tasks.json').write_text(json.dumps([
                     T('T-0001', 'Write the methods section', 'MED-y', 'todo'),
                     T('T-0002', 'Fix the parser', 'IMPLEMENT-app', 'doing', source='https://github.com/o/Finbar_loop_app/pull/36'),
@@ -502,16 +503,35 @@ def run(loop_bin, graph, shots):
                     T('T-0006', 'Ancient work', 'LOW-x', 'done', updated=ago(24 * 9)),
                     T('T-0007', 'Post the bundle', 'MED-y', 'waiting', waiting_on='T-0001'),
                     T('T-0008', 'Merge main in', 'MED-y', 'waiting', waiting_on='https://github.com/o/CUFLynx/pull/386'),
-                    T('T-0009', 'Undraft', 'MED-y', 'waiting', waiting_on='CI on #388')]))
+                    T('T-0009', 'Undraft', 'MED-y', 'waiting', waiting_on='CI on #388'),
+                    T('T-0010', 'Merge CAM #89', 'HIGH-merge-coordination-3', 'waiting', waiting_on='CI on #89', pr='https://github.com/o/CAM/pull/89'),
+                    T('T-0011', 'Release', 'MED-y', 'waiting', waiting_on='T-0010'),
+                    T('T-0012', 'Pick the mesh', 'HIGH-paper', 'waiting', waiting_on=open_q)]))
+                # Each agent's tasks sit under its live state (status.json): working now, blocked, idle.
+                st_saved = (repo / 'state/status.json').read_text()
+                st = json.loads(st_saved)
+                st['agents'] = [r for r in st['agents'] if r['name'] not in ('HIGH-paper', 'IMPLEMENT-app', 'MED-y')] + [
+                    {**st['agents'][0], 'name': 'HIGH-paper', 'state': 'working', 'why': '', 'items': []},
+                    {**st['agents'][0], 'name': 'IMPLEMENT-app', 'state': 'blocked', 'why': 'waiting on Finbar', 'items': ['Q-0001']},
+                    {**st['agents'][0], 'name': 'MED-y', 'state': 'stalled', 'why': 'idle: parked until asked', 'items': []}]
+                (repo / 'state/status.json').write_text(json.dumps(st))
                 page.goto(base + '#/tasks')
+                page.reload()
                 page.wait_for_selector('.tgroup')
                 page.locator('.switch button', has_text='All').click()
                 page.wait_for_selector('.switch button.on >> text=All')
                 grp = page.locator('.tgroup').evaluate_all("(gs) => gs.map((g) => [g.dataset.agent, [...g.querySelectorAll('.trow')].map((r) => r.dataset.task + ' ' + r.querySelector('.tchip').textContent)])")
                 check(page, page.locator('.meta a.on').inner_text() == 'Tasks' and grp == [
-                    ['HIGH-paper', ['T-0004 doing', 'T-0003 waiting on Q-0001']], ['IMPLEMENT-app', ['T-0002 doing']],
-                    ['MED-y', ['T-0007 waiting on T-0001', 'T-0008 waiting on CUFLynx #386', 'T-0009 waiting on CI on #388', 'T-0001 todo']]],
-                      f'Tasks: grouped by agent in role order, doing first, with chips {grp}', failures)
+                    ['HIGH-paper', ['T-0004 doing', 'T-0003 waiting on Q-0001 (answered)', f'T-0012 waiting on {open_q}']],
+                    ['IMPLEMENT-app', ['T-0002 doing']], ['HIGH-merge-coordination-3', ['T-0010 waiting on CI on #89']],
+                    ['MED-y', ['T-0007 waiting on T-0001 (MED-y)', 'T-0008 waiting on CUFLynx #386 (not reviewed)', 'T-0009 waiting on CI on #388',
+                               'T-0011 waiting on T-0010 (merge CAM #89)', 'T-0001 queued']]],
+                      f'Tasks: grouped by live state, then role order, doing first, todo as queued, with chips {grp}', failures)
+                secs = page.locator('.tsection').all_inner_texts()
+                states = page.locator('.tgroup').evaluate_all("(gs) => gs.map((g) => g.querySelector('.tstate').textContent)")
+                check(page, secs == ['Working now 1', 'Blocked 1', 'Idle 2'] and states == [
+                    'working now', 'blocked on Q-0001', 'idle: not seen recently', 'idle: parked until asked'],
+                      f'Tasks: sections by live state, each agent with its state {secs} {states}', failures)
                 row = page.locator('.trow[data-task="T-0002"]').inner_text()
                 check(page, 'Fix the parser' in row and 'Finbar_loop_app #36' in row and 'updated 2 h ago' in row
                       and page.locator('.trow[data-task="T-0003"] .tchip a[href="#/item/Q-0001"]').count() == 1,
@@ -530,11 +550,13 @@ def run(loop_bin, graph, shots):
                       'Tasks: done ones collapsed, only the last 7 days', failures)
                 page.locator('.switch button', has_text='Waiting on me').click()
                 page.wait_for_selector('.switch button.on >> text=Waiting on me')
-                check(page, [r.get_attribute('data-task') for r in page.locator('.tgroup .trow').all()] == ['T-0003'], 'Tasks: "Waiting on me" filter', failures)
+                check(page, [r.get_attribute('data-task') for r in page.locator('.tgroup .trow').all()] == ['T-0012'],
+                      'Tasks: "Waiting on me" is only open, unanswered items (T-0003 waits on an answered one)', failures)
                 check(page, narrow(), 'Tasks: no sideways scroll', failures)
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-tasks.png', full_page=True)
                 page.locator('.switch button', has_text='All').click()
+                (repo / 'state/status.json').write_text(st_saved)
                 # The Manual tab was called Mine: old links redirect.
                 meta = page.locator('.meta a').all_inner_texts()
                 check(page, meta[:3] == ['Agents', 'Tasks', 'Manual'], f'header tabs Agents, Tasks and Manual {meta}', failures)

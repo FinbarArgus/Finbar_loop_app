@@ -945,8 +945,11 @@
   }
 
   // ------------------------------------------------------------ Tasks: the ledger's task list
-  // state/tasks.json (`loop task`): what each session has been given to do, by session in role order. Filters: all,
-  // doing, waiting on Finbar; done tasks (shown for TASK_DONE_DAYS) are collapsed at the foot.
+  // state/tasks.json (`loop task`): what each session has been given to do, grouped under each agent's live state
+  // (state/status.json: working now, blocked, idle), agents in role order. todo reads as "queued". Filters: all,
+  // doing, waiting on Finbar (only open, unanswered loop items: LoopTasks.waitOf); done tasks (shown for
+  // TASK_DONE_DAYS) are collapsed at the foot.
+  const T = window.LoopTasks;
   const TASK_DONE_DAYS = 7;
   const TASK_FILTERS = [['all', 'All'], ['doing', 'Doing'], ['waiting', 'Waiting on me']];
   function taskSource(src, titles) {
@@ -955,57 +958,69 @@
     const pr = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(src);
     return el('a', { href: src, target: '_blank', rel: 'noopener', class: 'alink' }, pr ? `${pr[1]} #${pr[2]}` : 'link');
   }
-  // A waiting task is Finbar's to act on when it names no target or one of his items; a task, a PR or free
-  // text is something else's.
-  const waitsOnFinbar = (t) => t.status === 'waiting' && (!t.waiting_on || /^[QRC]-\d+$/.test(t.waiting_on));
-  // What a task waits on: an item or a PR as a link, another task as a jump to its row, anything else as text.
-  function waitTarget(on, titles) {
-    if (/^T-\d+$/.test(on)) {
-      return el('a', { href: '#/tasks', class: 'alink', onclick: (ev) => {
-        ev.preventDefault();
-        const row = document.querySelector(`.trow[data-task="${on}"]`);
-        if (!row) return;
-        if (row.closest('details')) row.closest('details').open = true;
-        row.scrollIntoView({ block: 'center' });
-      } }, on);
-    }
-    return /^[QRC]-\d+$/.test(on) || /^https?:\/\//.test(on) ? taskSource(on, titles) : on;
+  // A jump to another task's row on this tab (opening the done list if it is there).
+  const taskJump = (id) => el('a', { href: '#/tasks', class: 'alink', onclick: (ev) => {
+    ev.preventDefault();
+    const row = document.querySelector(`.trow[data-task="${id}"]`);
+    if (!row) return;
+    if (row.closest('details')) row.closest('details').open = true;
+    row.scrollIntoView({ block: 'center' });
+  } }, id);
+  // The waiting chip: "waiting on" an item, a PR (Finbar's review item if one covers it, else "not reviewed": an approved
+  // PR has a merge task), a task (the PR it merges, or its owner), or text.
+  function waitChip(w, titles) {
+    const parts = w.kind === 'none' ? ['waiting']
+      : w.kind === 'item' ? ['waiting on ', taskSource(w.on, titles), w.answered ? ' (answered)' : '']
+      : w.kind === 'pr' ? ['waiting on ', taskSource(w.on, titles), ...(w.review ? [' (Finbar\'s review ', taskSource(w.review, titles), ')'] : [' (not reviewed)'])]
+      : w.kind === 'task' ? ['waiting on ', taskJump(w.on), w.merge ? ` (merge ${w.merge})` : w.owner ? ` (${w.owner})` : '']
+      : ['waiting on ', w.on];
+    return el('span', { class: `tchip waiting${w.finbar ? ' finbar' : ''}`, 'data-wait': w.kind }, ...parts);
   }
-  function taskRow(t, titles, withName) {
-    const chip = t.status === 'waiting'
-      ? el('span', { class: 'tchip waiting' }, 'waiting on ', t.waiting_on ? waitTarget(t.waiting_on, titles) : 'Finbar')
-      : el('span', { class: `tchip ${t.status}` }, t.status);
+  function taskRow(t, ctx, withName) {
+    const chip = t.status === 'waiting' ? waitChip(T.waitOf(t, ctx.items, ctx.tasks), ctx.titles)
+      : el('span', { class: `tchip ${t.status}` }, T.STATUS_LABEL[t.status] || t.status);
     return el('div', { class: 'trow', 'data-task': t.id },
       el('div', { class: 'arow' }, chip, withName ? el('b', {}, t.for) : null, el('span', { class: 'ttitle' }, t.title)),
       el('div', { class: 'who' }, `${t.id} · ${t.status === 'done' ? 'done' : 'updated'} ${age(t.updated)} ago · by ${t.by}`,
-        t.source ? ' · ' : '', taskSource(t.source, titles), t.note ? ` · ${t.note}` : ''));
+        t.source ? ' · ' : '', taskSource(t.source, ctx.titles), t.note ? ` · ${t.note}` : ''));
   }
   async function showTasks() {
     await Promise.all([useTree(), refreshIndex()]);
-    const tasks = tree.paths.has('state/tasks.json') ? await getJSON('state/tasks.json').catch(() => []) : [];
-    const titles = new Map(index.items.map((x) => [x.id, x.title]));
+    const has = (p) => tree.paths.has(p);
+    const [tasks, st] = await Promise.all([has('state/tasks.json') ? getJSON('state/tasks.json').catch(() => []) : [],
+      has('state/status.json') ? getJSON('state/status.json').catch(() => null) : null]);
+    const ctx = { tasks, items: index.items, titles: new Map(index.items.map((x) => [x.id, x.title])) };
+    const rows = (st && st.agents) || [];
     const filter = TASK_FILTERS.some(([k]) => k === safeGet('loop.tasks.filter')) ? safeGet('loop.tasks.filter') : 'all';
     const open = tasks.filter((t) => t.status !== 'done');
     const done = tasks.filter((t) => t.status === 'done' && (Date.now() - Date.parse(t.updated)) / 864e5 <= TASK_DONE_DAYS)
       .sort((a, b) => b.updated.localeCompare(a.updated));
-    const inFilter = (t, k) => k === 'all' || (k === 'waiting' ? waitsOnFinbar(t) : t.status === k);
+    const inFilter = (t, k) => k === 'all' || (k === 'waiting' ? t.status === 'waiting' && T.waitOf(t, ctx.items, tasks).finbar : t.status === k);
     const shown = open.filter((t) => inFilter(t, filter));
     const sw = el('div', { class: 'switch' }, TASK_FILTERS.map(([k, label]) => el('button', { class: k === filter ? 'on' : '',
       onclick: () => { safeSet('loop.tasks.filter', k); showTasks(); } }, `${label} (${open.filter((t) => inFilter(t, k)).length})`)));
     const ORDER = ['doing', 'waiting', 'todo'];
     const names = [...new Set(shown.map((t) => t.for))].sort((a, b) => H.roleRank({ name: a }) - H.roleRank({ name: b }) || a.localeCompare(b));
-    const groups = names.map((n) => {
+    const states = new Map(names.map((n) => [n, T.agentState(n, rows)]));
+    const card = (n) => {
+      const state = states.get(n);
       const ts = shown.filter((t) => t.for === n).sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || a.id.localeCompare(b.id));
-      return el('section', { class: 'status-card tgroup', 'data-agent': n },
-        el('h3', {}, roleDot(n), ` ${n} `, el('span', { class: 'n' }, String(ts.length))), ...ts.map((t) => taskRow(t, titles, false)));
+      return el('section', { class: 'status-card tgroup', 'data-agent': n, 'data-state': state.key },
+        el('h3', {}, roleDot(n), ` ${n} `, el('span', { class: 'n' }, String(ts.length)), el('span', { class: 'grow' }),
+          el('span', { class: `tstate ${state.key}` }, state.label)), ...ts.map((t) => taskRow(t, ctx, false)));
+    };
+    const sections = T.GROUPS.flatMap(([key, label]) => {
+      const ns = names.filter((n) => states.get(n).key === key);
+      return ns.length ? [el('h3', { class: 'tsection', 'data-state': key }, `${label} `, el('span', { class: 'n' }, String(ns.length))),
+        ...ns.map(card)] : [];
     });
     main().replaceChildren(
       el('h2', { class: 'permh' }, 'Tasks ', el('span', { class: 'n' }, String(open.length))),
-      el('p', { class: 'who' }, 'What each agent has been given to do. The food pile on the Tree tab is the tasks to do or under way.'),
+      el('p', { class: 'who' }, 'What each agent has been given to do, under what it is doing now. Queued tasks wait their turn behind the one under way; the food pile on the Tree tab is the tasks queued or under way.'),
       sw,
-      ...(groups.length ? groups : [el('p', { class: 'empty' }, tasks.length ? 'Nothing here.' : 'No tasks yet.')]),
+      ...(sections.length ? sections : [el('p', { class: 'empty' }, tasks.length ? 'Nothing here.' : 'No tasks yet.')]),
       done.length ? el('details', { class: 'tdone' }, el('summary', {}, `Done in the last ${TASK_DONE_DAYS} days (${done.length})`),
-        ...done.map((t) => taskRow(t, titles, true))) : null);
+        ...done.map((t) => taskRow(t, ctx, true))) : null);
     setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/tasks')) await showTasks(); }, 60_000);
   }
 

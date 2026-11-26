@@ -492,6 +492,11 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .tchip.doing { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); font-weight: 600; }
 .tchip.waiting { background: color-mix(in srgb, var(--wait) 20%, transparent); color: var(--wait); font-weight: 600; white-space: normal; }
 .tchip.done { text-decoration: line-through; }
+.tchip.waiting:not(.finbar) { background: var(--soft); color: var(--muted); }
+.tsection { margin: 14px 0 4px; font-size: 14px; color: var(--muted); }
+.tstate { font-size: 12px; font-weight: 400; color: var(--muted); }
+.tstate.working { color: var(--ok); }
+.tstate.blocked { color: var(--wait); }
 .tdone { margin: 12px 0; } .tdone summary { cursor: pointer; color: var(--muted); }
 .idlework { margin-top: 4px; color: #c2410c; } .badge.idle { background: #c2410c; color: #fff; font-weight: 700; }
 .skyinfo .srow { margin-top: 2px; } .skyinfo .slimits { margin: 4px 0; } .ausage.stale { color: var(--muted); font-weight: 400; }
