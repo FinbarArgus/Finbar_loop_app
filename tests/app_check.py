@@ -486,9 +486,44 @@ def run(loop_bin, graph, shots):
                 page.reload()
                 got = back()
                 check(page, got == ('← Content', '#/list/content'), f'Back from an item opened by link goes to its own tab {got}', failures)
+                # Tasks: the ledger's task list by agent in role order, each with its status chip, age and source; filters;
+                # done ones collapsed at the foot.
+                import datetime as _dtt
+                ago = lambda h: (_dtt.datetime.now(_dtt.timezone.utc) - _dtt.timedelta(hours=h)).isoformat()
+                T = lambda i, title, who, status, **kw: {'id': i, 'title': title, 'for': who, 'by': 'LOOP', 'source': None, 'status': status,
+                                                        'waiting_on': None, 'created': ago(30), 'updated': ago(2), 'note': None, **kw}
+                (repo / 'state/tasks.json').write_text(json.dumps([
+                    T('T-0001', 'Write the methods section', 'MED-y', 'todo'),
+                    T('T-0002', 'Fix the parser', 'IMPLEMENT-app', 'doing', source='https://github.com/o/Finbar_loop_app/pull/36'),
+                    T('T-0003', 'Run the fit', 'HIGH-paper', 'waiting', waiting_on='Q-0001', source='Q-0001'),
+                    T('T-0004', 'Draft the figure', 'HIGH-paper', 'doing'),
+                    T('T-0005', 'Old work', 'HIGH-paper', 'done', updated=ago(24)),
+                    T('T-0006', 'Ancient work', 'LOW-x', 'done', updated=ago(24 * 9))]))
+                page.goto(base + '#/tasks')
+                page.wait_for_selector('.tgroup')
+                page.locator('.switch button', has_text='All').click()
+                page.wait_for_selector('.switch button.on >> text=All')
+                grp = page.locator('.tgroup').evaluate_all("(gs) => gs.map((g) => [g.dataset.agent, [...g.querySelectorAll('.trow')].map((r) => r.dataset.task + ' ' + r.querySelector('.tchip').textContent)])")
+                check(page, page.locator('.meta a.on').inner_text() == 'Tasks' and grp == [
+                    ['HIGH-paper', ['T-0004 doing', 'T-0003 waiting on Q-0001']], ['IMPLEMENT-app', ['T-0002 doing']], ['MED-y', ['T-0001 todo']]],
+                      f'Tasks: grouped by agent in role order, doing first, with chips {grp}', failures)
+                row = page.locator('.trow[data-task="T-0002"]').inner_text()
+                check(page, 'Fix the parser' in row and 'Finbar_loop_app #36' in row and 'updated 2 h ago' in row
+                      and page.locator('.trow[data-task="T-0003"] .tchip a[href="#/item/Q-0001"]').count() == 1,
+                      f'Tasks: a task shows its age and links its source and the item it waits on {row!r}', failures)
+                done = page.locator('details.tdone')
+                check(page, done.count() == 1 and done.get_attribute('open') is None and 'Done in the last 7 days (1)' in done.inner_text(),
+                      'Tasks: done ones collapsed, only the last 7 days', failures)
+                page.locator('.switch button', has_text='Waiting on me').click()
+                page.wait_for_selector('.switch button.on >> text=Waiting on me')
+                check(page, [r.get_attribute('data-task') for r in page.locator('.tgroup .trow').all()] == ['T-0003'], 'Tasks: "Waiting on me" filter', failures)
+                check(page, narrow(), 'Tasks: no sideways scroll', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-tasks.png', full_page=True)
+                page.locator('.switch button', has_text='All').click()
                 # The Manual tab was called Mine: old links redirect.
                 meta = page.locator('.meta a').all_inner_texts()
-                check(page, meta[:2] == ['Agents', 'Manual'], f'header tabs Agents and Manual {meta}', failures)
+                check(page, meta[:3] == ['Agents', 'Tasks', 'Manual'], f'header tabs Agents, Tasks and Manual {meta}', failures)
                 page.goto(base + '#/mine/write')
                 page.wait_for_url('**#/manual/write')
                 page.wait_for_selector('.tabs a.on[href="#/manual/write"]')
@@ -1179,23 +1214,32 @@ def run(loop_bin, graph, shots):
                       and page.locator('.meta a', has_text='Hills').count() == 0, '#/hills opens the Tree tab; no Hills tab', failures)
                 F = '.gview .farm'
                 check(page, page.locator(f'{F} [data-k="hill"]').count() == 7, 'Farm: one hill per agent, and one for an agent only in the messages', failures)
-                # LOOP's food pile is the board's open items (questions, content, PR reviews), not the usage; tapped, it
-                # says how many and what is counted.
-                page.goto(base + '#/list')
-                page.wait_for_selector('.tabs a .n')
-                n_open = sum(int(x) for x in page.locator('.tabs a:not(.tperm) > .n').all_inner_texts())
-                page.goto(base + '#/tree')
+                # LOOP's food pile is the tasks queued for the agents (status.json usage.food, from the ledger's task list);
+                # tapped, it names them per session and links to the Tasks tab; with none it is gone.
                 fruit = lambda: page.evaluate("""() => [...document.querySelectorAll('.gview .farm rect')]
                     .filter((r) => ['#c8553d', '#e39a3b', '#9a3d2c'].includes(r.getAttribute('fill'))).length""")
+                def food_is(total, per):
+                    stf = json.loads((repo / 'state/status.json').read_text())
+                    stf['usage']['food'] = {'total': total, 'per_session': per}
+                    (repo / 'state/status.json').write_text(json.dumps(stf))
                 def sky_at(age_s=0, **u):
                     (repo / 'state/usage.json').write_text(json.dumps({'resets': 'Nov 26, 7am (Pacific/Auckland)', 'at': int(time.time()) - age_s, **u}))
                     page.reload()
                     page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
+                food_is(5, {'HIGH-paper': 3, 'IMPLEMENT-app': 2})
                 sky_at(pct=26, held=False, override=False)
                 page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
-                lab = page.locator('.hinfo .ausage').first.inner_text()
-                check(page, n_open > 0 and lab.startswith(f'{n_open} items waiting on you') and 'blocking one counts twice' in lab and fruit() > 0,
-                      f'Farm: the food pile is the {n_open} open board items {lab!r}', failures)
+                lab = page.locator('.hinfo .ausage.food').inner_text()
+                check(page, lab.startswith('5 tasks queued for the agents (HIGH-paper 3, IMPLEMENT-app 2)') and fruit() > 0
+                      and page.locator('.hinfo .ausage.food a[href="#/tasks"]').count() == 1,
+                      f'Farm: the food pile is the tasks queued for the agents, linked to the task list {lab!r}', failures)
+                food_is(0, {})
+                sky_at(pct=26, held=False, override=False)
+                page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
+                lab = page.locator('.hinfo .ausage.food').inner_text()
+                check(page, fruit() == 0 and lab.startswith('Nothing queued: give them something to do'), f'Farm: nothing queued, no pile {lab!r}', failures)
+                food_is(5, {'HIGH-paper': 3, 'IMPLEMENT-app': 2})
+                sky_at(pct=26, held=False, override=False)
                 # Day: a sun with the weekly percentage above it; tapped (a phone) or hovered (a computer), every usage figure.
                 sun = page.evaluate("""() => { const s = document.querySelector('.gview svg .sun circle'), l = document.querySelector('.gview svg .sunlabel');
                   return { sun: !!s, label: l && l.textContent, night: !!document.querySelector('.gview svg.scene.night') }; }""")

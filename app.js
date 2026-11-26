@@ -943,6 +943,54 @@
     setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/permission')) await showPermission(); }, 60_000);
   }
 
+  // ------------------------------------------------------------ Tasks: the ledger's task list
+  // state/tasks.json (`loop task`): what each session has been given to do, by session in role order. Filters: all,
+  // doing, waiting on Finbar; done tasks (shown for TASK_DONE_DAYS) are collapsed at the foot.
+  const TASK_DONE_DAYS = 7;
+  const TASK_FILTERS = [['all', 'All'], ['doing', 'Doing'], ['waiting', 'Waiting on me']];
+  function taskSource(src, titles) {
+    if (!src) return null;
+    if (/^[QRC]-\d+$/.test(src)) return el('a', { href: `#/item/${src}`, class: 'alink', title: titles.get(src) || '' }, src);
+    const pr = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(src);
+    return el('a', { href: src, target: '_blank', rel: 'noopener', class: 'alink' }, pr ? `${pr[1]} #${pr[2]}` : 'link');
+  }
+  function taskRow(t, titles, withName) {
+    const chip = t.status === 'waiting'
+      ? el('span', { class: 'tchip waiting' }, 'waiting on ', t.waiting_on ? el('a', { href: `#/item/${t.waiting_on}` }, t.waiting_on) : 'Finbar')
+      : el('span', { class: `tchip ${t.status}` }, t.status);
+    return el('div', { class: 'trow', 'data-task': t.id },
+      el('div', { class: 'arow' }, chip, withName ? el('b', {}, t.for) : null, el('span', { class: 'ttitle' }, t.title)),
+      el('div', { class: 'who' }, `${t.id} · ${t.status === 'done' ? 'done' : 'updated'} ${age(t.updated)} ago · by ${t.by}`,
+        t.source ? ' · ' : '', taskSource(t.source, titles), t.note ? ` · ${t.note}` : ''));
+  }
+  async function showTasks() {
+    await Promise.all([useTree(), refreshIndex()]);
+    const tasks = tree.paths.has('state/tasks.json') ? await getJSON('state/tasks.json').catch(() => []) : [];
+    const titles = new Map(index.items.map((x) => [x.id, x.title]));
+    const filter = TASK_FILTERS.some(([k]) => k === safeGet('loop.tasks.filter')) ? safeGet('loop.tasks.filter') : 'all';
+    const open = tasks.filter((t) => t.status !== 'done');
+    const done = tasks.filter((t) => t.status === 'done' && (Date.now() - Date.parse(t.updated)) / 864e5 <= TASK_DONE_DAYS)
+      .sort((a, b) => b.updated.localeCompare(a.updated));
+    const shown = open.filter((t) => filter === 'all' || t.status === filter);
+    const sw = el('div', { class: 'switch' }, TASK_FILTERS.map(([k, label]) => el('button', { class: k === filter ? 'on' : '',
+      onclick: () => { safeSet('loop.tasks.filter', k); showTasks(); } }, `${label} (${k === 'all' ? open.length : open.filter((t) => t.status === k).length})`)));
+    const ORDER = ['doing', 'waiting', 'todo'];
+    const names = [...new Set(shown.map((t) => t.for))].sort((a, b) => H.roleRank({ name: a }) - H.roleRank({ name: b }) || a.localeCompare(b));
+    const groups = names.map((n) => {
+      const ts = shown.filter((t) => t.for === n).sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || a.id.localeCompare(b.id));
+      return el('section', { class: 'status-card tgroup', 'data-agent': n },
+        el('h3', {}, roleDot(n), ` ${n} `, el('span', { class: 'n' }, String(ts.length))), ...ts.map((t) => taskRow(t, titles, false)));
+    });
+    main().replaceChildren(
+      el('h2', { class: 'permh' }, 'Tasks ', el('span', { class: 'n' }, String(open.length))),
+      el('p', { class: 'who' }, 'What each agent has been given to do. The food pile on the Tree tab is the tasks to do or under way.'),
+      sw,
+      ...(groups.length ? groups : [el('p', { class: 'empty' }, tasks.length ? 'Nothing here.' : 'No tasks yet.')]),
+      done.length ? el('details', { class: 'tdone' }, el('summary', {}, `Done in the last ${TASK_DONE_DAYS} days (${done.length})`),
+        ...done.map((t) => taskRow(t, titles, true))) : null);
+    setPoll(async () => { await loadTree(); if (location.hash.startsWith('#/tasks')) await showTasks(); }, 60_000);
+  }
+
   // ------------------------------------------------------------ Manual: Read, Write, Students, Other
   // Finbar's own entries: personal/<id>/entry.json plus the files dropped with it. The app writes them;
   // loop-cron saves papers to Zotero and writes personal/<id>/zotero.json.
@@ -1597,24 +1645,19 @@
       a.updated ? el('div', { class: 'who' }, `last active ${age(a.updated)} ago`) : null);
   }
 
-  // The sky's usage figure (state/usage.json with `stale` added, see scene.js skyOf) and LOOP's pile's tasks, set by showTree.
-  let skyUsage = null, foodTasks = null;
+  // The sky's usage figure (state/usage.json with `stale` added, see scene.js skyOf) and LOOP's pile, the tasks queued
+  // for the agents (status.json usage.food: {total, per_session}), set by showTree.
+  let skyUsage = null, food = null;
   // Escape closes the Tree tab's pinned info line (treeEscape, set by showTree).
   let treeEscape = null;
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape' && treeEscape && location.hash.startsWith('#/tree')) treeEscape();
   });
-  // The open board items waiting on Finbar (the board's three tabs), for LOOP's food pile: {n, blocking, by section}.
-  function waitingTasks() {
-    const groups = boardGroups();
-    const all = SECTIONS.flatMap(([k]) => groups[k]);
-    return { n: all.length, blocking: all.filter((x) => x.blocking_now).length,
-      by: SECTIONS.map(([k, label]) => [label, groups[k].length]) };
-  }
-  const tasksLine = (t) => (!t ? null : el('div', { class: 'ausage' },
-    `${t.n} item${t.n === 1 ? '' : 's'} waiting on you`, t.n ? ` (${t.by.filter(([, n]) => n).map(([l, n]) => `${l} ${n}`).join(', ')})` : '',
-    t.blocking ? ` · ${t.blocking} blocking` : '',
-    el('div', { class: 'who' }, 'The pile is the open questions, content and PR reviews on the board; a blocking one counts twice.')));
+  const foodLine = (fd) => el('div', { class: 'ausage food' },
+    fd && fd.total ? `${fd.total} task${fd.total === 1 ? '' : 's'} queued for the agents (${Object.entries(fd.per_session || {}).map(([n, k]) => `${n} ${k}`).join(', ')})`
+      : 'Nothing queued: give them something to do',
+    el('div', { class: 'who' }, 'The pile is the food ready for the agents: their tasks to do or under way. ',
+      el('a', { href: '#/tasks' }, 'The task list')));
   const resetsText = (r) => String(r || '').replace(/\s*\(.*\)$/, '').replace(',', '');
   // The sun's (by night the moon's or the lamp's) panel: every usage figure the loop has.
   function skyInfo() {
@@ -1642,7 +1685,7 @@
         el('span', { class: 'who' }, hl.kind === 'food' ? ' · the food source (LOOP)' : ` · ${H.ROLE_TEXT[hl.role]} anthome`)),
       hl.asleep != null ? el('div', { class: 'who hsleep' }, hl.asleep ? 'Asleep: the usage hold is on until the reset.'
         : 'Awake: woken by an urgent message, while its session works.') : null,
-      hl.kind === 'food' ? tasksLine(foodTasks) : null,
+      hl.kind === 'food' ? foodLine(food) : null,
       L ? usageInfo(hl, L) : null,
       a.items && a.items.length ? el('div', { class: 'alinks' }, hl.mood === 'blocked' ? 'Waiting on: ' : 'Will need: ',
         a.items.map((id) => link(id, titles.get(id)))) : null,
@@ -1830,9 +1873,9 @@
     // by day, night while held or past 95%, a lamp when the guard is overridden or an Urgent message woke a session.
     skyUsage = gu && gu.pct != null ? { ...gu, stale: Date.now() / 1000 - gu.at > 2 * 3600 } : null;
     const sky = SC.skyOf(skyUsage), night = sky.night;
-    // LOOP's food pile is the work waiting on Finbar: the board's open items.
-    foodTasks = waitingTasks();
-    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: skyUsage, tasks: foodTasks });
+    // LOOP's food pile is the tasks queued for the agents (the ledger's task list, published by `loop status`).
+    food = (st && st.usage && st.usage.food) || null;
+    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: skyUsage, food });
     const L = sc.L;
     // Hover or tap: the info line. Every segment of the same paper lights up. A tap pins it, so the mouse can cross
     // the scene to its buttons; a tap on open ground unpins it.
@@ -1879,7 +1922,7 @@
         el('span', { class: 'hlight' }, el('i', { style: `background:${H.LIGHTS[r]}` }), H.ROLE_TEXT[r]))),
       el('span', {}, el('b', {}, 'Size'), ' tokens since the weekly reset'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
       el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Dark'), ' stalled'),
-      el('span', {}, el('b', {}, 'Fruit'), ' LOOP\'s pile at the tree\'s foot: the board items waiting on you; in a home, its focus'),
+      el('span', {}, el('b', {}, 'Fruit'), ' LOOP\'s pile at the tree\'s foot: the tasks queued for the agents; in a home, its focus'),
       el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'),
       el('span', {}, el('b', {}, 'Birds'), ' deadlines: nearer and bigger as they come due; a passed one is a crow in the tree'),
       el('span', {}, el('b', {}, 'Sun'), ` weekly usage, rising at 0% on the left and setting at ${SC.SUN_PCT}% on the right`),
@@ -2001,11 +2044,12 @@
     if (!quiet) justSent = null;
     treeWasCached = false;
     try {
-      const meta = ['status', 'manual', 'tree'].includes(h[0]) ? h[0] : 'work';     // Permission is a tab under Agents
+      const meta = ['status', 'manual', 'tree', 'tasks'].includes(h[0]) ? h[0] : 'work';     // Permission is a tab under Agents
       document.querySelectorAll('.meta a').forEach((a) => a.classList.toggle('on', a.dataset.meta === meta));
       if (VIEW_NAMES[h[0]]) backTo = { hash, label: VIEW_NAMES[h[0]] };
       if (h[0] === 'item' && h[1]) await showItem(h[1]);
       else if (h[0] === 'status') await showStatus();
+      else if (h[0] === 'tasks') await showTasks();
       else if (h[0] === 'permission') await showPermission();
       else if (h[0] === 'manual') await showMine(h[1]);
       else if (h[0] === 'tree') await showTree();

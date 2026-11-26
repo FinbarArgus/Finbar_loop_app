@@ -376,17 +376,18 @@
     }
   }
   // LOOP: a pile of fruit fallen from the growth tree (which stands in it in the scene) and leaf bits.
-  // The pile is the work waiting on Finbar: opts.tasks = {n, blocking}, the open board items (questions, content and
-  // PR reviews) and how many of them block now. Each counts 1 and a blocking one 1 more; the pile is 6 blocks high
-  // at FOOD_FULL or more, lower with fewer, a crumb with none (or no figure).
-  const FOOD_FULL = 12;
-  function foodSize(tasks) {
-    return tasks ? Math.max(0, Math.min(1, ((tasks.n || 0) + (tasks.blocking || 0)) / FOOD_FULL)) : 0;
+  // The pile is the food ready for the agents: opts.food = {total, per_session} (status.json usage.food), the tasks
+  // queued for them in the ledger's task list, todo or doing. It is 6 blocks high at FOOD_FULL or more, lower with
+  // fewer, and gone at none (or no figure): nothing has been given them to do.
+  const FOOD_FULL = 15;
+  function foodSize(food) {
+    return food ? Math.max(0, Math.min(1, (food.total || 0) / FOOD_FULL)) : 0;
   }
-  function paintFood(hl, L, px, tasks) {
+  function paintFood(hl, L, px, food) {
     const t = toneOf(hl), f = L.food, r = rng('food', hl.name);
     const set = (x, y, c) => px.set(`${x},${y}`, t(c));
-    const left = foodSize(tasks), H = 6 * left;
+    const left = foodSize(food), H = 6 * left;
+    if (!left) return;
     let peak = 0;
     for (let i = 0; i < f.w; i++) {
       const u = ((i + 0.5) / f.w) * 2 - 1;
@@ -479,7 +480,7 @@
     }
     for (const hl of homes) paintHome(hl, px, carved);
     for (const hl of homes) paintMound(hl, px, L.surface);
-    for (const hl of L.hills.filter((h) => h.kind === 'food')) paintFood(hl, L, px, opts.tasks);
+    for (const hl of L.hills.filter((h) => h.kind === 'food')) paintFood(hl, L, px, opts.food);
     let ants = '', labels = '', hits = '', glow = '', foods = '', zz = '';
     const still = (hl) => (opts.night && hl.asleep !== false ? ' data-still="1"' : '');     // a tunnel's ants sleep too
     L.paths.forEach((pa, n) => {

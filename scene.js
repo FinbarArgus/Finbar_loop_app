@@ -23,11 +23,13 @@
   // an Urgent message woke a session. The sun and its arc grow with the farm's width (1 at SUN.per blocks or less), so
   // they read at the default view's zoom on a phone; the default view's top rises to hold them (sunArc). SUN.ground:
   // blocks of clear sky between the ray tips at the arc's ends and the surface (the anthills, their rocks);
-  // SUN.margin: from the view's sides (the height scale); the arc rises SUN.lift + SUN.liftPer blocks per unit.
+  // SUN.margin: from the view's sides (the height scale). Its peak is SUN.peakM metres above the tree's top (and at
+  // least SUN.lift blocks above its ends).
   const SUN_PCT = 95;
-  const SUN = { per: 100, r: 2, ray: 1.3, font: 1.7, ground: 9, margin: 8, lift: 5, liftPer: 7,
+  const SUN = { per: 100, r: 2, ray: 1.3, font: 1.7, ground: 9, margin: 8, lift: 5, peakM: 5,
     core: '#f7c948', edge: '#ee9a2e', ink: '#6b4a10' };
   const LAMP = { glass: '#fff1b8', base: '#8a8577', glow: '#ffd77a', reach: 34 };
+  const HOME_MAX = 100;         // the most sky above the surface the default view rises to, to hold the sun's arc
   const HOME_SKY = 24;          // blocks of sky above the surface in the default view (the anthills and the trunk's foot)
   const GAP = 12;               // the least open surface the tree stands in; it widens with the trunk (trunk + 8)
   const SMALL = 4;              // a tree shorter than this (blocks) gets a marker at its foot, and Whole tree frames it alone
@@ -81,10 +83,11 @@
   }
   // The sun's arc over the farm L: {s (its size), r, reach (centre to ray tip), gap (centre to the label's baseline),
   // font, x0, x1 (its centre at 0% and SUN_PCT), low (its centre at both ends), apex (at SUN_PCT / 2), top (the label's
-  // top at the apex)}.
-  function sunArc(L) {
+  // top at the apex)}. tall: the tree's height in blocks; the apex is SUN.peakM metres above its top.
+  function sunArc(L, tall = 0) {
     const s = Math.max(1, L.width / SUN.per), r = SUN.r * s, reach = r + SUN.ray * s, gap = r + 1.6 * s, font = SUN.font * s;
-    const low = L.surface - SUN.ground - reach, apex = low - (SUN.lift + SUN.liftPer * s), edge = SUN.margin + reach;
+    const low = L.surface - SUN.ground - reach, edge = SUN.margin + reach;
+    const apex = Math.min(low - SUN.lift, L.surface - tall - SUN.peakM * SCALE);
     return { s, r, reach, gap, font, x0: edge, x1: L.width - edge, low, apex, top: apex - gap - font };
   }
   // The sun's centre for pct: x linear from arc.x0 (0%) to arc.x1 (SUN_PCT), y on a parabola, arc.low at both ends
@@ -128,12 +131,12 @@
     };
   }
 
-  // state: growth.derive(); agents: status.json agents[]; opts: {messages, t, branchNames, hour, usage, tasks}.
+  // state: growth.derive(); agents: status.json agents[]; opts: {messages, t, branchNames, hour, usage, food}.
   // opts.usage (state/usage.json, see skyOf): the sun by day; at night a sky with stars and a moon, the tree and the
   // farm in shade, and, while held, z's from every asleep anthill (anthills.js) drawn over the shade (an overridden
-  // guard holds nothing, so its sessions stay awake). opts.tasks ({n, blocking}): the size of LOOP's pile (anthills.js).
+  // guard holds nothing, so its sessions stay awake). opts.food (status.json usage.food): the size of LOOP's pile (anthills.js).
   // The sun, the moon and the lamp are a tap target data-k="sky" (the app shows the usage).
-  // -> {svg, L (the farm's layout), box (the whole scene), home (the default view: the farm and the trunk's foot),
+  // -> {svg, L (the farm's layout), arc (the sun's, sunArc), box (the whole scene), home (the default view: the farm and the trunk's foot),
   //     tree (the tree, over the scene's width, and the ground it stands on; a small tree's own frame)}; each box is
   //     {x0, y0, x1, y1} in blocks. A small tree (a young one, drawn smaller) has a marker above its foot in the
   //     default view, with its height and a tap target data-k="sprout" (the app zooms to `tree`).
@@ -150,7 +153,7 @@
     const T = G.parts(state, { scene: true, paper: SKY, branchNames: opts.branchNames, hour: opts.hour,
       scaleX: small ? null : (1 - fx) / SCALE });
     const tx0 = fx + SCALE * T.x0, tx1 = fx + SCALE * (T.x0 + T.w), ty0 = L.surface + SCALE * T.y0;
-    const arc = sunArc(L);
+    const arc = sunArc(L, tall);
     const flying = birds(state, L, fx, Math.min(0, ty0, arc.top - 1) - BIRD_ROOM).map((bd) => ({ ...bd, ...birdSvg(bd) }));
     const box = { x0: Math.min(0, tx0, ...flying.map((b) => b.x - 4)), y0: Math.min(0, ty0, ...flying.map((b) => b.y - 4)),
       x1: Math.max(L.width, tx1), y1: L.height };
@@ -165,8 +168,9 @@
     // The ground and sky run a scene's width past each side, so a view zoomed out past the scene shows no edge.
     const bw = box.x1 - box.x0, span = [box.x0 - bw, box.x1 + bw];
     const farm = H.parts(agents, { ...lopts, scene: true, span });
-    // The default view: the farm, the trunk's foot and at least HOME_SKY of sky, up to the sun's arc.
-    const home = { x0: 0, y0: Math.min(L.surface - HOME_SKY, arc.top - 1), x1: L.width, y1: L.height };
+    // The default view: the farm, the trunk's foot and at least HOME_SKY of sky, up to the sun's arc (at most HOME_MAX:
+    // over a taller tree the sun's peak is above it, like the crown, and seen by zooming out).
+    const home = { x0: 0, y0: Math.min(L.surface - HOME_SKY, Math.max(arc.top - 1, L.surface - HOME_MAX)), x1: L.width, y1: L.height };
     const place = `translate(${f(fx)} ${f(L.surface)}) scale(${SCALE})`;
     const counts = ['blocked', 'working', 'quiet'].map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
     const skyTop = box.y0 - (box.y1 - box.y0), sky = sk.night ? NIGHT.sky : SKY;
@@ -197,7 +201,7 @@
       + sprout + (sun ? sun.disc + sun.label : '')
       + `<g class="tree" transform="${place}">${T.hits}</g>`
       + (sproutHit || flying.length || skyHit ? `<g class="hits">${sproutHit}${flying.map((b) => b.hit).join('')}${skyHit}</g>` : '') + '</svg>';
-    return { svg, L, box, home, tree };
+    return { svg, L, box, home, tree, arc };
   }
 
   // Stars over the sky [x0, x1] x [y0, y1] (a fixed pattern, thicker in the default view), and a crescent moon in the default view's top right.
@@ -220,5 +224,5 @@
   // The moon: in the default view's top right, HOME_SKY - 5 above the surface.
   const moonAt = (L) => ({ x: L.width - 7, y: L.surface - HOME_SKY + 5 });
 
-  return { scene, birds, BIRD_ROOM, BIRD_EDGE, skyOf, sunArc, sunAt, SUN_PCT, SUN, NIGHT, SCALE, HOME_SKY, GAP, SMALL, BIRD_NEAR, BIRD_PER_DAY, BIRD_DAYS, BIRD_SMALL, BIRD_GROW };
+  return { scene, birds, BIRD_ROOM, BIRD_EDGE, skyOf, sunArc, sunAt, SUN_PCT, SUN, NIGHT, SCALE, HOME_SKY, HOME_MAX, GAP, SMALL, BIRD_NEAR, BIRD_PER_DAY, BIRD_DAYS, BIRD_SMALL, BIRD_GROW };
 }));
