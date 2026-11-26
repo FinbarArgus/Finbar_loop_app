@@ -1597,15 +1597,42 @@
       a.updated ? el('div', { class: 'who' }, `last active ${age(a.updated)} ago`) : null);
   }
 
-  let foodUsage = null;
-  // The current session's usage (status.json, from /usage), beside the weekly figure on LOOP's food pile.
-  const sessionLine = () => {
-    const l = ((lastStatus && lastStatus.usage && lastStatus.usage.limits) || []).find((x) => /^session/i.test(x.name));
-    return l ? el('div', { class: 'ausage session' }, `session usage ${l.pct}%`, l.resets ? ` · resets ${String(l.resets).replace(/\s*\(.*\)$/, '')}` : '') : null;
-  };
-  const usageLine = (u) => (!u ? null : el('div', { class: 'ausage' + (u.stale ? ' stale' : '') },
-    u.stale ? `usage unknown (last: weekly usage ${Math.round(u.pct)}%)` : `weekly usage ${Math.round(u.pct)}%`,
-    u.resets ? ` · resets ${String(u.resets).replace(/\s*\(.*\)$/, '').replace(',', '')}` : ''));
+  // The sky's usage figure (state/usage.json with `stale` added, see scene.js skyOf) and LOOP's pile's tasks, set by showTree.
+  let skyUsage = null, foodTasks = null;
+  // Escape closes the Tree tab's pinned info line (treeEscape, set by showTree).
+  let treeEscape = null;
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && treeEscape && location.hash.startsWith('#/tree')) treeEscape();
+  });
+  // The open board items waiting on Finbar (the board's three tabs), for LOOP's food pile: {n, blocking, by section}.
+  function waitingTasks() {
+    const groups = boardGroups();
+    const all = SECTIONS.flatMap(([k]) => groups[k]);
+    return { n: all.length, blocking: all.filter((x) => x.blocking_now).length,
+      by: SECTIONS.map(([k, label]) => [label, groups[k].length]) };
+  }
+  const tasksLine = (t) => (!t ? null : el('div', { class: 'ausage' },
+    `${t.n} item${t.n === 1 ? '' : 's'} waiting on you`, t.n ? ` (${t.by.filter(([, n]) => n).map(([l, n]) => `${l} ${n}`).join(', ')})` : '',
+    t.blocking ? ` · ${t.blocking} blocking` : '',
+    el('div', { class: 'who' }, 'The pile is the open questions, content and PR reviews on the board; a blocking one counts twice.')));
+  const resetsText = (r) => String(r || '').replace(/\s*\(.*\)$/, '').replace(',', '');
+  // The sun's (by night the moon's or the lamp's) panel: every usage figure the loop has.
+  function skyInfo() {
+    const u = skyUsage, sk = SC.skyOf(u);
+    if (!u) return el('div', {}, el('b', {}, 'Usage'), el('div', { class: 'who' }, 'No weekly figure from the usage guard yet.'));
+    const limits = ((lastStatus && lastStatus.usage && lastStatus.usage.limits) || []);
+    const row = (k, v, cls) => el('div', { class: 'srow' + (cls ? ` ${cls}` : '') }, el('span', { class: 'who' }, k), ' ', v);
+    return el('div', { class: 'skyinfo' },
+      el('div', { class: 'ausage' + (u.stale ? ' stale' : '') },
+        u.stale ? `Weekly usage unknown (last ${Math.round(u.pct)}%, ${age(new Date(u.at * 1000).toISOString())} ago)` : `Weekly usage ${Math.round(u.pct)}%`,
+        u.resets ? ` · resets ${resetsText(u.resets)}` : ''),
+      limits.length ? el('div', { class: 'slimits' }, limits.map((l) => row(l.name, `${l.pct}%${l.resets ? ` · resets ${resetsText(l.resets)}` : ''}`, 'session'))) : null,
+      row('Hold', u.held ? 'on: messages, answers and papers wait for the reset (Urgent ones still go)' : `off (it starts at ${SC.SUN_PCT}%)`),
+      row('Guard', u.override ? 'overridden (usage-guard off): sessions run past the limit' : 'on'),
+      row('Woken by Urgent messages', (u.woken || []).length ? u.woken.join(', ') : 'none'),
+      el('div', { class: 'who' }, sk.night ? (sk.lamp ? 'Night, with a lamp lit: the guard is overridden or an Urgent message went out.' : 'Night: usage is held until the weekly reset.')
+        : `The sun rises at 0% on the left and sets at ${SC.SUN_PCT}% on the right; night after that.`));
+  }
   function hillInfo(hl, L, tapped) {
     const a = hl.agent;
     const titles = new Map(index.items.map((x) => [x.id, x.title]));
@@ -1615,8 +1642,7 @@
         el('span', { class: 'who' }, hl.kind === 'food' ? ' · the food source (LOOP)' : ` · ${H.ROLE_TEXT[hl.role]} anthome`)),
       hl.asleep != null ? el('div', { class: 'who hsleep' }, hl.asleep ? 'Asleep: the usage hold is on until the reset.'
         : 'Awake: woken by an urgent message, while its session works.') : null,
-      hl.kind === 'food' ? usageLine(foodUsage) : null,
-      hl.kind === 'food' ? sessionLine() : null,
+      hl.kind === 'food' ? tasksLine(foodTasks) : null,
       L ? usageInfo(hl, L) : null,
       a.items && a.items.length ? el('div', { class: 'alinks' }, hl.mood === 'blocked' ? 'Waiting on: ' : 'Will need: ',
         a.items.map((id) => link(id, titles.get(id)))) : null,
@@ -1752,7 +1778,7 @@
     // a pointer's width) is picked, over the farm's. The young tree's marker keeps its own tap (it zooms to the tree).
     const pick = (ev) => {
       const direct = ev.target.closest('[data-k]');
-      if (direct && (direct.dataset.k === 'sprout' || direct.closest('.tree'))) return direct;
+      if (direct && (direct.dataset.k === 'sprout' || direct.dataset.k === 'sky' || direct.closest('.tree'))) return direct;
       const reach = ev.pointerType === 'mouse' ? 12 : 22;
       let best = null, bd = reach;
       svgEl.querySelectorAll('.tree .hits [data-k]').forEach((n) => {
@@ -1797,14 +1823,16 @@
     const agents = (st && st.agents) || [];
     const state = growthState();
     const redraw = () => showTree();
-    const hint = 'Tap or hover the trunk (the topics you have read), a branch (its papers), an animal, a bird (a deadline), an anthome (its usage), the food in it (its focus) or a tunnel (its messages).';
+    const hint = 'Tap or hover the sun or moon (usage), the trunk (the topics you have read), a branch (its papers), an animal, a bird (a deadline), an anthome (its usage), the food in it (its focus) or a tunnel (its messages).';
     const info = el('div', { class: 'ginfo hinfo' }, el('span', { class: 'who' }, hint));
     const names = safeGet('loop.tree.names') === '1';
-    // LOOP's food pile is the weekly usage left (the usage guard's figure, published by `loop status`); faded when stale.
-    foodUsage = gu && gu.pct != null ? { pct: gu.pct, resets: gu.resets, stale: Date.now() / 1000 - gu.at > 2 * 3600 } : null;
-    // Night while the usage hold is on (state/usage.json held): every anthill asleep but those woken by an urgent message.
-    const night = gu && gu.held ? { woken: gu.woken || [] } : null;
-    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: foodUsage, night });
+    // The sky is the weekly usage (the usage guard's figure, published by `loop status`; faded when over 2 h old): the sun
+    // by day, night while held or past 95%, a lamp when the guard is overridden or an Urgent message woke a session.
+    skyUsage = gu && gu.pct != null ? { ...gu, stale: Date.now() / 1000 - gu.at > 2 * 3600 } : null;
+    const sky = SC.skyOf(skyUsage), night = sky.night;
+    // LOOP's food pile is the work waiting on Finbar: the board's open items.
+    foodTasks = waitingTasks();
+    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: skyUsage, tasks: foodTasks });
     const L = sc.L;
     // Hover or tap: the info line. Every segment of the same paper lights up. A tap pins it, so the mouse can cross
     // the scene to its buttons; a tap on open ground unpins it.
@@ -1822,7 +1850,7 @@
       if (!t || (t === shown && !tapped)) return;
       const k = t.dataset.k, i = t.dataset.i;
       const tree_ = ['seg', 'branch', 'creature', 'bird'].includes(k);
-      const body = tree_ ? growthInfo(state, k, i, t.dataset.b)
+      const body = k === 'sky' ? skyInfo() : tree_ ? growthInfo(state, k, i, t.dataset.b)
         : k === 'path' ? pathInfo(L.paths[+i]) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L, !!tapped) : null;
       if (!body) return;
       shown = t; pinned = !!tapped;
@@ -1834,6 +1862,7 @@
       info.classList.add('on');
     };
     const viewer = sceneViewer(sc, show);
+    treeEscape = () => show(null, true);
     const box = el('input', { type: 'checkbox' });
     box.checked = names;
     box.addEventListener('change', () => { safeSet('loop.tree.names', box.checked ? '1' : null); redraw(); });
@@ -1850,10 +1879,13 @@
         el('span', { class: 'hlight' }, el('i', { style: `background:${H.LIGHTS[r]}` }), H.ROLE_TEXT[r]))),
       el('span', {}, el('b', {}, 'Size'), ' tokens since the weekly reset'), el('span', {}, el('b', {}, 'Rock'), ' blocked on you'),
       el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Dark'), ' stalled'),
-      el('span', {}, el('b', {}, 'Fruit'), ' LOOP, at the tree\'s foot; in a home, its focus'),
+      el('span', {}, el('b', {}, 'Fruit'), ' LOOP\'s pile at the tree\'s foot: the board items waiting on you; in a home, its focus'),
       el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'),
       el('span', {}, el('b', {}, 'Birds'), ' deadlines: nearer and bigger as they come due; a passed one is a crow in the tree'),
-      night ? el('span', {}, el('b', {}, 'Night'), ' usage held until the reset: z\'s asleep; an urgent message wakes its agent') : null);
+      el('span', {}, el('b', {}, 'Sun'), ` weekly usage, rising at 0% on the left and setting at ${SC.SUN_PCT}% on the right`),
+      night ? el('span', {}, el('b', {}, 'Night'), sky.held ? ' usage held until the reset: z\'s asleep; an urgent message wakes its agent'
+        : ` over ${SC.SUN_PCT}% of the weekly usage`) : null,
+      sky.lamp ? el('span', {}, el('b', {}, 'Lamp'), ' the guard is overridden or an Urgent message went out') : null);
     const log = el('ol', { class: 'glog' }, state.events.slice(0, 40).map(growthEvent));
     const more = state.events.length > 40 ? el('button', { class: 'link', onclick: () => {
       log.replaceChildren(...state.events.map(growthEvent)); more.remove();

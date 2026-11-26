@@ -41,7 +41,9 @@ test('the default view frames every anthill, anthome and the trunk\'s foot', () 
   }
   assert.ok(within({ x: sc.L.food.cx, y: sc.L.surface - S.HOME_SKY + 1 }, sc.home));
   assert.ok(within({ x: sc.L.gap.cx, y: sc.L.surface }, sc.home), 'the trunk\'s foot');
-  assert.match(sc.svg, new RegExp(`viewBox="0 ${sc.L.surface - S.HOME_SKY} ${sc.L.width} ${sc.L.height - sc.L.surface + S.HOME_SKY}"`));
+  const top = Math.min(sc.L.surface - S.HOME_SKY, S.sunArc(sc.L).top - 1);           // and the sun's arc
+  assert.deepEqual(sc.home, { x0: 0, y0: top, x1: sc.L.width, y1: sc.L.height });
+  assert.match(sc.svg, new RegExp(`viewBox="0 ${Math.round(top * 100) / 100} ${sc.L.width} ${Math.round((sc.L.height - top) * 100) / 100}"`));
 });
 
 test('a grown tree rises above the default view, and the scene grows to hold it', () => {
@@ -148,14 +150,14 @@ test('deadline birds fly in from beside the food pile: further for later deadlin
   }
   assert.match(sc.svg, /data-k="bird" data-i="gone"/, 'the passed one perches on the tree');
   // At night the birds are shaded with the rest of the scene, and their tap targets stay above the shade.
-  const dark = S.scene(st, AGENTS, { night: { woken: [] } }), at = (x) => dark.svg.indexOf(x);
+  const dark = S.scene(st, AGENTS, { usage: { pct: 95, held: true, woken: [] } }), at = (x) => dark.svg.indexOf(x);
   assert.ok(at('<g class="birds">') < at('nightshade') && at('nightshade') < dark.svg.lastIndexOf('data-k="bird"'));
 });
 
 test('night (usage held): a dark sky with stars and a moon in the default view, the scene shaded, z\'s over the shade', () => {
   const day = S.scene(young(), AGENTS);
   assert.doesNotMatch(day.svg, /nightshade|class="zz"|data-still|class="stars"/);
-  const sc = S.scene(young(), AGENTS, { night: { woken: [] } });
+  const sc = S.scene(young(), AGENTS, { usage: { pct: 95, held: true, woken: [] } });
   assert.match(sc.svg, /class="scene night"/);
   assert.match(sc.svg, new RegExp(`fill="${S.NIGHT.sky}"`));
   const stars = [...sc.svg.matchAll(/<rect x="([-\d.]+)" y="([-\d.]+)" width="0\.[35]" height="0\.[35]" fill="#fff6d8"/g)]
@@ -173,13 +175,82 @@ test('night (usage held): a dark sky with stars and a moon in the default view, 
 });
 
 test('night: an urgent message wakes only that agent while its session works; it sleeps again when idle', () => {
-  const woke = S.scene(young(), AGENTS, { night: { woken: ['HIGH-a', 'MED-c'] } });   // MED-c stalled: asleep again
+  const woke = S.scene(young(), AGENTS, { usage: { pct: 95, held: true, woken: ['HIGH-a', 'MED-c'] } });   // MED-c stalled: asleep again
   const hill = (sc, name) => sc.L.hills.findIndex((h) => h.name === name);
   const zzOf = (sc, name) => sc.svg.includes(`class="zz" data-h="${hill(sc, name)}"`);
   assert.ok(!zzOf(woke, 'HIGH-a') && zzOf(woke, 'MED-c') && zzOf(woke, 'LOW-d') && zzOf(woke, 'LOOP'));
   const ants = (sc, name) => [...sc.svg.matchAll(new RegExp(`<g class="ant" data-h="${hill(sc, name)}"[^>]*>`, 'g'))].map((m) => m[0]);
   assert.ok(ants(woke, 'HIGH-a').length > 0 && ants(woke, 'HIGH-a').every((a) => !a.includes('data-still')), 'the woken hill\'s ants move');
   assert.ok(ants(woke, 'LOW-d').length > 0 && ants(woke, 'LOW-d').every((a) => a.includes('data-still')), 'a working, unwoken hill\'s ants stand still');
-  const idle = S.scene(young(), AGENTS.map((a) => (a.name === 'HIGH-a' ? { ...a, state: 'idle' } : a)), { night: { woken: ['HIGH-a'] } });
+  const idle = S.scene(young(), AGENTS.map((a) => (a.name === 'HIGH-a' ? { ...a, state: 'idle' } : a)), { usage: { pct: 95, held: true, woken: ['HIGH-a'] } });
   assert.ok(zzOf(idle, 'HIGH-a'), 'woken but idle: asleep again');
+});
+
+test('day: the sun rises at the left at 0%, is highest at 47.5%, sets at the right at 95%, its percentage above it', () => {
+  const wide = Array.from({ length: 20 }, (_, k) => ag(`MED-${k}`));
+  for (const agents of [AGENTS, wide]) {
+    const sc = S.scene(young(), agents, { usage: { pct: 0 } }), arc = S.sunArc(sc.L), h = sc.home, at = (p) => S.sunAt(p, arc);
+    const [a, m, b] = [at(0), at(47.5), at(95)];
+    assert.equal(arc.s, Math.max(1, sc.L.width / S.SUN.per), 'the sun grows with the farm\'s width');
+    assert.ok(a.x - arc.reach - h.x0 >= S.SUN.margin && h.x1 - b.x - arc.reach >= S.SUN.margin - 1e-9, 'near the edges, clear of the height scale');
+    assert.ok(Math.abs(m.x - (h.x0 + h.x1) / 2) < 1e-9 && Math.abs(a.y - b.y) < 1e-9 && m.y < a.y - 10, 'low at both ends, highest in the middle');
+    assert.ok(at(20).x < at(40).x && at(20).y > m.y && at(70).y < b.y, 'x moves right, y rises then falls');
+    assert.deepEqual(at(120), b, 'past 95% it stays set');
+    for (const [pct, p] of [[0, a], [47.5, m], [95, b]]) {
+      assert.ok(p.y - arc.gap - arc.font >= h.y0, `${pct}%: its label inside the default view`);
+      assert.ok(p.y + arc.reach <= sc.L.surface - S.SUN.ground + 1e-9, `${pct}%: clear of the anthills`);
+    }
+  }
+  const day = S.scene(young(), AGENTS, { usage: { pct: 26.4, held: false } });
+  assert.doesNotMatch(day.svg, /class="scene night"|nightshade|class="moon"|class="lamp"/);
+  const c = S.sunAt(26.4, S.sunArc(day.L));
+  assert.match(day.svg, new RegExp(`<g class="sun"><g [^>]*>.*<circle cx="${Math.round(c.x * 100) / 100}" cy="${Math.round(c.y * 100) / 100}"`));
+  assert.match(day.svg, /<text class="sunlabel"[^>]*>26%<\/text>/);
+  assert.match(day.svg, /<g class="hits">.*data-k="sky"/);
+  // The sun and its label are drawn over the tree and the farm, so neither hides it.
+  const i = (x) => day.svg.indexOf(x);
+  assert.ok(i('<g class="sun">') > i('<g class="farm">') && i('<g class="sun">') > i('<g class="tree"') && i('sunlabel') > i('<g class="sun">'));
+  assert.match(S.scene(young(), AGENTS, { usage: { pct: 40, stale: true } }).svg, /sunlabel[^>]*opacity="0.45">40%\?</);
+  assert.doesNotMatch(S.scene(young(), AGENTS).svg, /class="sun"|data-k="sky"/, 'no usage figure: no sun');
+});
+
+test('night when held, and at 95% with the guard overridden; the lamp when overridden or an Urgent message woke a session', () => {
+  assert.deepEqual(S.skyOf({ pct: 50 }), { night: false, lamp: false, held: false, woken: [] });
+  assert.deepEqual(S.skyOf({ pct: 94.9, override: true }), { night: false, lamp: false, held: false, woken: [] });
+  assert.deepEqual(S.skyOf({ pct: 95, held: true }), { night: true, lamp: false, held: true, woken: [] });
+  assert.deepEqual(S.skyOf({ pct: 97, held: false, override: true }), { night: true, lamp: true, held: false, woken: [] });
+  assert.deepEqual(S.skyOf({ pct: 95, held: true, woken: ['HIGH-a'] }), { night: true, lamp: true, held: true, woken: ['HIGH-a'] });
+  const held = S.scene(young(), AGENTS, { usage: { pct: 95, held: true } });
+  assert.match(held.svg, /class="scene night"/);
+  assert.doesNotMatch(held.svg, /class="sun"|class="lamp"|lampmask/);
+  assert.match(held.svg, /<g class="hits">.*data-k="sky"/, 'the moon is a tap target');
+  // Overridden at 97%: night, stars and the moon, a lamp over LOOP's pile lifting the shade around it; nobody asleep.
+  const lit = S.scene(young(), AGENTS, { usage: { pct: 97, override: true } });
+  assert.match(lit.svg, /class="scene night"/);
+  assert.match(lit.svg, /class="stars"/);
+  assert.match(lit.svg, /class="moon"/);
+  assert.match(lit.svg, /<g class="lamp">/);
+  assert.match(lit.svg, /class="nightshade"[^>]*mask="url\(#lampmask\)"/);
+  assert.match(lit.svg, /<mask id="lampmask"[^>]*>.*fill="url\(#lamphole\)"/);
+  assert.ok(lit.svg.indexOf('nightshade') < lit.svg.indexOf('<g class="lamp">'), 'the bulb over the shade');
+  assert.doesNotMatch(lit.svg, /class="zz"|data-still/);
+  assert.match(lit.svg, /at night \(over the weekly limit, a lamp lit\)/);
+  // Held, an Urgent message woke HIGH-a: the lamp too, and the other anthills asleep.
+  const woke = S.scene(young(), AGENTS, { usage: { pct: 96, held: true, woken: ['HIGH-a'] } });
+  assert.match(woke.svg, /<g class="lamp">/);
+  assert.match(woke.svg, /class="zz"/);
+});
+
+test("LOOP's food pile is the open board items: a crumb with none, higher with more, blocking ones count twice, full at FOOD_FULL", () => {
+  const H = require('../anthills.js');
+  assert.equal(H.foodSize(null), 0);
+  assert.equal(H.foodSize({ n: 0, blocking: 0 }), 0);
+  assert.equal(H.foodSize({ n: 3, blocking: 0 }), 3 / H.FOOD_FULL);
+  assert.equal(H.foodSize({ n: 3, blocking: 3 }), 6 / H.FOOD_FULL);
+  assert.equal(H.foodSize({ n: 40, blocking: 2 }), 1);
+  const fruit = (tasks) => (S.scene(young(), AGENTS, { tasks }).svg.match(/fill="#(c8553d|e39a3b|9a3d2c)"/g) || []).length;
+  const n = [0, 3, 8, 12].map((k) => fruit({ n: k, blocking: 0 }));
+  assert.ok(n[0] > 0 && n[0] < n[1] && n[1] < n[2] && n[2] < n[3], `the pile grows with the count ${n}`);
+  assert.equal(fruit({ n: 4, blocking: 4 }), n[2], 'four blocking items weigh as eight');
+  assert.equal(fruit({ n: 0 }), fruit(null), 'no figure: a crumb');
 });

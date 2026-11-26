@@ -376,18 +376,17 @@
     }
   }
   // LOOP: a pile of fruit fallen from the growth tree (which stands in it in the scene) and leaf bits.
-  // The pile is the weekly usage left: opts.usage = {pct, stale} (pct of the week used). Full (6 blocks) after the
-  // reset, lower as it runs out, a crumb at 100%; with no figure it is full, and a stale figure is drawn faded.
-  const fade = (c) => '#' + [1, 3, 5].map((k) => Math.round(parseInt(c.slice(k, k + 2), 16) * 0.35 + 0xe6 * 0.65)
-    .toString(16).padStart(2, '0')).join('');
-  function foodLeft(usage) {
-    return usage && usage.pct != null ? Math.max(0, Math.min(1, (100 - usage.pct) / 100)) : 1;
+  // The pile is the work waiting on Finbar: opts.tasks = {n, blocking}, the open board items (questions, content and
+  // PR reviews) and how many of them block now. Each counts 1 and a blocking one 1 more; the pile is 6 blocks high
+  // at FOOD_FULL or more, lower with fewer, a crumb with none (or no figure).
+  const FOOD_FULL = 12;
+  function foodSize(tasks) {
+    return tasks ? Math.max(0, Math.min(1, ((tasks.n || 0) + (tasks.blocking || 0)) / FOOD_FULL)) : 0;
   }
-  function paintFood(hl, L, px, usage) {
-    const tone = toneOf(hl), f = L.food, r = rng('food', hl.name);
-    const t = usage && usage.stale ? (c) => fade(tone(c)) : tone;
+  function paintFood(hl, L, px, tasks) {
+    const t = toneOf(hl), f = L.food, r = rng('food', hl.name);
     const set = (x, y, c) => px.set(`${x},${y}`, t(c));
-    const left = foodLeft(usage), H = 6 * left;
+    const left = foodSize(tasks), H = 6 * left;
     let peak = 0;
     for (let i = 0; i < f.w; i++) {
       const u = ((i + 0.5) / f.w) * 2 - 1;
@@ -480,7 +479,7 @@
     }
     for (const hl of homes) paintHome(hl, px, carved);
     for (const hl of homes) paintMound(hl, px, L.surface);
-    for (const hl of L.hills.filter((h) => h.kind === 'food')) paintFood(hl, L, px, opts.usage);
+    for (const hl of L.hills.filter((h) => h.kind === 'food')) paintFood(hl, L, px, opts.tasks);
     let ants = '', labels = '', hits = '', glow = '', foods = '', zz = '';
     const still = (hl) => (opts.night && hl.asleep !== false ? ' data-still="1"' : '');     // a tunnel's ants sleep too
     L.paths.forEach((pa, n) => {
@@ -543,6 +542,6 @@
       + ` aria-label="${L.hills.length} agents: ${counts}">${body}${zz}</svg>`;
   }
 
-  return { foodLeft, pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, parts, svg, label,
+  return { foodSize, FOOD_FULL, pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, parts, svg, label,
     SIZES, ANTS, SHAPES, CONTENTS, SOILS, LIGHTS, ROLE_ORDER, ROLE_TEXT, SPEED, SCALE, COL };
 }));

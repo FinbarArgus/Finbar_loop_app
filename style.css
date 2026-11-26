@@ -484,7 +484,8 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .ttable th, .ttable td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
 .bverdict .choice-btn { padding: 6px 8px; }
 .bverdict .choice-btn.sent { border-style: dashed; }
-.ausage { font-weight: 600; } .ausage.stale { color: var(--muted); font-weight: 400; }
+.ausage { font-weight: 600; }
+.skyinfo .srow { margin-top: 2px; } .skyinfo .slimits { margin: 4px 0; } .ausage.stale { color: var(--muted); font-weight: 400; }
 .heldbanner { background: color-mix(in srgb, var(--ask) 22%, var(--bg)); color: var(--ink); padding: 8px 16px; font-size: 14px; font-weight: 600; text-align: center; }
 /* Night (the usage hold): z's rise from each asleep anthill and fade. */
 .scene .zz text { animation: hzz 2.4s linear infinite; }
