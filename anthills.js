@@ -8,7 +8,8 @@
 // by a tunnel underground, through a gallery below the homes; messages with LOOP go up the session's shaft and
 // along the surface to the food. A rock on an anthill means that session is blocked on Finbar. Each anthome's shape, contents and lights come from its name, so each looks different; the
 // colour of its lights is the session's role (HIGH, MED, LOW, IMPLEMENT or other), and the lights are off when the
-// session has stalled or stopped. Working sessions have ants walking from their home up to the surface.
+// session has stalled or stopped. Working sessions have ants walking from their home up to the surface. The
+// maintainer is a dung beetle underground, under the hill of the session it is working with (status.json usage.maintainer).
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -81,6 +82,7 @@
     trail: '#a89068', ant: '#1f1610', egg: '#f2ece0', seed: '#d2b483', seedDark: '#a8885b', larva: '#efe3c7', fungus: '#d9dccb',
     fungusDark: '#b5b9a3', root: '#3c2c1f', crumb: '#e2c46e', leaf: '#7f9a5c', fruit: '#c8553d', fruitDark: '#9a3d2c', fruitGold: '#e39a3b', off: '#6d665e',
     rock: '#8a8c88', rockDark: '#686a66', rockLight: '#b0b2ad', label: '#4a4036', inkUnder: '#f4ecdc',
+    beetle: '#2b5a4c', beetleLine: '#0f2a22', beetleSheen: '#a6e0b4', beetleLeg: '#1a1410', dung: '#7a5a34', dungDark: '#5a4024',
   };
 
   // An anthome's design, fixed by its name.
@@ -133,10 +135,18 @@
   // HOME_W[0] to HOME_W[1] with the square root of its share of the largest session's tokens, so its area follows
   // the tokens and a small session stays visible. Without token figures it is NO_TOKENS_W wide. hl.food is
   // the food pile on its floor (a box), hl.tokens its tokens.
+  // opts.maintainer (status.json usage.maintainer: {name, at, why, since, source}): the maintainer is no anthill, and
+  // its tunnels are not drawn; L.beetle is its dung beetle in the gallery under the hill of session `at` (LOOP's
+  // pile when `at` is LOOP or not in the farm): {x, y, k (its scale), hill (an index in hills, or -1), agent (its
+  // status row, or {name}), at, why, since, source}.
   function layout(agents, opts = {}) {
-    const all = (agents || []).filter((a) => a && a.name);
+    const mt = opts.maintainer && opts.maintainer.name ? opts.maintainer : null;
+    const all = (agents || []).filter((a) => a && a.name && !(mt && a.name === mt.name));
     const woken = new Set((opts.night && opts.night.woken) || []);
     const known = new Set(all.map((a) => a.name));
+    if (mt && opts.messages) {
+      opts = { ...opts, messages: { ...opts.messages, pairs: (opts.messages.pairs || []).filter((pr) => pr.a !== mt.name && pr.b !== mt.name) } };
+    }
     for (const pr of (opts.messages || {}).pairs || []) {
       for (const n of [pr.a, pr.b]) {
         if (n && !known.has(n)) { known.add(n); all.push({ name: n, state: 'stalled', running: false, ghost: true }); }
@@ -201,6 +211,13 @@
     const L = { width, height, surface, gallery, food, hills: list,
       gap: gap ? { x0: fx + FOOD / 2, x1: fx + FOOD / 2 + gap, cx: fx + FOOD / 2 + gap / 2 } : null };
     L.paths = pathsOf(L, opts.messages);
+    if (mt) {
+      const n = list.findIndex((h) => h.kind === 'home' && h.name === mt.at);
+      const k = Math.max(1, width / 100);                  // it grows with the farm, so it reads on a phone (as the "!" does)
+      L.beetle = { x: n >= 0 ? list[n].x : fx, y: gallery + GALLERY / 2 + 0.5, k, hill: n >= 0 ? n : list.findIndex((h) => h.kind === 'food'),
+        agent: (agents || []).find((a) => a && a.name === mt.name) || { name: mt.name },
+        at: mt.at || null, why: mt.why || null, since: mt.since || null, source: mt.source || null };
+    }
     return L;
   }
 
@@ -429,6 +446,17 @@
     + '<circle cx="0.36" cy="-0.02" r="0.16" stroke="none"/>'
     + '<path fill="none" d="M-0.08 0.05 L-0.4 0.38 M0.02 0.08 L-0.02 0.42 M0.1 0.05 L0.38 0.38 M-0.08 -0.05 L-0.36 -0.32 M0.1 -0.05 L0.34 -0.32 M0.02 -0.08 L0 -0.36'
     + ' M0.46 -0.1 L0.7 -0.4 M0.48 -0.04 L0.78 -0.2"/></g>';
+  // The maintainer's dung beetle, facing right and rolling its ball, in its burrow (6.4 x 3.1 blocks before its scale).
+  const BEETLE = `<ellipse cx="1" cy="0.1" rx="3.2" ry="1.55" fill="${C.tunnel}"/>`
+    + `<g stroke="${C.beetleLeg}" stroke-width="0.16" stroke-linecap="round" fill="none">`
+    + '<path d="M-0.9 0.5 L-1.5 1.1 M0 0.6 L-0.1 1.2 M0.7 0.5 L1.2 1.1 M-0.9 -0.4 L-1.5 -0.9 M0.7 -0.4 L1.2 -0.9"/></g>'
+    + `<circle cx="2.45" cy="0.15" r="1.05" fill="${C.dung}"/><circle cx="2.1" cy="-0.2" r="0.18" fill="${C.dungDark}"/>`
+    + `<circle cx="2.8" cy="0.5" r="0.15" fill="${C.dungDark}"/><circle cx="2.6" cy="-0.45" r="0.1" fill="${C.dungDark}"/>`
+    + `<ellipse cx="-0.25" cy="0" rx="1.25" ry="0.85" fill="${C.beetle}"/>`
+    + `<path d="M-1.4 0 L0.95 0" stroke="${C.beetleLine}" stroke-width="0.08"/>`
+    + `<ellipse cx="-0.45" cy="-0.38" rx="0.55" ry="0.16" fill="${C.beetleSheen}" opacity="0.75"/>`
+    + `<ellipse cx="1.05" cy="0" rx="0.42" ry="0.55" fill="${C.beetle}"/>`
+    + `<path d="M1.35 -0.35 L1.6 -0.15 L1.4 0 L1.6 0.15 L1.35 0.35 Z" fill="${C.beetleLeg}"/>`;
   const SCALE = 0.75;
   // Ant transform: moved to p, turned to its heading, never upside down (mirrored when heading left).
   function antPose(p) {
@@ -524,13 +552,22 @@
         + `<rect x="${f(hm.x0 - 0.5)}" y="${f(hm.y0 - 0.5)}" width="${f(hm.w + 1)}" height="${f(hm.h + LABEL + 0.5)}"/></g>`;
       foods += `<rect data-k="food" data-i="${n}" x="${f(hl.food.x0 - 0.6)}" y="${f(hl.food.y0 - 1)}" width="${f(hl.food.w + 1.2)}" height="${f(hl.food.h + 1.4)}"/>`;
     });
+    // The maintainer's beetle (L.beetle): <g class="beetle" data-at data-x data-y data-s> placed by translate(x y) scale(k), so the app
+    // can walk it from where it was; its tap target is data-k="beetle".
+    let beetle = '';
+    const bt = L.beetle;
+    if (bt) {
+      const bx = bt.x, k = bt.k;
+      beetle = `<g class="beetle" data-at="${esc(bt.at || '')}" data-x="${f(bx)}" data-y="${f(bt.y)}" data-s="${f(k)}" transform="translate(${f(bx)} ${f(bt.y)}) scale(${f(k)})"><g transform="translate(-1 0)">${BEETLE}</g></g>`;
+      if (!opts.mini) hits += `<rect data-k="beetle" x="${f(bx - 2.8 * k)}" y="${f(bt.y - 1.4 * k)}" width="${f(5.6 * k)}" height="${f(2.8 * k)}"/>`;
+    }
     const sw = f(sx1 - sx0), sx = sx0 ? `x="${f(sx0)}" ` : '';
     const body = (opts.scene ? '' : `<rect width="${L.width}" height="${L.surface}" fill="${C.sky}"/>`)
       + `<rect ${sx}y="${L.surface}" width="${sw}" height="${f(L.height - L.surface)}" fill="${C.soil[0]}"/>`
       + `<rect ${sx}y="${L.surface + 10}" width="${sw}" height="${f(L.height - L.surface - 10)}" fill="${C.soil[1]}"/>`
       + `<rect ${sx}y="${f(L.gallery - 2)}" width="${sw}" height="${f(L.height - L.gallery + 2)}" fill="${C.soil[2]}"/>`
       + `<g shape-rendering="crispEdges">${rects(px)}</g>`
-      + `<g class="glows" opacity="0.38">${glow}</g>${labels}<g class="ants">${ants}</g>`
+      + `<g class="glows" opacity="0.38">${glow}</g>${labels}<g class="ants">${ants}</g>${beetle}`
       + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}${foods}</g>`);
     return { body, L, zz, alerts };
   }

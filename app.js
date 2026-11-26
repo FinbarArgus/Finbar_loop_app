@@ -1655,12 +1655,45 @@
     if (ev.key === 'Escape' && treeEscape && location.hash.startsWith('#/tree')) treeEscape();
   });
   // Idle with work (status.json idle_with_work): its tasks, and when the maintainer was told.
-  let taskTitles = new Map();
+  let taskTitles = new Map(), allTasks = [];
   const hhmm = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   const idleLine = (a) => (!(a.idle_with_work || []).length ? null : el('div', { class: 'idlework' },
     el('b', {}, '! Idle with work: '), a.idle_with_work.map((id) => `${id} ${taskTitles.get(id) || ''}`.trim()).join('; '),
     el('div', { class: 'who' }, a.maintenance_alerted ? `Maintenance alerted at ${hhmm(a.maintenance_alerted)}` : 'Maintenance not alerted yet',
       ' · ', el('a', { href: '#/tasks' }, 'The task list'))));
+  // The maintainer's dung beetle (anthills.js L.beetle, from status.json usage.maintainer): who it is working with, why,
+  // since when and how the ledger knows, and its tasks under way.
+  const BEETLE_SOURCE = { said: 'it said so (loop maintenance at)', message: 'its last message', task: 'the last task it added',
+    alert: 'the last idle alert it was sent', default: 'nothing recent: it waits at LOOP' };
+  function beetleInfo(bt) {
+    const a = bt.agent, doing = allTasks.filter((t) => t.for === a.name && t.status === 'doing');
+    return el('div', {},
+      el('div', { class: 'arow' }, el('b', {}, a.name), a.state ? el('span', { class: `badge hmood ${H.moodOf(a)}` }, MOOD_TEXT[H.moodOf(a)]) : null,
+        el('span', { class: 'who' }, ' · the maintainer, a dung beetle')),
+      el('div', { class: 'adetail beetleat' }, `Working with ${bt.at || 'LOOP'}`, bt.why ? `: ${bt.why}` : ''),
+      el('div', { class: 'who' }, `From ${BEETLE_SOURCE[bt.source] || 'the ledger'}`, bt.since ? `, ${age(bt.since)} ago` : ''),
+      doing.length ? el('div', { class: 'alinks' }, 'Doing: ', doing.map((t) => `${t.id} ${t.title}`).join('; ')) : null,
+      a.why ? el('div', { class: 'awhy' }, a.why) : null);
+  }
+  // When the beetle has moved to another session since this device last drew it (loop.tree.beetle: {at, x}), it
+  // walks along the gallery from there (4 blocks a second, facing its way).
+  function walkBeetle(view) {
+    const g = view.querySelector('.beetle');
+    if (!g) return;
+    const { at, x, y, s } = { at: g.dataset.at, x: +g.dataset.x, y: +g.dataset.y, s: +g.dataset.s };
+    let from = null;
+    try { from = JSON.parse(safeGet('loop.tree.beetle') || 'null'); } catch (e) { /* unreadable: no walk */ }
+    safeSet('loop.tree.beetle', JSON.stringify({ at, x }));
+    if (!from || from.at === at || !Number.isFinite(from.x) || Math.abs(from.x - x) < 0.5
+      || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const dir = x < from.x ? -1 : 1;
+    const pose = (bx) => `translate(${bx}px, ${y}px) scale(${dir * s}, ${s})`;
+    g.style.transform = pose(from.x);
+    g.getBoundingClientRect();                       // start from there before the transition
+    g.style.transition = `transform ${Math.min(12, Math.max(2, Math.abs(x - from.x) / 4)).toFixed(1)}s linear`;
+    g.style.transform = pose(x);
+    g.addEventListener('transitionend', () => { g.style.transition = ''; g.style.transform = ''; }, { once: true });
+  }
   const foodLine = (fd) => el('div', { class: 'ausage food' },
     fd && fd.total ? `${fd.total} task${fd.total === 1 ? '' : 's'} queued for the agents (${Object.entries(fd.per_session || {}).map(([n, k]) => `${n} ${k}`).join(', ')})`
       : 'Nothing queued: give them something to do',
@@ -1882,10 +1915,14 @@
     // by day, night while held or past 95%, a lamp when the guard is overridden or an Urgent message woke a session.
     skyUsage = gu && gu.pct != null ? { ...gu, stale: Date.now() / 1000 - gu.at > 2 * 3600 } : null;
     const sky = SC.skyOf(skyUsage), night = sky.night;
-    if (tree.paths.has('state/tasks.json')) taskTitles = new Map((await getJSON('state/tasks.json').catch(() => [])).map((t) => [t.id, t.title]));
+    if (tree.paths.has('state/tasks.json')) {
+      allTasks = await getJSON('state/tasks.json').catch(() => []);
+      taskTitles = new Map(allTasks.map((t) => [t.id, t.title]));
+    }
     // LOOP's food pile is the tasks queued for the agents (the ledger's task list, published by `loop status`).
     food = (st && st.usage && st.usage.food) || null;
-    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: skyUsage, food });
+    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: skyUsage, food,
+      maintainer: (st && st.usage && st.usage.maintainer) || null });
     const L = sc.L;
     // Hover or tap: the info line. Every segment of the same paper lights up. A tap pins it, so the mouse can cross
     // the scene to its buttons; a tap on open ground unpins it.
@@ -1904,7 +1941,7 @@
       const k = t.dataset.k, i = t.dataset.i;
       const tree_ = ['seg', 'branch', 'creature', 'bird'].includes(k);
       const body = k === 'sky' ? skyInfo() : tree_ ? growthInfo(state, k, i, t.dataset.b)
-        : k === 'path' ? pathInfo(L.paths[+i]) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L, !!tapped) : null;
+        : k === 'path' ? pathInfo(L.paths[+i]) : k === 'beetle' ? beetleInfo(L.beetle) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L, !!tapped) : null;
       if (!body) return;
       shown = t; pinned = !!tapped;
       viewer.view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
@@ -1935,6 +1972,7 @@
       el('span', {}, el('b', {}, 'Fruit'), ' LOOP\'s pile at the tree\'s foot: the tasks queued for the agents; in a home, its focus'),
       el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'),
       el('span', {}, el('b', {}, '!'), ' idle with work: a task to do, neither working nor blocked (the maintainer is told)'),
+      L.beetle ? el('span', {}, el('b', {}, 'Beetle'), ' the maintainer, underground at the session it is working with') : null,
       el('span', {}, el('b', {}, 'Birds'), ' deadlines: nearer and bigger as they come due; a passed one is a crow in the tree'),
       el('span', {}, el('b', {}, 'Sun'), ` weekly usage, rising at 0% on the left and setting at ${SC.SUN_PCT}% on the right`),
       night ? el('span', {}, el('b', {}, 'Night'), sky.held ? ' usage held until the reset: z\'s asleep; an urgent message wakes its agent'
@@ -1961,6 +1999,7 @@
     const again = treePinnedAgent ? L.hills.findIndex((h) => h.agent && h.agent.name === treePinnedAgent) : -1;
     if (again >= 0) show(viewer.view.querySelector(`.hits [data-k="hill"][data-i="${again}"]`), true);
     animateAnts(viewer.view, L.hills, L.paths);
+    walkBeetle(viewer.view);
     const key = () => [...tree.sha].filter(([x]) => x.startsWith('personal/') || ['state/citations.json', 'state/status.json', 'state/messages.json', 'state/usage.json'].includes(x)).join();
     const before = key();
     setPoll(async () => {
