@@ -955,9 +955,25 @@
     const pr = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(src);
     return el('a', { href: src, target: '_blank', rel: 'noopener', class: 'alink' }, pr ? `${pr[1]} #${pr[2]}` : 'link');
   }
+  // A waiting task is Finbar's to act on when it names no target or one of his items; a task, a PR or free
+  // text is something else's.
+  const waitsOnFinbar = (t) => t.status === 'waiting' && (!t.waiting_on || /^[QRC]-\d+$/.test(t.waiting_on));
+  // What a task waits on: an item or a PR as a link, another task as a jump to its row, anything else as text.
+  function waitTarget(on, titles) {
+    if (/^T-\d+$/.test(on)) {
+      return el('a', { href: '#/tasks', class: 'alink', onclick: (ev) => {
+        ev.preventDefault();
+        const row = document.querySelector(`.trow[data-task="${on}"]`);
+        if (!row) return;
+        if (row.closest('details')) row.closest('details').open = true;
+        row.scrollIntoView({ block: 'center' });
+      } }, on);
+    }
+    return /^[QRC]-\d+$/.test(on) || /^https?:\/\//.test(on) ? taskSource(on, titles) : on;
+  }
   function taskRow(t, titles, withName) {
     const chip = t.status === 'waiting'
-      ? el('span', { class: 'tchip waiting' }, 'waiting on ', t.waiting_on ? el('a', { href: `#/item/${t.waiting_on}` }, t.waiting_on) : 'Finbar')
+      ? el('span', { class: 'tchip waiting' }, 'waiting on ', t.waiting_on ? waitTarget(t.waiting_on, titles) : 'Finbar')
       : el('span', { class: `tchip ${t.status}` }, t.status);
     return el('div', { class: 'trow', 'data-task': t.id },
       el('div', { class: 'arow' }, chip, withName ? el('b', {}, t.for) : null, el('span', { class: 'ttitle' }, t.title)),
@@ -972,9 +988,10 @@
     const open = tasks.filter((t) => t.status !== 'done');
     const done = tasks.filter((t) => t.status === 'done' && (Date.now() - Date.parse(t.updated)) / 864e5 <= TASK_DONE_DAYS)
       .sort((a, b) => b.updated.localeCompare(a.updated));
-    const shown = open.filter((t) => filter === 'all' || t.status === filter);
+    const inFilter = (t, k) => k === 'all' || (k === 'waiting' ? waitsOnFinbar(t) : t.status === k);
+    const shown = open.filter((t) => inFilter(t, filter));
     const sw = el('div', { class: 'switch' }, TASK_FILTERS.map(([k, label]) => el('button', { class: k === filter ? 'on' : '',
-      onclick: () => { safeSet('loop.tasks.filter', k); showTasks(); } }, `${label} (${k === 'all' ? open.length : open.filter((t) => t.status === k).length})`)));
+      onclick: () => { safeSet('loop.tasks.filter', k); showTasks(); } }, `${label} (${open.filter((t) => inFilter(t, k)).length})`)));
     const ORDER = ['doing', 'waiting', 'todo'];
     const names = [...new Set(shown.map((t) => t.for))].sort((a, b) => H.roleRank({ name: a }) - H.roleRank({ name: b }) || a.localeCompare(b));
     const groups = names.map((n) => {

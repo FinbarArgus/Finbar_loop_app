@@ -490,7 +490,7 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .trow .arow { flex-wrap: wrap; gap: 6px; } .ttitle { flex: 1 1 12em; min-width: 0; }
 .tchip { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--soft); color: var(--muted); white-space: nowrap; }
 .tchip.doing { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); font-weight: 600; }
-.tchip.waiting { background: color-mix(in srgb, var(--wait) 20%, transparent); color: var(--wait); font-weight: 600; }
+.tchip.waiting { background: color-mix(in srgb, var(--wait) 20%, transparent); color: var(--wait); font-weight: 600; white-space: normal; }
 .tchip.done { text-decoration: line-through; }
 .tdone { margin: 12px 0; } .tdone summary { cursor: pointer; color: var(--muted); }
 .idlework { margin-top: 4px; color: #c2410c; } .badge.idle { background: #c2410c; color: #fff; font-weight: 700; }
