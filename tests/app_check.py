@@ -499,19 +499,32 @@ def run(loop_bin, graph, shots):
                     T('T-0003', 'Run the fit', 'HIGH-paper', 'waiting', waiting_on='Q-0001', source='Q-0001'),
                     T('T-0004', 'Draft the figure', 'HIGH-paper', 'doing'),
                     T('T-0005', 'Old work', 'HIGH-paper', 'done', updated=ago(24)),
-                    T('T-0006', 'Ancient work', 'LOW-x', 'done', updated=ago(24 * 9))]))
+                    T('T-0006', 'Ancient work', 'LOW-x', 'done', updated=ago(24 * 9)),
+                    T('T-0007', 'Post the bundle', 'MED-y', 'waiting', waiting_on='T-0001'),
+                    T('T-0008', 'Merge main in', 'MED-y', 'waiting', waiting_on='https://github.com/o/CUFLynx/pull/386'),
+                    T('T-0009', 'Undraft', 'MED-y', 'waiting', waiting_on='CI on #388')]))
                 page.goto(base + '#/tasks')
                 page.wait_for_selector('.tgroup')
                 page.locator('.switch button', has_text='All').click()
                 page.wait_for_selector('.switch button.on >> text=All')
                 grp = page.locator('.tgroup').evaluate_all("(gs) => gs.map((g) => [g.dataset.agent, [...g.querySelectorAll('.trow')].map((r) => r.dataset.task + ' ' + r.querySelector('.tchip').textContent)])")
                 check(page, page.locator('.meta a.on').inner_text() == 'Tasks' and grp == [
-                    ['HIGH-paper', ['T-0004 doing', 'T-0003 waiting on Q-0001']], ['IMPLEMENT-app', ['T-0002 doing']], ['MED-y', ['T-0001 todo']]],
+                    ['HIGH-paper', ['T-0004 doing', 'T-0003 waiting on Q-0001']], ['IMPLEMENT-app', ['T-0002 doing']],
+                    ['MED-y', ['T-0007 waiting on T-0001', 'T-0008 waiting on CUFLynx #386', 'T-0009 waiting on CI on #388', 'T-0001 todo']]],
                       f'Tasks: grouped by agent in role order, doing first, with chips {grp}', failures)
                 row = page.locator('.trow[data-task="T-0002"]').inner_text()
                 check(page, 'Fix the parser' in row and 'Finbar_loop_app #36' in row and 'updated 2 h ago' in row
                       and page.locator('.trow[data-task="T-0003"] .tchip a[href="#/item/Q-0001"]').count() == 1,
                       f'Tasks: a task shows its age and links its source and the item it waits on {row!r}', failures)
+                # A task waiting on another task, a PR or free text never links to a loop item (which would 404).
+                chips = {i: page.locator(f'.trow[data-task="{i}"] .tchip a').evaluate_all("(as) => as.map((a) => a.getAttribute('href'))")
+                         for i in ('T-0007', 'T-0008', 'T-0009')}
+                check(page, chips == {'T-0007': ['#/tasks'], 'T-0008': ['https://github.com/o/CUFLynx/pull/386'], 'T-0009': []},
+                      f'Tasks: what a task waits on links to the task, the PR or nothing {chips}', failures)
+                page.locator('.trow[data-task="T-0007"] .tchip a').click()
+                check(page, page.url.endswith('#/tasks') and 'GitHub said 404' not in page.locator('#main').inner_text()
+                      and page.locator('.trow[data-task="T-0001"]').is_visible(),
+                      'Tasks: clicking the task another one waits on stays on the Tasks tab', failures)
                 done = page.locator('details.tdone')
                 check(page, done.count() == 1 and done.get_attribute('open') is None and 'Done in the last 7 days (1)' in done.inner_text(),
                       'Tasks: done ones collapsed, only the last 7 days', failures)
