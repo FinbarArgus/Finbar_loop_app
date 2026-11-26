@@ -33,21 +33,30 @@
   const SMALL = 4;              // a tree shorter than this (blocks) gets a marker at its foot, and Whole tree frames it alone
   const f = (v) => String(Math.round(v * 100) / 100);
   const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-  // Deadline birds: a bird flies in from up and left of LOOP's food pile, BIRD_NEAR + BIRD_PER_DAY blocks per day to
-  // its deadline away (counted up to BIRD_DAYS), and grows from BIRD_SMALL to 1 block per sprite cell over its last
-  // BIRD_GROW days. A dashed line runs to the crown node it will land on (growth.layout); once passed it perches there.
-  const BIRD_NEAR = 6, BIRD_PER_DAY = 4, BIRD_DAYS = 45, BIRD_SMALL = 0.35, BIRD_GROW = 14;
+  // Deadline birds: a bird waits up and out from the crown node it will land on (growth.layout), 20-60 degrees above
+  // the horizontal on that node's side of the trunk, BIRD_NEAR + BIRD_PER_DAY blocks per day to its deadline away
+  // (counted up to BIRD_DAYS), and flies down onto the node as the deadline nears; it grows from BIRD_SMALL to 1 block
+  // per sprite cell over its last BIRD_GROW days. A dashed line runs to the node; once passed it perches there. The
+  // distance is eased into the room the sky has in that direction (D tanh(dist / D), D up to the sky's top and
+  // BIRD_EDGE from the farm's sides), so a far bird stays in view and a nearer one is always closer.
+  const BIRD_NEAR = 6, BIRD_PER_DAY = 4, BIRD_DAYS = 45, BIRD_SMALL = 0.35, BIRD_GROW = 14, BIRD_EDGE = 3;
+  const BIRD_ROOM = 12;         // the sky over the tree birds may use: its top is this far above the tree and the sun
 
-  // Flying birds -> [{id, x, y, size, land: {x, y}}] in scene blocks. fx: the trunk's foot; L: the farm's layout.
-  function birds(state, L, fx) {
+  // Flying birds -> [{id, x, y, size, land: {x, y}}] in scene blocks. fx: the trunk's foot; L: the farm's layout;
+  // top: the sky's top (y) the birds keep below.
+  function birds(state, L, fx, top) {
     const k = G.treeScale(state), lb = G.layout(state).birds;
-    const pile = { x: L.food.cx, y: L.surface - 3 };
     return (state.birds || []).map((b, n) => ({ b, n })).filter(({ b }) => !b.evil).map(({ b, n }) => {
-      const d = Math.min(Math.max(b.days, 0), BIRD_DAYS), dist = BIRD_NEAR + BIRD_PER_DAY * d;
+      const days = Math.min(Math.max(b.days, 0), BIRD_DAYS), dist = BIRD_NEAR + BIRD_PER_DAY * days;
+      const land = { x: fx + SCALE * k * lb[n].x, y: L.surface - SCALE * k * lb[n].y };
+      const side = land.x < fx ? -1 : land.x > fx ? 1 : (G.rng(state.seed, 'bird-side', b.id)() < 0.5 ? -1 : 1);
       const a = (20 + 40 * G.rng(state.seed, 'bird-angle', b.id)()) * Math.PI / 180;
-      return { id: b.id, x: pile.x - dist * Math.cos(a), y: pile.y - dist * Math.sin(a),
-        size: BIRD_SMALL + (1 - BIRD_SMALL) * (1 - Math.min(Math.max(b.days, 0), BIRD_GROW) / BIRD_GROW),
-        land: { x: fx + SCALE * k * lb[n].x, y: L.surface - SCALE * k * lb[n].y } };
+      const ux = side * Math.cos(a), uy = -Math.sin(a);
+      // The room along (ux, uy) before the sky's top or the farm's side.
+      const room = Math.min((land.y - top) / -uy, ux > 0 ? (L.width - BIRD_EDGE - land.x) / ux : (land.x - BIRD_EDGE) / -ux);
+      const D = Math.max(room, BIRD_NEAR), r = D * Math.tanh(dist / D);
+      return { id: b.id, x: land.x + r * ux, y: land.y + r * uy, dist: r,
+        size: BIRD_SMALL + (1 - BIRD_SMALL) * (1 - Math.min(Math.max(b.days, 0), BIRD_GROW) / BIRD_GROW), land };
     });
   }
   function birdSvg(bd) {
@@ -141,7 +150,8 @@
     const T = G.parts(state, { scene: true, paper: SKY, branchNames: opts.branchNames, hour: opts.hour,
       scaleX: small ? null : (1 - fx) / SCALE });
     const tx0 = fx + SCALE * T.x0, tx1 = fx + SCALE * (T.x0 + T.w), ty0 = L.surface + SCALE * T.y0;
-    const flying = birds(state, L, fx).map((bd) => ({ ...bd, ...birdSvg(bd) }));
+    const arc = sunArc(L);
+    const flying = birds(state, L, fx, Math.min(0, ty0, arc.top - 1) - BIRD_ROOM).map((bd) => ({ ...bd, ...birdSvg(bd) }));
     const box = { x0: Math.min(0, tx0, ...flying.map((b) => b.x - 4)), y0: Math.min(0, ty0, ...flying.map((b) => b.y - 4)),
       x1: Math.max(L.width, tx1), y1: L.height };
     // A small tree's frame: the tree and its height scale, with as much ground below as the tree is tall.
@@ -156,7 +166,6 @@
     const bw = box.x1 - box.x0, span = [box.x0 - bw, box.x1 + bw];
     const farm = H.parts(agents, { ...lopts, scene: true, span });
     // The default view: the farm, the trunk's foot and at least HOME_SKY of sky, up to the sun's arc.
-    const arc = sunArc(L);
     const home = { x0: 0, y0: Math.min(L.surface - HOME_SKY, arc.top - 1), x1: L.width, y1: L.height };
     const place = `translate(${f(fx)} ${f(L.surface)}) scale(${SCALE})`;
     const counts = ['blocked', 'working', 'quiet'].map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
@@ -211,5 +220,5 @@
   // The moon: in the default view's top right, HOME_SKY - 5 above the surface.
   const moonAt = (L) => ({ x: L.width - 7, y: L.surface - HOME_SKY + 5 });
 
-  return { scene, birds, skyOf, sunArc, sunAt, SUN_PCT, SUN, NIGHT, SCALE, HOME_SKY, GAP, SMALL, BIRD_NEAR, BIRD_PER_DAY, BIRD_DAYS, BIRD_SMALL, BIRD_GROW };
+  return { scene, birds, BIRD_ROOM, BIRD_EDGE, skyOf, sunArc, sunAt, SUN_PCT, SUN, NIGHT, SCALE, HOME_SKY, GAP, SMALL, BIRD_NEAR, BIRD_PER_DAY, BIRD_DAYS, BIRD_SMALL, BIRD_GROW };
 }));
