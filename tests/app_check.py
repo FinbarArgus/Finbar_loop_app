@@ -820,11 +820,13 @@ def run(loop_bin, graph, shots):
                 check(page, 'Tree paper 0' in log and 'a leaf' in log and 'arrived' in log, 'Tree: growth log', failures)
                 birds = page.evaluate("""() => ({
                   gull: !!document.querySelector('.gview .birds .bird[data-i="bird-soon"] line[stroke-dasharray]'),
+                  above: (() => { const l = document.querySelector('.gview .birds .bird[data-i="bird-soon"] line');
+                    return !!l && +l.getAttribute('y1') < +l.getAttribute('y2'); })(),
                   crowFlies: !!document.querySelector('.gview .birds .bird[data-i="bird-late"]'),
                   crow: !!document.querySelector('.gview .tree .hits [data-k="bird"][data-i="bird-late"]'),
                   legend: [...document.querySelectorAll('.hlegend span')].some((x) => x.textContent.startsWith('Birds')) })""")
-                check(page, birds == {'gull': True, 'crowFlies': False, 'crow': True, 'legend': True},
-                      f'Birds: an open deadline flies in with a dashed line, a passed one perches on the tree {birds}', failures)
+                check(page, birds == {'gull': True, 'above': True, 'crowFlies': False, 'crow': True, 'legend': True},
+                      f'Birds: an open deadline flies down to its crown node along a dashed line, a passed one perches on the tree {birds}', failures)
                 page.locator('.gview .hits [data-k="bird"][data-i="bird-soon"]').dispatch_event('click')
                 info = page.locator('.ginfo').inner_text()
                 check(page, 'Grant report' in info and 'in 5 d' in info and 'flying in' in info, f'Birds: tapping a bird shows its deadline {info!r}', failures)

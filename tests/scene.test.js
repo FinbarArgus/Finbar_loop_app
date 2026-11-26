@@ -128,21 +128,20 @@ test('anthomes are about 1 m on the tree\'s height scale (Finbar, C-0007), and L
   assert.ok(!sc.svg.includes('#b89b55'), 'no crown');
 });
 
-test('deadline birds fly in from beside the food pile: further for later deadlines, bigger when near, a dashed line to where they land', () => {
+test('deadline birds wait up and out from the crown node they land on: further for later deadlines, bigger when near, a dashed line to it', () => {
   const due = (id, deadline) => ({ id, kind: 'task', created: '2026-12-01T09:00:00', deadline, title: id });
   const st = G.derive([...EX.history(365).entries, due('d1', '2026-12-11'), due('d10', '2026-12-20'), due('d90', '2027-03-10'), due('gone', '2026-12-05')], {}, {}, NOW);
   const sc = S.scene(st, AGENTS);
-  const B = Object.fromEntries(S.birds(st, sc.L, sc.L.gap.cx).filter((b) => /^(d\d+|gone)$/.test(b.id)).map((b) => [b.id, b]));
+  const top = Math.min(0, sc.tree.y0, S.sunArc(sc.L).top - 1) - S.BIRD_ROOM;
+  const B = Object.fromEntries(S.birds(st, sc.L, sc.L.gap.cx, top).filter((b) => /^(d\d+|gone)$/.test(b.id)).map((b) => [b.id, b]));
   assert.deepEqual(Object.keys(B).sort(), ['d1', 'd10', 'd90'], 'a passed deadline does not fly');
-  const pile = { x: sc.L.food.cx, y: sc.L.surface - 3 };
-  const dist = (b) => Math.hypot(b.x - pile.x, b.y - pile.y);
-  assert.ok(Math.abs(dist(B.d1) - (S.BIRD_NEAR + S.BIRD_PER_DAY * 1.5)) < 1e-9);
-  assert.ok(Math.abs(dist(B.d10) - (S.BIRD_NEAR + S.BIRD_PER_DAY * 10.5)) < 1e-9);
-  assert.ok(Math.abs(dist(B.d90) - (S.BIRD_NEAR + S.BIRD_PER_DAY * S.BIRD_DAYS)) < 1e-9, 'counted up to BIRD_DAYS');
+  const dist = (b) => Math.hypot(b.x - b.land.x, b.y - b.land.y);
+  assert.ok(dist(B.d1) < dist(B.d10) && dist(B.d10) < dist(B.d90), 'nearer deadlines are nearer their node');
+  assert.ok(Math.abs(dist(B.d1) - (S.BIRD_NEAR + S.BIRD_PER_DAY * 1.5)) < 1, 'a near one is about its distance away');
   assert.ok(B.d1.size > B.d10.size && B.d10.size > B.d90.size && B.d90.size === S.BIRD_SMALL);
   for (const b of Object.values(B)) {
-    assert.ok(b.x < pile.x && b.y < pile.y, `${b.id} up and left of the pile`);
-    assert.ok(within(b, sc.box), `${b.id} inside the scene`);
+    assert.ok(b.y < b.land.y && Math.sign(b.x - sc.L.gap.cx) === Math.sign(b.land.x - sc.L.gap.cx), `${b.id} above its node, on its side of the trunk`);
+    assert.ok(within(b, sc.box) && b.y >= top - 1e-9 && b.x >= S.BIRD_EDGE - 1e-9 && b.x <= sc.L.width - S.BIRD_EDGE + 1e-9, `${b.id} inside the sky`);
     const lb = G.layout(st).birds.find((x) => x.id === b.id), k = G.treeScale(st);
     assert.deepEqual(b.land, { x: sc.L.gap.cx + S.SCALE * k * lb.x, y: sc.L.surface - S.SCALE * k * lb.y });
     assert.match(sc.svg, new RegExp(`<g class="bird" data-i="${b.id}"><line [^>]*x2="${Math.round(b.land.x * 100) / 100}" y2="${Math.round(b.land.y * 100) / 100}"[^>]*stroke-dasharray`));
@@ -253,4 +252,22 @@ test("LOOP's food pile is the open board items: a crumb with none, higher with m
   assert.ok(n[0] > 0 && n[0] < n[1] && n[1] < n[2] && n[2] < n[3], `the pile grows with the count ${n}`);
   assert.equal(fruit({ n: 4, blocking: 4 }), n[2], 'four blocking items weigh as eight');
   assert.equal(fruit({ n: 0 }), fruit(null), 'no figure: a crumb');
+});
+
+test('a bird flies down onto its crown node as its deadline nears, never near the ground (Finbar 2026-11-27)', () => {
+  const due = (id, deadline) => ({ id, kind: 'task', created: '2026-12-01T09:00:00', deadline, title: id });
+  for (const history of [EX.history(30).entries, EX.history(2 * 365).entries]) {        // a small tree and a grown one
+    const st = G.derive([...history, due('soon', '2026-12-20')], {}, {}, NOW);
+    const sc = S.scene(st, AGENTS);
+    const top = Math.min(0, sc.tree.y0, S.sunArc(sc.L).top - 1) - S.BIRD_ROOM;
+    const k = G.treeScale(st), lowest = Math.max(...G.layout(st).birds.map((b) => sc.L.surface - S.SCALE * k * b.y));
+    const at = (days) => S.birds({ ...st, birds: st.birds.map((b) => ({ ...b, days })) }, sc.L, sc.L.gap.cx, top).find((b) => b.id === 'soon');
+    const path = [45, 14, 3, 0].map(at);
+    const dist = path.map((b) => Math.hypot(b.x - b.land.x, b.y - b.land.y));
+    for (let i = 1; i < dist.length; i++) assert.ok(dist[i] < dist[i - 1], `closer each step ${dist}`);
+    assert.ok(path.every((b) => b.y < b.land.y && b.y <= lowest && b.y < sc.L.surface - 6), 'above its node and the crown, never near the ground');
+    assert.ok(path.every((b) => b.y >= top - 1e-9 && b.x >= S.BIRD_EDGE - 1e-9 && b.x <= sc.L.width - S.BIRD_EDGE + 1e-9), 'inside the sky');
+    assert.ok(path[0].size === S.BIRD_SMALL && path[0].y < path[3].y, 'a far one is small and high');
+    assert.ok(new Set(path.map((b) => `${b.land.x},${b.land.y}`)).size === 1, 'one node all the way');
+  }
 });
