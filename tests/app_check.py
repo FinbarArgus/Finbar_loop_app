@@ -1177,25 +1177,54 @@ def run(loop_bin, graph, shots):
                       and page.locator('.meta a', has_text='Hills').count() == 0, '#/hills opens the Tree tab; no Hills tab', failures)
                 F = '.gview .farm'
                 check(page, page.locator(f'{F} [data-k="hill"]').count() == 7, 'Farm: one hill per agent, and one for an agent only in the messages', failures)
-                # LOOP's food pile is the weekly usage left (state/usage.json, from the usage guard via `loop status`): full at 0%,
-                # half at 50%, a crumb at 94% and 100%; tapped, it says the figure; older than 2 h it is faded, "usage unknown".
+                # LOOP's food pile is the board's open items (questions, content, PR reviews), not the usage; tapped, it
+                # says how many and what is counted.
+                page.goto(base + '#/list')
+                page.wait_for_selector('.tabs a .n')
+                n_open = sum(int(x) for x in page.locator('.tabs a:not(.tperm) > .n').all_inner_texts())
+                page.goto(base + '#/tree')
                 fruit = lambda: page.evaluate("""() => [...document.querySelectorAll('.gview .farm rect')]
                     .filter((r) => ['#c8553d', '#e39a3b', '#9a3d2c'].includes(r.getAttribute('fill'))).length""")
-                def food_at(pct, age_s=0):
-                    (repo / 'state/usage.json').write_text(json.dumps({'pct': pct, 'resets': 'Nov 26, 7am (Pacific/Auckland)', 'at': int(time.time()) - age_s}))
+                def sky_at(age_s=0, **u):
+                    (repo / 'state/usage.json').write_text(json.dumps({'resets': 'Nov 26, 7am (Pacific/Auckland)', 'at': int(time.time()) - age_s, **u}))
                     page.reload()
                     page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
-                n = {}
-                for pct in (0, 50, 94, 100):
-                    food_at(pct)
-                    n[pct] = fruit()
-                check(page, n[0] > n[50] > n[94] > 0 and n[94] == n[100] and n[94] <= 3, f'Farm: the food pile shrinks with the weekly usage, a crumb left {n}', failures)
-                food_at(94)
+                sky_at(pct=26, held=False, override=False)
                 page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
-                lab = page.locator('.hinfo .ausage:not(.session)').inner_text()
-                check(page, lab == 'weekly usage 94% · resets Nov 26 7am', f'Farm: tapping the food says the weekly usage {lab!r}', failures)
-                ses = page.locator('.hinfo .ausage.session').inner_text()
-                check(page, ses.startswith('session usage 43% · resets Nov 23'), f'Farm: and the current session\'s usage {ses!r}', failures)
+                lab = page.locator('.hinfo .ausage').first.inner_text()
+                check(page, n_open > 0 and lab.startswith(f'{n_open} items waiting on you') and 'blocking one counts twice' in lab and fruit() > 0,
+                      f'Farm: the food pile is the {n_open} open board items {lab!r}', failures)
+                # Day: a sun with the weekly percentage above it; tapped (a phone) or hovered (a computer), every usage figure.
+                sun = page.evaluate("""() => { const s = document.querySelector('.gview svg .sun circle'), l = document.querySelector('.gview svg .sunlabel');
+                  return { sun: !!s, label: l && l.textContent, night: !!document.querySelector('.gview svg.scene.night') }; }""")
+                check(page, sun == {'sun': True, 'label': '26%', 'night': False}, f'Sky: a sun labelled with the weekly usage {sun}', failures)
+                page.locator('.gzoom button', has_text='Reset').click()
+                page.keyboard.press('Escape')                                            # unpin the food's info: a hover never replaces a pinned one
+                b = page.locator('.gview .hits [data-k="sky"]').bounding_box()
+                if label == 'phone':
+                    page.touchscreen.tap(b['x'] + b['width'] / 2, b['y'] + b['height'] / 2)
+                else:
+                    page.mouse.move(b['x'] + b['width'] / 2, b['y'] + b['height'] / 2)
+                page.wait_for_selector('.ginfo .skyinfo')
+                info = page.locator('.ginfo').inner_text()
+                check(page, all(x in info for x in ('Weekly usage 26% · resets Nov 26 7am', '43%', 'resets Nov 23', 'Hold off', 'Guard on',
+                                                    'Woken by Urgent messages none')),
+                      f'Sky: {"tapping" if label == "phone" else "hovering"} the sun shows every usage figure {info!r}', failures)
+                if shots:
+                    page.locator('.ginfo').screenshot(path=f'{shots}/{label}-sky-info.png')
+                page.locator('.gview .hits [data-k="sky"]').dispatch_event('click')     # pinned
+                page.keyboard.press('Escape')
+                check(page, page.locator('.ginfo .skyinfo').count() == 0, 'Sky: Escape closes the usage panel', failures)
+                # Over 95% with the guard overridden (`usage-guard off`: not held): night with a lamp, nobody asleep.
+                sky_at(pct=97, held=False, override=True)
+                lit = page.evaluate("""() => ({ night: !!document.querySelector('.gview svg.scene.night'), lamp: !!document.querySelector('.gview svg .lamp'),
+                  moon: !!document.querySelector('.gview svg .moon'), sun: !!document.querySelector('.gview svg .sun'), zz: document.querySelectorAll('.gview .zz').length })""")
+                check(page, lit == {'night': True, 'lamp': True, 'moon': True, 'sun': False, 'zz': 0}, f'Sky: overridden past 95%, night with a lamp {lit}', failures)
+                page.locator('.gview .hits [data-k="sky"]').first.dispatch_event('click')
+                info = page.locator('.ginfo').inner_text()
+                check(page, 'Weekly usage 97%' in info and 'Guard overridden' in info and 'lamp lit' in info, f'Sky: the moon\'s panel says the guard is overridden {info!r}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-lamp.png')
                 # Held (the usage guard tripped): a banner on every tab; send buttons stay enabled.
                 (repo / 'state/usage.json').write_text(json.dumps({'pct': 95, 'resets': 'Nov 26, 7am (Pacific/Auckland)', 'at': int(time.time()), 'held': True}))
                 hb = []
@@ -1258,12 +1287,13 @@ def run(loop_bin, graph, shots):
                 page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
                 check(page, page.locator('.gview svg.scene.night, .gview .zz, .gview .ant[data-still]').count() == 0,
                       'Day again once the hold lifts: no night, no z\'s, no still ants', failures)
-                food_at(50, age_s=3 * 3600)
-                page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
-                lab = page.locator('.hinfo .ausage:not(.session)').inner_text()
-                check(page, fruit() == 0 and 'usage unknown' in lab, f'Farm: a usage figure over 2 h old is faded, "usage unknown" {lab!r}', failures)
+                sky_at(age_s=3 * 3600, pct=50, held=False)
+                page.locator('.gview .hits [data-k="sky"]').dispatch_event('click')
+                lab = page.locator('.ginfo .ausage').first.inner_text()
+                check(page, page.locator('.gview svg .sunlabel').text_content() == '50%?' and lab.startswith('Weekly usage unknown (last 50%, 3 h ago)'),
+                      f'Sky: a usage figure over 2 h old is a faded sun, "unknown" {lab!r}', failures)
                 if shots:
-                    page.screenshot(path=f'{shots}/{label}-food-stale.png')
+                    page.screenshot(path=f'{shots}/{label}-sun.png')
                 (repo / 'state/usage.json').unlink()
                 page.reload()
                 page.wait_for_selector('.gview .farm .hits [data-k="hill"]')
