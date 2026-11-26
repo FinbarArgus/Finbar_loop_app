@@ -860,6 +860,7 @@
         el('div', { class: 'arow' },
           el('span', { class: `dot ${r.running ? 'on' : 'off'}`, title: r.running ? 'running' : 'not running' }),
           roleDot(r.name), el('b', {}, r.name), r.loop ? el('span', { class: 'badge' }, 'LOOP') : null,
+          (r.idle_with_work || []).length ? el('span', { class: 'badge idle', title: `idle with work: ${r.idle_with_work.join(', ')}` }, '! idle with work') : null,
           el('span', { class: 'grow' }),
           r.context_tokens ? el('span', { class: 'who' }, `${Math.round(r.context_tokens / 1000)}k ctx`) : null,
           r.model ? el('span', { class: 'who' }, ` · ${r.model}`) : null),
@@ -1653,6 +1654,13 @@
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape' && treeEscape && location.hash.startsWith('#/tree')) treeEscape();
   });
+  // Idle with work (status.json idle_with_work): its tasks, and when the maintainer was told.
+  let taskTitles = new Map();
+  const hhmm = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const idleLine = (a) => (!(a.idle_with_work || []).length ? null : el('div', { class: 'idlework' },
+    el('b', {}, '! Idle with work: '), a.idle_with_work.map((id) => `${id} ${taskTitles.get(id) || ''}`.trim()).join('; '),
+    el('div', { class: 'who' }, a.maintenance_alerted ? `Maintenance alerted at ${hhmm(a.maintenance_alerted)}` : 'Maintenance not alerted yet',
+      ' · ', el('a', { href: '#/tasks' }, 'The task list'))));
   const foodLine = (fd) => el('div', { class: 'ausage food' },
     fd && fd.total ? `${fd.total} task${fd.total === 1 ? '' : 's'} queued for the agents (${Object.entries(fd.per_session || {}).map(([n, k]) => `${n} ${k}`).join(', ')})`
       : 'Nothing queued: give them something to do',
@@ -1686,6 +1694,7 @@
       hl.asleep != null ? el('div', { class: 'who hsleep' }, hl.asleep ? 'Asleep: the usage hold is on until the reset.'
         : 'Awake: woken by an urgent message, while its session works.') : null,
       hl.kind === 'food' ? foodLine(food) : null,
+      idleLine(a),
       L ? usageInfo(hl, L) : null,
       a.items && a.items.length ? el('div', { class: 'alinks' }, hl.mood === 'blocked' ? 'Waiting on: ' : 'Will need: ',
         a.items.map((id) => link(id, titles.get(id)))) : null,
@@ -1873,6 +1882,7 @@
     // by day, night while held or past 95%, a lamp when the guard is overridden or an Urgent message woke a session.
     skyUsage = gu && gu.pct != null ? { ...gu, stale: Date.now() / 1000 - gu.at > 2 * 3600 } : null;
     const sky = SC.skyOf(skyUsage), night = sky.night;
+    if (tree.paths.has('state/tasks.json')) taskTitles = new Map((await getJSON('state/tasks.json').catch(() => [])).map((t) => [t.id, t.title]));
     // LOOP's food pile is the tasks queued for the agents (the ledger's task list, published by `loop status`).
     food = (st && st.usage && st.usage.food) || null;
     const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: skyUsage, food });
@@ -1924,6 +1934,7 @@
       el('span', {}, el('b', {}, 'Ants'), ' working'), el('span', {}, el('b', {}, 'Dark'), ' stalled'),
       el('span', {}, el('b', {}, 'Fruit'), ' LOOP\'s pile at the tree\'s foot: the tasks queued for the agents; in a home, its focus'),
       el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'),
+      el('span', {}, el('b', {}, '!'), ' idle with work: a task to do, neither working nor blocked (the maintainer is told)'),
       el('span', {}, el('b', {}, 'Birds'), ' deadlines: nearer and bigger as they come due; a passed one is a crow in the tree'),
       el('span', {}, el('b', {}, 'Sun'), ` weekly usage, rising at 0% on the left and setting at ${SC.SUN_PCT}% on the right`),
       night ? el('span', {}, el('b', {}, 'Night'), sky.held ? ' usage held until the reset: z\'s asleep; an urgent message wakes its agent'

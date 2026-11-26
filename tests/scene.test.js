@@ -284,3 +284,17 @@ test('the sun peaks 5 m above the top of the tree, small or grown, its label cle
     assert.ok(S.sunAt(0, sc.arc).y === sc.arc.low && S.sunAt(95, sc.arc).y === sc.arc.low, '0% and 95% stay low');
   }
 });
+
+test('a "!" over the anthill of a session idle with work, also over the night shade', () => {
+  const agents = AGENTS.map((a) => (a.name === 'LOW-d' ? { ...a, state: 'stalled', idle_with_work: ['T-0001'] } : a));
+  const sc = S.scene(young(), agents);
+  const n = sc.L.hills.findIndex((h) => h.name === 'LOW-d');
+  const bangs = [...sc.svg.matchAll(/<g class="idlebang" data-h="(\d+)"[^>]*><circle cx="([-\d.]+)" cy="([-\d.]+)"/g)];
+  assert.equal(bangs.length, 1);
+  assert.equal(+bangs[0][1], n);
+  const hl = sc.L.hills[n];
+  assert.ok(+bangs[0][3] < sc.L.surface - hl.mound.h && Math.abs(+bangs[0][2] - (hl.mound.x0 + hl.mound.w / 2)) < 1e-9, 'over its mound');
+  assert.doesNotMatch(S.scene(young(), AGENTS).svg, /idlebang/, 'none without idle_with_work');
+  const dark = S.scene(young(), agents, { usage: { pct: 95, held: true } });
+  assert.ok(dark.svg.indexOf('nightshade') < dark.svg.indexOf('idlebang'), 'drawn over the night shade');
+});

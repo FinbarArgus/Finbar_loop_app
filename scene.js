@@ -197,7 +197,7 @@
       + (small ? `<g class="farm">${farm.body}</g><g class="tree" transform="${place}" shape-rendering="crispEdges">${T.body}</g>`
         : `<g class="tree" transform="${place}" shape-rendering="crispEdges">${T.body}</g><g class="farm">${farm.body}</g>`)
       + (flying.length ? `<g class="birds">${flying.map((b) => b.draw).join('')}</g>` : '')
-      + (night ? night.shade : '')
+      + (night ? night.shade : '') + farm.alerts
       + sprout + (sun ? sun.disc + sun.label : '')
       + `<g class="tree" transform="${place}">${T.hits}</g>`
       + (sproutHit || flying.length || skyHit ? `<g class="hits">${sproutHit}${flying.map((b) => b.hit).join('')}${skyHit}</g>` : '') + '</svg>';

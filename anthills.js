@@ -76,7 +76,7 @@
     { name: 'clay', base: '#a98a6a', dark: '#866b50', light: '#c2a687' },
   ];
   const C = {
-    sky: '#f3f2ea', snore: '#e9ecff', grass: '#6f8a55', grassLight: '#87a068', topsoil: '#7d5e42', soil: ['#6e5139', '#634832', '#57402d'],
+    sky: '#f3f2ea', snore: '#e9ecff', alert: '#e8590c', grass: '#6f8a55', grassLight: '#87a068', topsoil: '#7d5e42', soil: ['#6e5139', '#634832', '#57402d'],
     pebble: '#8d8378', pebbleDark: '#6f675d', room: '#c9a77e', roomFloor: '#b99569', wall: '#9c7a57', tunnel: '#b8956b',
     trail: '#a89068', ant: '#1f1610', egg: '#f2ece0', seed: '#d2b483', seedDark: '#a8885b', larva: '#efe3c7', fungus: '#d9dccb',
     fungusDark: '#b5b9a3', root: '#3c2c1f', crumb: '#e2c46e', leaf: '#7f9a5c', fruit: '#c8553d', fruitDark: '#9a3d2c', fruitGold: '#e39a3b', off: '#6d665e',
@@ -481,7 +481,7 @@
     for (const hl of homes) paintHome(hl, px, carved);
     for (const hl of homes) paintMound(hl, px, L.surface);
     for (const hl of L.hills.filter((h) => h.kind === 'food')) paintFood(hl, L, px, opts.food);
-    let ants = '', labels = '', hits = '', glow = '', foods = '', zz = '';
+    let ants = '', labels = '', hits = '', glow = '', foods = '', zz = '', alerts = '';
     const still = (hl) => (opts.night && hl.asleep !== false ? ' data-still="1"' : '');     // a tunnel's ants sleep too
     L.paths.forEach((pa, n) => {
       for (let k = 0; k < pa.ants; k++) ants += `<g class="ant" data-p="${n}" data-a="${k}"${still(pa)} transform="${antPose(antAt(pa, k, opts.t || 0))}">${ANT}</g>`;
@@ -508,9 +508,19 @@
         return;
       }
       const hm = hl.home;
+      let bangHit = '';
+      // Idle with work (status.json idle_with_work: a task to do, neither working nor blocked): a "!" over its anthill.
+      if ((hl.agent.idle_with_work || []).length) {
+        const k = Math.max(1, L.width / 100);              // it grows with the farm, so it reads on a phone (as the sun does)
+        const bx = hl.mound.x0 + hl.mound.w / 2, by = L.surface - hl.mound.h - 1.3 - 1.7 * k;
+        alerts += `<g class="idlebang" data-h="${n}" pointer-events="none"><circle cx="${f(bx)}" cy="${f(by)}" r="${f(1.7 * k)}" fill="${C.alert}"`
+          + ` stroke="#fff" stroke-width="${f(0.35 * k)}"/><text x="${f(bx)}" y="${f(by + 0.85 * k)}" font-size="${f(2.5 * k)}" font-weight="900"`
+          + ` font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" fill="#fff">!</text></g>`;
+        bangHit = `<rect x="${f(bx - 2 * k)}" y="${f(by - 2 * k)}" width="${f(4 * k)}" height="${f(4 * k)}"/>`;   // a tap on it opens the hill
+      }
       labels += `<text x="${f(hm.cx)}" y="${f(hm.y0 + hm.h + LABEL - 0.6)}" font-size="1.8" font-family="ui-monospace, Menlo, Consolas, monospace"`
         + ` text-anchor="middle" fill="${ink}" stroke="#3b2a1c" stroke-width="0.5" paint-order="stroke">${esc(label(hl))}</text>`;
-      hits += `<g data-k="hill" data-i="${n}"><rect x="${f(hl.mound.x0 - 1)}" y="${f(L.surface - hl.mound.h - 5)}" width="${f(hl.mound.w + 2)}" height="${f(hl.mound.h + 5)}"/>`
+      hits += `<g data-k="hill" data-i="${n}">${bangHit}<rect x="${f(hl.mound.x0 - 1)}" y="${f(L.surface - hl.mound.h - 5)}" width="${f(hl.mound.w + 2)}" height="${f(hl.mound.h + 5)}"/>`
         + `<rect x="${f(hm.x0 - 0.5)}" y="${f(hm.y0 - 0.5)}" width="${f(hm.w + 1)}" height="${f(hm.h + LABEL + 0.5)}"/></g>`;
       foods += `<rect data-k="food" data-i="${n}" x="${f(hl.food.x0 - 0.6)}" y="${f(hl.food.y0 - 1)}" width="${f(hl.food.w + 1.2)}" height="${f(hl.food.h + 1.4)}"/>`;
     });
@@ -522,7 +532,7 @@
       + `<g shape-rendering="crispEdges">${rects(px)}</g>`
       + `<g class="glows" opacity="0.38">${glow}</g>${labels}<g class="ants">${ants}</g>`
       + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}${foods}</g>`);
-    return { body, L, zz };
+    return { body, L, zz, alerts };
   }
 
   // Three z's rising from an asleep anthill's top (LOOP's: beside its pile), each fading as it rises (style.css .zz).
@@ -537,10 +547,10 @@
   }
 
   function svg(agents, opts = {}) {
-    const { body, L, zz } = parts(agents, opts);
+    const { body, L, zz, alerts } = parts(agents, opts);
     const counts = MOOD_ORDER.map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L.width} ${L.height}" class="anthills" role="img"`
-      + ` aria-label="${L.hills.length} agents: ${counts}">${body}${zz}</svg>`;
+      + ` aria-label="${L.hills.length} agents: ${counts}">${body}${zz}${alerts}</svg>`;
   }
 
   return { foodSize, FOOD_FULL, pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, parts, svg, label,

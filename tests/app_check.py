@@ -1162,7 +1162,7 @@ def run(loop_bin, graph, shots):
                                                 'why': '', 'working_on': f'{name} at work', 'recent': [], 'items': [], **kw}
                 st['agents'] = [mk('LOOP', 'working', loop=True), mk('HIGH-session-a', 'blocked', items=['Q-0001'], why='waiting on Finbar',
                                 recent=[{'id': 'Q-0001', 'title': 'Which step size for the run?', 'tab': 'question', 'status': 'question', 'blocking_now': True}]),
-                                mk('HIGH-paper', 'working'), mk('MED-y', 'stalled'), mk('LOW-x', 'working'), mk('IMPLEMENT-app', 'working')]
+                                mk('HIGH-paper', 'working'), mk('MED-y', 'stalled', idle_with_work=['T-0001'], maintenance_alerted='2026-11-27T03:05:00Z'), mk('LOW-x', 'working'), mk('IMPLEMENT-app', 'working')]
                 for a, tok in zip(st['agents'], [9e6, 4e6, 2.5e7, 3e5, 1e6, 1.2e7]):
                     a['week_tokens'] = {'total': tok, 'output': tok * 0.01, 'input': tok * 0.002, 'cache_write': tok * 0.1, 'cache_read': tok * 0.888}
                 st.setdefault('usage', {})['week_start'] = '2026-11-19T07:00:00+13:00'
@@ -1214,6 +1214,16 @@ def run(loop_bin, graph, shots):
                       and page.locator('.meta a', has_text='Hills').count() == 0, '#/hills opens the Tree tab; no Hills tab', failures)
                 F = '.gview .farm'
                 check(page, page.locator(f'{F} [data-k="hill"]').count() == 7, 'Farm: one hill per agent, and one for an agent only in the messages', failures)
+                # Idle with work (a task to do, neither working nor blocked): a "!" over MED-y's anthill; tapped, its tasks and
+                # when the maintainer was told.
+                bang = page.evaluate("[...document.querySelectorAll('.gview .idlebang')].map((g) => +g.dataset.h)")
+                check(page, len(bang) == 1, f'Idle with work: one "!" over an anthill {bang}', failures)
+                page.locator(f'{F} .hits g[data-k="hill"][data-i="{bang[0]}"] rect').first.dispatch_event('click')
+                idle = page.locator('.hinfo .idlework').inner_text()
+                check(page, 'MED-y' in page.locator('.hinfo').inner_text() and 'T-0001 Write the methods section' in idle
+                      and 'Maintenance alerted at' in idle, f'Idle with work: tapping it shows its tasks and the alert {idle!r}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-idle-badge.png')
                 # LOOP's food pile is the tasks queued for the agents (status.json usage.food, from the ledger's task list);
                 # tapped, it names them per session and links to the Tasks tab; with none it is gone.
                 fruit = lambda: page.evaluate("""() => [...document.querySelectorAll('.gview .farm rect')]
