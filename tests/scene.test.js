@@ -41,7 +41,7 @@ test('the default view frames every anthill, anthome and the trunk\'s foot', () 
   }
   assert.ok(within({ x: sc.L.food.cx, y: sc.L.surface - S.HOME_SKY + 1 }, sc.home));
   assert.ok(within({ x: sc.L.gap.cx, y: sc.L.surface }, sc.home), 'the trunk\'s foot');
-  const top = Math.min(sc.L.surface - S.HOME_SKY, S.sunArc(sc.L).top - 1);           // and the sun's arc
+  const top = Math.min(sc.L.surface - S.HOME_SKY, Math.max(sc.arc.top - 1, sc.L.surface - S.HOME_MAX));   // and the sun's arc
   assert.deepEqual(sc.home, { x0: 0, y0: top, x1: sc.L.width, y1: sc.L.height });
   assert.match(sc.svg, new RegExp(`viewBox="0 ${Math.round(top * 100) / 100} ${sc.L.width} ${Math.round((sc.L.height - top) * 100) / 100}"`));
 });
@@ -132,7 +132,7 @@ test('deadline birds wait up and out from the crown node they land on: further f
   const due = (id, deadline) => ({ id, kind: 'task', created: '2026-12-01T09:00:00', deadline, title: id });
   const st = G.derive([...EX.history(365).entries, due('d1', '2026-12-11'), due('d10', '2026-12-20'), due('d90', '2027-03-10'), due('gone', '2026-12-05')], {}, {}, NOW);
   const sc = S.scene(st, AGENTS);
-  const top = Math.min(0, sc.tree.y0, S.sunArc(sc.L).top - 1) - S.BIRD_ROOM;
+  const top = Math.min(0, sc.tree.y0, sc.arc.top - 1) - S.BIRD_ROOM;
   const B = Object.fromEntries(S.birds(st, sc.L, sc.L.gap.cx, top).filter((b) => /^(d\d+|gone)$/.test(b.id)).map((b) => [b.id, b]));
   assert.deepEqual(Object.keys(B).sort(), ['d1', 'd10', 'd90'], 'a passed deadline does not fly');
   const dist = (b) => Math.hypot(b.x - b.land.x, b.y - b.land.y);
@@ -188,9 +188,10 @@ test('night: an urgent message wakes only that agent while its session works; it
 test('day: the sun rises at the left at 0%, is highest at 47.5%, sets at the right at 95%, its percentage above it', () => {
   const wide = Array.from({ length: 20 }, (_, k) => ag(`MED-${k}`));
   for (const agents of [AGENTS, wide]) {
-    const sc = S.scene(young(), agents, { usage: { pct: 0 } }), arc = S.sunArc(sc.L), h = sc.home, at = (p) => S.sunAt(p, arc);
+    const sc = S.scene(young(), agents, { usage: { pct: 0 } }), arc = sc.arc, h = sc.home, at = (p) => S.sunAt(p, arc);
     const [a, m, b] = [at(0), at(47.5), at(95)];
     assert.equal(arc.s, Math.max(1, sc.L.width / S.SUN.per), 'the sun grows with the farm\'s width');
+    assert.deepEqual(arc, S.sunArc(sc.L, S.SCALE * (young().height || 0)));
     assert.ok(a.x - arc.reach - h.x0 >= S.SUN.margin && h.x1 - b.x - arc.reach >= S.SUN.margin - 1e-9, 'near the edges, clear of the height scale');
     assert.ok(Math.abs(m.x - (h.x0 + h.x1) / 2) < 1e-9 && Math.abs(a.y - b.y) < 1e-9 && m.y < a.y - 10, 'low at both ends, highest in the middle');
     assert.ok(at(20).x < at(40).x && at(20).y > m.y && at(70).y < b.y, 'x moves right, y rises then falls');
@@ -202,7 +203,7 @@ test('day: the sun rises at the left at 0%, is highest at 47.5%, sets at the rig
   }
   const day = S.scene(young(), AGENTS, { usage: { pct: 26.4, held: false } });
   assert.doesNotMatch(day.svg, /class="scene night"|nightshade|class="moon"|class="lamp"/);
-  const c = S.sunAt(26.4, S.sunArc(day.L));
+  const c = S.sunAt(26.4, day.arc);
   assert.match(day.svg, new RegExp(`<g class="sun"><g [^>]*>.*<circle cx="${Math.round(c.x * 100) / 100}" cy="${Math.round(c.y * 100) / 100}"`));
   assert.match(day.svg, /<text class="sunlabel"[^>]*>26%<\/text>/);
   assert.match(day.svg, /<g class="hits">.*data-k="sky"/);
@@ -240,18 +241,18 @@ test('night when held, and at 95% with the guard overridden; the lamp when overr
   assert.match(woke.svg, /class="zz"/);
 });
 
-test("LOOP's food pile is the open board items: a crumb with none, higher with more, blocking ones count twice, full at FOOD_FULL", () => {
+test("LOOP's food pile is the tasks queued for the agents: gone with none, higher with more, full at FOOD_FULL", () => {
   const H = require('../anthills.js');
+  assert.equal(H.FOOD_FULL, 15);
   assert.equal(H.foodSize(null), 0);
-  assert.equal(H.foodSize({ n: 0, blocking: 0 }), 0);
-  assert.equal(H.foodSize({ n: 3, blocking: 0 }), 3 / H.FOOD_FULL);
-  assert.equal(H.foodSize({ n: 3, blocking: 3 }), 6 / H.FOOD_FULL);
-  assert.equal(H.foodSize({ n: 40, blocking: 2 }), 1);
-  const fruit = (tasks) => (S.scene(young(), AGENTS, { tasks }).svg.match(/fill="#(c8553d|e39a3b|9a3d2c)"/g) || []).length;
-  const n = [0, 3, 8, 12].map((k) => fruit({ n: k, blocking: 0 }));
-  assert.ok(n[0] > 0 && n[0] < n[1] && n[1] < n[2] && n[2] < n[3], `the pile grows with the count ${n}`);
-  assert.equal(fruit({ n: 4, blocking: 4 }), n[2], 'four blocking items weigh as eight');
-  assert.equal(fruit({ n: 0 }), fruit(null), 'no figure: a crumb');
+  assert.equal(H.foodSize({ total: 0, per_session: {} }), 0);
+  assert.equal(H.foodSize({ total: 6 }), 6 / 15);
+  assert.equal(H.foodSize({ total: 40 }), 1);
+  const fruit = (food) => (S.scene(young(), AGENTS, { food }).svg.match(/fill="#(c8553d|e39a3b|9a3d2c)"/g) || []).length;
+  const n = [0, 3, 8, 15, 30].map((k) => fruit({ total: k }));
+  assert.equal(n[0], 0, 'nothing queued: no pile');
+  assert.ok(n[0] < n[1] && n[1] < n[2] && n[2] < n[3] && n[3] === n[4], `the pile grows with the count, full at 15 ${n}`);
+  assert.equal(fruit(null), 0, 'no figure: no pile');
 });
 
 test('a bird flies down onto its crown node as its deadline nears, never near the ground (Finbar 2026-11-27)', () => {
@@ -259,7 +260,7 @@ test('a bird flies down onto its crown node as its deadline nears, never near th
   for (const history of [EX.history(30).entries, EX.history(2 * 365).entries]) {        // a small tree and a grown one
     const st = G.derive([...history, due('soon', '2026-12-20')], {}, {}, NOW);
     const sc = S.scene(st, AGENTS);
-    const top = Math.min(0, sc.tree.y0, S.sunArc(sc.L).top - 1) - S.BIRD_ROOM;
+    const top = Math.min(0, sc.tree.y0, sc.arc.top - 1) - S.BIRD_ROOM;
     const k = G.treeScale(st), lowest = Math.max(...G.layout(st).birds.map((b) => sc.L.surface - S.SCALE * k * b.y));
     const at = (days) => S.birds({ ...st, birds: st.birds.map((b) => ({ ...b, days })) }, sc.L, sc.L.gap.cx, top).find((b) => b.id === 'soon');
     const path = [45, 14, 3, 0].map(at);
@@ -269,5 +270,17 @@ test('a bird flies down onto its crown node as its deadline nears, never near th
     assert.ok(path.every((b) => b.y >= top - 1e-9 && b.x >= S.BIRD_EDGE - 1e-9 && b.x <= sc.L.width - S.BIRD_EDGE + 1e-9), 'inside the sky');
     assert.ok(path[0].size === S.BIRD_SMALL && path[0].y < path[3].y, 'a far one is small and high');
     assert.ok(new Set(path.map((b) => `${b.land.x},${b.land.y}`)).size === 1, 'one node all the way');
+  }
+});
+
+test('the sun peaks 5 m above the top of the tree, small or grown, its label clear of the crown', () => {
+  for (const st of [young(), grown(30), grown(2 * 365)]) {
+    const sc = S.scene(st, AGENTS, { usage: { pct: 47.5 } }), top = sc.L.surface - S.SCALE * st.height;
+    const m = S.sunAt(47.5, sc.arc);
+    assert.ok(Math.abs(m.y - Math.min(sc.arc.low - S.SUN.lift, top - 5 * S.SCALE)) < 1e-9, `${st.height} m: the peak 5 m over the tree`);
+    if (st.height > 1) assert.ok(Math.abs(m.y - (top - 5 * S.SCALE)) < 1e-9);
+    assert.ok(m.y + sc.arc.reach < top, 'clear of the crown');
+    if (sc.arc.top - 1 >= sc.L.surface - S.HOME_MAX) assert.ok(m.y - sc.arc.gap - sc.arc.font >= sc.home.y0, 'its label inside the default view');
+    assert.ok(S.sunAt(0, sc.arc).y === sc.arc.low && S.sunAt(95, sc.arc).y === sc.arc.low, '0% and 95% stay low');
   }
 });

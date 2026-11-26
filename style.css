@@ -485,6 +485,14 @@ details.addlink .newentry input { font: inherit; padding: 6px 8px; border-radius
 .bverdict .choice-btn { padding: 6px 8px; }
 .bverdict .choice-btn.sent { border-style: dashed; }
 .ausage { font-weight: 600; }
+.tgroup h3 { display: flex; align-items: center; gap: 4px; }
+.trow { border-top: 1px solid var(--line); padding: 6px 0; } .trow:first-of-type { border-top: 0; }
+.trow .arow { flex-wrap: wrap; gap: 6px; } .ttitle { flex: 1 1 12em; min-width: 0; }
+.tchip { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--soft); color: var(--muted); white-space: nowrap; }
+.tchip.doing { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); font-weight: 600; }
+.tchip.waiting { background: color-mix(in srgb, var(--wait) 20%, transparent); color: var(--wait); font-weight: 600; }
+.tchip.done { text-decoration: line-through; }
+.tdone { margin: 12px 0; } .tdone summary { cursor: pointer; color: var(--muted); }
 .skyinfo .srow { margin-top: 2px; } .skyinfo .slimits { margin: 4px 0; } .ausage.stale { color: var(--muted); font-weight: 400; }
 .heldbanner { background: color-mix(in srgb, var(--ask) 22%, var(--bg)); color: var(--ink); padding: 8px 16px; font-size: 14px; font-weight: 600; text-align: center; }
 /* Night (the usage hold): z's rise from each asleep anthill and fade. */
