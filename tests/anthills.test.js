@@ -179,6 +179,34 @@ test('names are escaped and shortened; the mini farm has no text or tap targets'
   assert.match(H.svg([], {}), /<svg/);
 });
 
+test('the maintainer is a dung beetle in the gallery under the hill it works with, not an anthill, with no tunnels', () => {
+  const B = 'Maintenance-Dung-Beetle';
+  const agents = [...AGENTS, ag(B, 'working', 3e6)];
+  const msgs = { ...MSGS, pairs: [...MSGS.pairs, { a: B, b: 'MED-c', count: 4, last: '2026-11-23T05:00:00Z' }] };
+  const at = (where) => H.layout(agents, { messages: msgs, maintainer: { name: B, at: where, why: 'stuck dialog', since: '2026-11-23T05:00:00Z', source: 'said' } });
+  const L = at('MED-c');
+  assert.ok(!L.hills.some((h) => h.name === B), 'no anthill');
+  assert.ok(!L.paths.some((p) => p.a === B || p.b === B), 'no tunnels');
+  const n = L.hills.findIndex((h) => h.name === 'MED-c');
+  assert.equal(L.beetle.hill, n);
+  assert.equal(L.beetle.x, L.hills[n].x);
+  assert.ok(L.beetle.y > L.gallery && L.beetle.y < L.height, 'underground, below the homes');
+  assert.equal(L.beetle.agent.state, 'working', 'its status row, for the tap');
+  assert.deepEqual([L.beetle.at, L.beetle.why, L.beetle.source], ['MED-c', 'stuck dialog', 'said']);
+  for (const where of ['LOOP', 'no-such-session']) {                    // at LOOP, or a session not in the farm: under LOOP's pile
+    const M = at(where);
+    assert.equal(M.beetle.x, M.food.cx);
+    assert.equal(M.hills[M.beetle.hill].kind, 'food');
+  }
+  assert.ok(H.layout(agents, { messages: msgs }).hills.some((h) => h.name === B) && !H.layout(agents).beetle, 'without usage.maintainer, an anthill as before');
+  const s = H.svg(agents, { messages: msgs, maintainer: { name: B, at: 'MED-c' } });
+  assert.match(s, new RegExp(`<g class="beetle" data-x="${L.beetle.x}" `));
+  assert.match(s, /data-k="beetle"/);
+  assert.doesNotMatch(H.svg(agents, { mini: true, maintainer: { name: B, at: 'MED-c' } }), /data-k="beetle"/, 'no tap target in the mini farm');
+  const wide = H.layout(many(40), { maintainer: { name: B, at: 'MED-x3' } });
+  assert.ok(wide.beetle.k > 1 && Math.abs(wide.beetle.k - wide.width / 100) < 1e-9, 'it grows with the farm');
+});
+
 test('opts.gap leaves open surface to the right of the food: the right-hand anthills move over, the farm widens', () => {
   const a = H.layout(AGENTS), b = H.layout(AGENTS, { gap: 14 });
   assert.equal(a.gap, null);
