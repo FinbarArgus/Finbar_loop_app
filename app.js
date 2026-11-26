@@ -1675,20 +1675,23 @@
       doing.length ? el('div', { class: 'alinks' }, 'Doing: ', doing.map((t) => `${t.id} ${t.title}`).join('; ')) : null,
       a.why ? el('div', { class: 'awhy' }, a.why) : null);
   }
-  // The beetle walks along the gallery from where the last drawing had it (4 blocks a second, facing its way).
-  let beetleFrom = null;
+  // When the beetle has moved to another session since this device last drew it (loop.tree.beetle: {at, x}), it
+  // walks along the gallery from there (4 blocks a second, facing its way).
   function walkBeetle(view) {
     const g = view.querySelector('.beetle');
-    const from = beetleFrom;
-    beetleFrom = g ? { x: +g.dataset.x } : null;
-    if (!g || !from || Math.abs(from.x - beetleFrom.x) < 0.5 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const { x, y, s } = { x: +g.dataset.x, y: +g.dataset.y, s: +g.dataset.s };
+    if (!g) return;
+    const { at, x, y, s } = { at: g.dataset.at, x: +g.dataset.x, y: +g.dataset.y, s: +g.dataset.s };
+    let from = null;
+    try { from = JSON.parse(safeGet('loop.tree.beetle') || 'null'); } catch (e) { /* unreadable: no walk */ }
+    safeSet('loop.tree.beetle', JSON.stringify({ at, x }));
+    if (!from || from.at === at || !Number.isFinite(from.x) || Math.abs(from.x - x) < 0.5
+      || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const dir = x < from.x ? -1 : 1;
-    const at = (bx) => `translate(${bx}px, ${y}px) scale(${dir * s}, ${s})`;
-    g.style.transform = at(from.x);
+    const pose = (bx) => `translate(${bx}px, ${y}px) scale(${dir * s}, ${s})`;
+    g.style.transform = pose(from.x);
     g.getBoundingClientRect();                       // start from there before the transition
     g.style.transition = `transform ${Math.min(12, Math.max(2, Math.abs(x - from.x) / 4)).toFixed(1)}s linear`;
-    g.style.transform = at(x);
+    g.style.transform = pose(x);
     g.addEventListener('transitionend', () => { g.style.transition = ''; g.style.transform = ''; }, { once: true });
   }
   const foodLine = (fd) => el('div', { class: 'ausage food' },

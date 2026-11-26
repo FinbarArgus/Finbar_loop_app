@@ -9,6 +9,7 @@ answer; a detail request with an image (Enter sends); the added detail (figure +
 a review with provenance, quiz (marking, reason, score, start again) and checklist; no console errors
 and no sideways scrolling.
 """
+import datetime as dt
 import argparse
 import base64
 import hashlib
@@ -1248,6 +1249,32 @@ def run(loop_bin, graph, shots):
                 page.locator(f'{F} .hits g[data-k="hill"][data-i="0"] rect').last.dispatch_event('click')
                 lab = page.locator('.hinfo .ausage.food').inner_text()
                 check(page, fruit() == 0 and lab.startswith('Nothing queued: give them something to do'), f'Farm: nothing queued, no pile {lab!r}', failures)
+                # The maintainer (status.json usage.maintainer) is a dung beetle underground under the hill it works with;
+                # tapped, who it works with and why; when it moves, it walks there along the gallery.
+                def beetle_at(at):
+                    stf = json.loads((repo / 'state/status.json').read_text())
+                    stf['usage']['maintainer'] = {'name': 'Maintenance-Dung-Beetle', 'at': at, 'why': 'restarting it',
+                                                  'since': dt.datetime.now(dt.timezone.utc).isoformat(), 'source': 'said'}
+                    (repo / 'state/status.json').write_text(json.dumps(stf))
+                beetle_at('MED-y')
+                sky_at(pct=26, held=False, override=False)
+                bx = page.evaluate("+document.querySelector('.gview .beetle').dataset.x")
+                page.locator(f'{F} .hits [data-k="beetle"]').dispatch_event('click')
+                bi = page.locator('.hinfo').inner_text()
+                check(page, page.locator('.gview .beetle').count() == 1 and 'Working with MED-y: restarting it' in bi and 'it said so' in bi
+                      and 'the maintainer, a dung beetle' in bi, f'Beetle: under the hill it works with; tapped, who and why {bi!r}', failures)
+                page.keyboard.press('Escape')
+                beetle_at('HIGH-paper')
+                sky_at(pct=26, held=False, override=False)
+                walk = page.evaluate("""() => { const g = document.querySelector('.gview .beetle');
+                  return [g.dataset.at, +g.dataset.x, g.style.transition, g.style.transform]; }""")
+                check(page, walk[0] == 'HIGH-paper' and walk[1] != bx and 'transform' in walk[2] and float(walk[3][10:].split('px')[0]) == walk[1],
+                      f'Beetle: it walks from MED-y to its new hill {walk}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-beetle.png')
+                sky_at(pct=26, held=False, override=False)
+                walk = page.evaluate("() => document.querySelector('.gview .beetle').style.transition")
+                check(page, walk == '', f'Beetle: no walk while it stays put {walk!r}', failures)
                 food_is(5, {'HIGH-paper': 3, 'IMPLEMENT-app': 2})
                 sky_at(pct=26, held=False, override=False)
                 # Day: a sun with the weekly percentage above it; tapped (a phone) or hovered (a computer), every usage figure.

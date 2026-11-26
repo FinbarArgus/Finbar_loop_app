@@ -200,7 +200,7 @@ test('the maintainer is a dung beetle in the gallery under the hill it works wit
   }
   assert.ok(H.layout(agents, { messages: msgs }).hills.some((h) => h.name === B) && !H.layout(agents).beetle, 'without usage.maintainer, an anthill as before');
   const s = H.svg(agents, { messages: msgs, maintainer: { name: B, at: 'MED-c' } });
-  assert.match(s, new RegExp(`<g class="beetle" data-x="${L.beetle.x}" `));
+  assert.match(s, new RegExp(`<g class="beetle" data-at="MED-c" data-x="${L.beetle.x}" `));
   assert.match(s, /data-k="beetle"/);
   assert.doesNotMatch(H.svg(agents, { mini: true, maintainer: { name: B, at: 'MED-c' } }), /data-k="beetle"/, 'no tap target in the mini farm');
   const wide = H.layout(many(40), { maintainer: { name: B, at: 'MED-x3' } });

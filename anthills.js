@@ -552,13 +552,13 @@
         + `<rect x="${f(hm.x0 - 0.5)}" y="${f(hm.y0 - 0.5)}" width="${f(hm.w + 1)}" height="${f(hm.h + LABEL + 0.5)}"/></g>`;
       foods += `<rect data-k="food" data-i="${n}" x="${f(hl.food.x0 - 0.6)}" y="${f(hl.food.y0 - 1)}" width="${f(hl.food.w + 1.2)}" height="${f(hl.food.h + 1.4)}"/>`;
     });
-    // The maintainer's beetle (L.beetle): <g class="beetle" data-x data-y data-s> placed by translate(x y) scale(k), so the app
+    // The maintainer's beetle (L.beetle): <g class="beetle" data-at data-x data-y data-s> placed by translate(x y) scale(k), so the app
     // can walk it from where it was; its tap target is data-k="beetle".
     let beetle = '';
     const bt = L.beetle;
     if (bt) {
       const bx = bt.x, k = bt.k;
-      beetle = `<g class="beetle" data-x="${f(bx)}" data-y="${f(bt.y)}" data-s="${f(k)}" transform="translate(${f(bx)} ${f(bt.y)}) scale(${f(k)})"><g transform="translate(-1 0)">${BEETLE}</g></g>`;
+      beetle = `<g class="beetle" data-at="${esc(bt.at || '')}" data-x="${f(bx)}" data-y="${f(bt.y)}" data-s="${f(k)}" transform="translate(${f(bx)} ${f(bt.y)}) scale(${f(k)})"><g transform="translate(-1 0)">${BEETLE}</g></g>`;
       if (!opts.mini) hits += `<rect data-k="beetle" x="${f(bx - 2.8 * k)}" y="${f(bt.y - 1.4 * k)}" width="${f(5.6 * k)}" height="${f(2.8 * k)}"/>`;
     }
     const sw = f(sx1 - sx0), sx = sx0 ? `x="${f(sx0)}" ` : '';
