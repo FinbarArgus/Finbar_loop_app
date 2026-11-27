@@ -982,7 +982,10 @@
     return el('div', { class: 'trow', 'data-task': t.id },
       el('div', { class: 'arow' }, chip, withName ? el('b', {}, t.for) : null, el('span', { class: 'ttitle' }, t.title)),
       el('div', { class: 'who' }, `${t.id} · ${t.status === 'done' ? 'done' : 'updated'} ${age(t.updated)} ago · by ${t.by}`,
-        t.source ? ' · ' : '', taskSource(t.source, ctx.titles), t.note ? ` · ${t.note}` : ''));
+        t.source ? ' · ' : '', taskSource(t.source, ctx.titles),
+        // The content page showing the work (`loop task done --content`).
+        t.content ? el('span', { class: 'tcontent' }, ' · content ', taskSource(t.content, ctx.titles)) : null,
+        t.note ? ` · ${t.note}` : ''));
   }
   async function showTasks() {
     await Promise.all([useTree(), refreshIndex()]);
