@@ -219,7 +219,7 @@ test('GOD is a badger on the surface at the farm\'s left edge, not an anthill, w
     assert.ok(L.pad > 0 && L.width === A.width + L.pad, 'the farm widens by the strip');
     assert.equal(L.food.cx, A.food.cx + L.pad, 'everything else moves over');
     const left = Math.min(...L.hills.filter((h) => h.kind === 'home').map((h) => h.mound.x0));
-    assert.ok(L.badger.x + 5 * L.badger.k < left && L.badger.x - 3.4 * L.badger.k > 0, 'between the left edge and the first anthill');
+    assert.ok(L.badger.x + 5 * L.badger.k < left && L.badger.x - 3.4 * L.badger.k > 2, 'between the height scale (x = 1) and the first anthill');
     const s = H.svg(agents, { messages: msgs });
     assert.match(s, /<g class="badger" /);
     assert.match(s, /data-k="badger"/);

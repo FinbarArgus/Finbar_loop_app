@@ -124,7 +124,7 @@
   const TIER = 18;          // from the shallow homes to the deep ones (a home and its name)
   const GALLERY = 6;        // the band below the homes the tunnels run through
   const LABEL = 3.4;        // from a home's floor to its name's baseline
-  const BADGER_ROOM = 9;    // blocks of surface (before the badger's scale) added at the farm's left edge for GOD's badger
+  const BADGER_ROOM = 11;   // blocks of surface (before the badger's scale) added at the farm's left edge for GOD's badger
   // GOD: the session that profiles the agent setup (Finbar, 2026-11-27), named GOD or god-...
   const isGod = (name) => /^god\b/i.test(String(name || ''));
 
@@ -230,7 +230,7 @@
         agent: (agents || []).find((a) => a && a.name === mt.name) || { name: mt.name },
         at: mt.at || null, why: mt.why || null, since: mt.since || null, source: mt.source || null };
     }
-    if (god) L.badger = { x: pad * 0.55, y: surface, k: bk, agent: god };
+    if (god) L.badger = { x: pad * 0.6, y: surface, k: bk, agent: god };
     return L;
   }
 
