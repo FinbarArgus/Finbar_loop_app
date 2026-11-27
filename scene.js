@@ -28,6 +28,11 @@
   const SUN_PCT = 95;
   const SUN = { per: 100, r: 2, ray: 1.3, font: 1.7, ground: 9, margin: 8, lift: 5, peakM: 5,
     core: '#f7c948', edge: '#ee9a2e', ink: '#6b4a10' };
+  // The 5-hour usage (status.json usage.limits "Session") is a cloud over the sun: beside it at 0%, sliding in from the
+  // scene's middle to cover it at 100%, its percentage written in it; by day the sky turns overcast towards OVERCAST
+  // as it fills (eased, (pct / 100)^2), darkest when the 5 hours are used up.
+  const CLOUD = { fill: '#ffffff', edge: '#9aa3ad', ink: '#3f4852', w: 3.2, h: 1.5 };
+  const OVERCAST = '#8e96a3';
   const LAMP = { glass: '#fff1b8', base: '#8a8577', glow: '#ffd77a', reach: 34 };
   const HOME_MAX = 100;         // the most sky above the surface the default view rises to, to hold the sun's arc
   const HOME_SKY = 24;          // blocks of sky above the surface in the default view (the anthills and the trunk's foot)
@@ -111,8 +116,36 @@
         + `<circle cx="${f(x)}" cy="${f(y)}" r="${f(r)}" fill="${SUN.core}" stroke="${SUN.edge}" stroke-width="${f(0.3 * s)}"/></g>`,
       label: `<text class="sunlabel" x="${f(x)}" y="${f(y - gap)}" font-size="${f(font)}" font-weight="700" text-anchor="middle" ${MONO}`
         + ` fill="${SUN.ink}" stroke="${SKY}" stroke-width="${f(0.45 * s)}" paint-order="stroke"${op}>${text}</text>`,
-      hit: `<rect x="${f(x - w / 2)}" y="${f(y - gap - font)}" width="${f(w)}" height="${f(gap + font + reach)}" data-k="sky" fill="#000" fill-opacity="0"/>`,
+      box: { x0: x - w / 2, y0: y - gap - font, x1: x + w / 2, y1: y + reach },
     };
+  }
+  // The cloud for the 5-hour usage pct over the sun at (x, y) on arc; mid: the scene's middle (it comes in from that
+  // side). -> {x, y, w, h, cover (0..1: how far over the sun), svg, hit}.
+  function cloudAt(pct, x, y, arc, mid) {
+    const p = Math.max(0, Math.min(1, (pct || 0) / 100)), { s, reach, font } = arc;
+    const w = CLOUD.w * reach, h = CLOUD.h * reach, dir = x > mid ? -1 : 1;
+    return { x: x + dir * (1 - p) * (w / 2 + reach), y: y + 0.1 * reach, w, h, cover: p, s, font };
+  }
+  function cloudSvg(session, at, op) {
+    const { x, y, w, h, s, font } = cloudAt(session.pct, at.x, at.y, at.arc, at.mid);
+    const puffs = [[-0.28, 0.05, 0.3], [0, -0.18, 0.38], [0.26, 0.02, 0.32], [-0.08, 0.16, 0.3], [0.12, 0.17, 0.28]]
+      .map(([dx, dy, r]) => `<circle cx="${f(x + dx * w)}" cy="${f(y + dy * h)}" r="${f(r * h)}"/>`).join('');
+    const text = `5h ${Math.round(session.pct)}%`;
+    return {
+      svg: `<g class="cloud"${op}><g fill="${CLOUD.edge}" transform="translate(0 ${f(0.12 * s)})">${puffs}</g>`
+        + `<g fill="${CLOUD.fill}">${puffs}</g>`
+        + `<text class="cloudlabel" x="${f(x)}" y="${f(y + 0.32 * font)}" font-size="${f(0.8 * font)}" font-weight="700"`
+        + ` text-anchor="middle" ${MONO} fill="${CLOUD.ink}">${text}</text></g>`,
+      box: { x0: x - w / 2, y0: y - h / 2, x1: x + w / 2, y1: y + h / 2 },
+    };
+  }
+  // The day sky's colour for the 5-hour usage pct: SKY, turning towards OVERCAST as it fills.
+  function daySky(pct) {
+    const k = Math.max(0, Math.min(1, (pct || 0) / 100)) ** 2;
+    const mix = (a, b) => Math.round(a + (b - a) * k).toString(16).padStart(2, '0');
+    const rgb = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+    const [a, b] = [rgb(SKY), rgb(OVERCAST)];
+    return '#' + a.map((v, i) => mix(v, b[i])).join('');
   }
   // The lamp hanging in the night sky over LOOP's pile: a bulb on a cord, its warm glow, and a hole in the night shade
   // around it (a mask) so that part of the scene is lit.
@@ -132,7 +165,8 @@
   }
 
   // state: growth.derive(); agents: status.json agents[]; opts: {messages, t, branchNames, hour, usage, food}.
-  // opts.usage (state/usage.json, see skyOf): the sun by day; at night a sky with stars and a moon, the tree and the
+  // opts.session ({pct}: status.json usage.limits "Session", the 5-hour usage): a cloud over the sun and an overcast sky
+  // (cloudAt, daySky). opts.usage (state/usage.json, see skyOf): the sun by day; at night a sky with stars and a moon, the tree and the
   // farm in shade, and, while held, z's from every asleep anthill (anthills.js) drawn over the shade (an overridden
   // guard holds nothing, so its sessions stay awake). opts.food (status.json usage.food): the size of LOOP's pile (anthills.js).
   // The sun, the moon and the lamp are a tap target data-k="sky" (the app shows the usage).
@@ -155,7 +189,10 @@
     const tx0 = fx + SCALE * T.x0, tx1 = fx + SCALE * (T.x0 + T.w), ty0 = L.surface + SCALE * T.y0;
     const arc = sunArc(L, tall);
     const flying = birds(state, L, fx, Math.min(0, ty0, arc.top - 1) - BIRD_ROOM).map((bd) => ({ ...bd, ...birdSvg(bd) }));
-    const box = { x0: Math.min(0, tx0, ...flying.map((b) => b.x - 4)), y0: Math.min(0, ty0, ...flying.map((b) => b.y - 4)),
+    // With a sun, the scene's box holds its arc too (its label's top), so the view, which never shows above it, shows it.
+    const sunUp = !sk.night && !!opts.usage && opts.usage.pct != null;
+    const box = { x0: Math.min(0, tx0, ...flying.map((b) => b.x - 4)),
+      y0: Math.min(0, ty0, sunUp ? arc.top - 1 : 0, ...flying.map((b) => b.y - 4)),
       x1: Math.max(L.width, tx1), y1: L.height };
     // A small tree's frame: the tree and its height scale, with as much ground below as the tree is tall.
     const tree = small ? { x0: tx0, y0: ty0, x1: tx1, y1: L.surface + (L.surface - ty0) * 0.25 }
@@ -173,8 +210,10 @@
     const home = { x0: 0, y0: Math.min(L.surface - HOME_SKY, Math.max(arc.top - 1, L.surface - HOME_MAX)), x1: L.width, y1: L.height };
     const place = `translate(${f(fx)} ${f(L.surface)}) scale(${SCALE})`;
     const counts = ['blocked', 'working', 'quiet'].map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
-    const skyTop = box.y0 - (box.y1 - box.y0), sky = sk.night ? NIGHT.sky : SKY;
-    const sun = !sk.night && opts.usage && opts.usage.pct != null ? sunSvg(opts.usage, arc) : null;
+    const ses = opts.session && opts.session.pct != null ? opts.session : null;
+    const skyTop = box.y0 - (box.y1 - box.y0), sky = sk.night ? NIGHT.sky : ses ? daySky(ses.pct) : SKY;
+    const sun = sunUp ? sunSvg(opts.usage, arc) : null;
+    const cloud = sun && ses ? cloudSvg(ses, { ...sunAt(opts.usage.pct, arc), arc, mid: L.width / 2 }, opts.usage.stale ? ' opacity="0.45"' : '') : null;
     const lamp = sk.lamp ? lampSvg(L, skyTop) : null;
     const shadeBox = `x="${f(span[0])}" y="${f(skyTop)}" width="${f(span[1] - span[0])}" height="${f(L.height - skyTop)}"`;
     const night = !sk.night ? null : {
@@ -185,12 +224,15 @@
         + (lamp ? lamp.glow + lamp.bulb : '') + farm.zz,
     };
     const moon = sk.night ? moonAt(L) : null;
-    const skyHit = sun ? sun.hit : moon ? `<rect x="${f(moon.x - 3.5)}" y="${f(moon.y - 3.5)}" width="7" height="7" data-k="sky" fill="#000" fill-opacity="0"/>`
+    // One tap target over the sun, its label and the cloud.
+    const sb = sun && (cloud ? { x0: Math.min(sun.box.x0, cloud.box.x0), y0: Math.min(sun.box.y0, cloud.box.y0),
+      x1: Math.max(sun.box.x1, cloud.box.x1), y1: Math.max(sun.box.y1, cloud.box.y1) } : sun.box);
+    const skyHit = sun ? `<rect x="${f(sb.x0)}" y="${f(sb.y0)}" width="${f(sb.x1 - sb.x0)}" height="${f(sb.y1 - sb.y0)}" data-k="sky" fill="#000" fill-opacity="0"/>` : moon ? `<rect x="${f(moon.x - 3.5)}" y="${f(moon.y - 3.5)}" width="7" height="7" data-k="sky" fill="#000" fill-opacity="0"/>`
       + (lamp ? lamp.hit : '') : '';
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${f(home.x0)} ${f(home.y0)} ${f(home.x1 - home.x0)} ${f(home.y1 - home.y0)}"`
       + ` class="scene${night ? ' night' : ''}" role="img" aria-label="${state.stage}, ${f(state.height)} m tall, over ${L.hills.length} agents: ${counts}`
       + `${night ? `, at night (${sk.held ? 'usage held' : 'over the weekly limit'}${lamp ? ', a lamp lit' : ''})` : ''}`
-      + `${sun ? `, a sun at ${Math.round(opts.usage.pct)}% weekly usage` : ''}">`
+      + `${sun ? `, a sun at ${Math.round(opts.usage.pct)}% weekly usage` : ''}${cloud ? `, a cloud over it at ${Math.round(ses.pct)}% of the 5-hour usage` : ''}">`
       + `<rect x="${f(span[0])}" y="${f(skyTop)}" width="${f(span[1] - span[0])}" height="${f(L.surface - skyTop)}" fill="${sky}"/>`
       + (night ? night.sky : '')
       // A grown tree's foot stands in LOOP's pile (the farm drawn over it); a young one is drawn over the farm's grass.
@@ -198,7 +240,7 @@
         : `<g class="tree" transform="${place}" shape-rendering="crispEdges">${T.body}</g><g class="farm">${farm.body}</g>`)
       + (flying.length ? `<g class="birds">${flying.map((b) => b.draw).join('')}</g>` : '')
       + (night ? night.shade : '') + farm.alerts
-      + sprout + (sun ? sun.disc + sun.label : '')
+      + sprout + (sun ? sun.disc + (cloud ? cloud.svg : '') + sun.label : '')
       + `<g class="tree" transform="${place}">${T.hits}</g>`
       + (sproutHit || flying.length || skyHit ? `<g class="hits">${sproutHit}${flying.map((b) => b.hit).join('')}${skyHit}</g>` : '') + '</svg>';
     return { svg, L, box, home, tree, arc };
@@ -224,5 +266,5 @@
   // The moon: in the default view's top right, HOME_SKY - 5 above the surface.
   const moonAt = (L) => ({ x: L.width - 7, y: L.surface - HOME_SKY + 5 });
 
-  return { scene, birds, BIRD_ROOM, BIRD_EDGE, skyOf, sunArc, sunAt, SUN_PCT, SUN, NIGHT, SCALE, HOME_SKY, HOME_MAX, GAP, SMALL, BIRD_NEAR, BIRD_PER_DAY, BIRD_DAYS, BIRD_SMALL, BIRD_GROW };
+  return { scene, birds, BIRD_ROOM, BIRD_EDGE, skyOf, sunArc, sunAt, cloudAt, daySky, CLOUD, OVERCAST, SUN_PCT, SUN, NIGHT, SCALE, HOME_SKY, HOME_MAX, GAP, SMALL, BIRD_NEAR, BIRD_PER_DAY, BIRD_DAYS, BIRD_SMALL, BIRD_GROW };
 }));

@@ -214,6 +214,34 @@ test('day: the sun rises at the left at 0%, is highest at 47.5%, sets at the rig
   assert.doesNotMatch(S.scene(young(), AGENTS).svg, /class="sun"|data-k="sky"/, 'no usage figure: no sun');
 });
 
+test('the 5-hour usage is a cloud sliding over the sun, its percentage in it, the sky darker as it fills', () => {
+  const skyFill = (svg) => /<rect x="[^"]+" y="[^"]+" width="[^"]+" height="[^"]+" fill="(#[0-9a-f]{6})"\/>/.exec(svg)[1];
+  for (const week of [20, 80]) {                                     // the sun on the left, then on the right
+    const at = (pct) => S.scene(young(), AGENTS, { usage: { pct: week }, session: { pct } });
+    const sc = at(0), sun = S.sunAt(week, sc.arc), mid = sc.L.width / 2;
+    const c0 = S.cloudAt(0, sun.x, sun.y, sc.arc, mid), c50 = S.cloudAt(50, sun.x, sun.y, sc.arc, mid), c100 = S.cloudAt(100, sun.x, sun.y, sc.arc, mid);
+    assert.ok(Math.abs(Math.abs(c0.x - sun.x) - (c0.w / 2 + sc.arc.reach)) < 1e-9, `${week}%: at 0% the cloud is just beside the sun`);
+    assert.ok((c0.x - sun.x) * (mid - sun.x) > 0, `${week}%: it comes in from the scene's middle`);
+    assert.ok(Math.abs(c50.x - sun.x) < Math.abs(c0.x - sun.x) && c100.x === sun.x, `${week}%: at 100% it covers the sun`);
+    assert.ok(c0.x - c0.w / 2 >= 0 && c0.x + c0.w / 2 <= sc.L.width, `${week}%: the cloud stays over the farm`);
+    assert.match(at(16).svg, /<text class="cloudlabel"[^>]*>5h 16%<\/text>/);
+    assert.match(at(16).svg, /a cloud over it at 16% of the 5-hour usage/);
+    const i = (x) => at(16).svg.indexOf(x);
+    assert.ok(i('<g class="cloud"') > i('<g class="sun">') && i('sunlabel') > i('<g class="cloud"'), 'over the sun, under its label');
+    assert.equal(at(16).svg.split('data-k="sky"').length - 1, 1, 'one tap target for the sun and the cloud');
+    assert.ok(sc.box.y0 <= sc.arc.top - 1, 'the scene box holds the sun, so a wide view can show it');
+  }
+  const sky = (pct) => skyFill(S.scene(young(), AGENTS, { usage: { pct: 30 }, session: { pct } }).svg);
+  assert.equal(sky(0), '#f3f2ea');
+  assert.equal(sky(100), S.OVERCAST, 'used up: the darkest');
+  const lum = (c) => [1, 3, 5].reduce((s, k) => s + parseInt(c.slice(k, k + 2), 16), 0);
+  assert.ok(lum(sky(0)) > lum(sky(50)) && lum(sky(50)) > lum(sky(90)) && lum(sky(90)) > lum(sky(100)), 'darker as it fills');
+  assert.doesNotMatch(S.scene(young(), AGENTS, { usage: { pct: 30 } }).svg, /class="cloud"/, 'no 5-hour figure: no cloud');
+  const night = S.scene(young(), AGENTS, { usage: { pct: 95, held: true }, session: { pct: 50 } });
+  assert.doesNotMatch(night.svg, /class="cloud"/, 'night: no sun, no cloud');
+  assert.equal(skyFill(night.svg), S.NIGHT.sky);
+});
+
 test('night when held, and at 95% with the guard overridden; the lamp when overridden or an Urgent message woke a session', () => {
   assert.deepEqual(S.skyOf({ pct: 50 }), { night: false, lamp: false, held: false, woken: [] });
   assert.deepEqual(S.skyOf({ pct: 94.9, override: true }), { night: false, lamp: false, held: false, woken: [] });

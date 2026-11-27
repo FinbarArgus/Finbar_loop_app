@@ -1316,6 +1316,10 @@ def run(loop_bin, graph, shots):
                 sun = page.evaluate("""() => { const s = document.querySelector('.gview svg .sun circle'), l = document.querySelector('.gview svg .sunlabel');
                   return { sun: !!s, label: l && l.textContent, night: !!document.querySelector('.gview svg.scene.night') }; }""")
                 check(page, sun == {'sun': True, 'label': '26%', 'night': False}, f'Sky: a sun labelled with the weekly usage {sun}', failures)
+                # The 5-hour usage (status.json usage.limits "Session", 43%) is a cloud over the sun; the sky turns overcast.
+                cl = page.evaluate("""() => { const l = document.querySelector('.gview svg .cloud .cloudlabel');
+                  return { label: l && l.textContent, sky: document.querySelector('.gview svg.scene > rect').getAttribute('fill') }; }""")
+                check(page, cl['label'] == '5h 43%' and cl['sky'] not in ('#f3f2ea', None), f'Sky: a cloud with the 5-hour usage over the sun, the sky greyer {cl}', failures)
                 page.locator('.gzoom button', has_text='Reset').click()
                 page.keyboard.press('Escape')                                            # unpin the food's info: a hover never replaces a pinned one
                 b = page.locator('.gview .hits [data-k="sky"]').bounding_box()
