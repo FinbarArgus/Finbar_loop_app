@@ -207,6 +207,48 @@ test('the maintainer is a dung beetle in the gallery under the hill it works wit
   assert.ok(wide.beetle.k > 1 && Math.abs(wide.beetle.k - wide.width / 100) < 1e-9, 'it grows with the farm');
 });
 
+test('GOD is a badger on the surface at the farm\'s left edge, not an anthill, with no tunnels; the farm widens by its strip', () => {
+  for (const G of ['GOD', 'god-agent-efficiency-profiling']) {
+    const agents = [...AGENTS, ag(G, 'stalled', 7e6)];
+    const msgs = { ...MSGS, pairs: [...MSGS.pairs, { a: G, b: 'LOOP', count: 2, last: '2026-11-23T05:00:00Z' }] };
+    const L = H.layout(agents, { messages: msgs }), A = H.layout(AGENTS, { messages: MSGS });
+    assert.ok(!L.hills.some((h) => h.name === G), 'no anthill');
+    assert.ok(!L.paths.some((p) => p.a === G || p.b === G), 'no tunnels');
+    assert.equal(L.badger.agent.name, G, 'its status row, for the tap');
+    assert.equal(L.badger.y, L.surface);
+    assert.ok(L.pad > 0 && L.width === A.width + L.pad, 'the farm widens by the strip');
+    assert.equal(L.food.cx, A.food.cx + L.pad, 'everything else moves over');
+    const left = Math.min(...L.hills.filter((h) => h.kind === 'home').map((h) => h.mound.x0));
+    assert.ok(L.badger.x + 5 * L.badger.k < left && L.badger.x - 3.4 * L.badger.k > 0, 'between the left edge and the first anthill');
+    const s = H.svg(agents, { messages: msgs });
+    assert.match(s, /<g class="badger" /);
+    assert.match(s, /data-k="badger"/);
+    assert.doesNotMatch(H.svg(agents, { mini: true }), /data-k="badger"/, 'no tap target in the mini farm');
+  }
+  const A = H.layout(AGENTS);
+  assert.ok(!A.badger && A.pad === 0, 'without GOD: no badger, no strip');
+  assert.ok(!H.isGod('Goddard') && !H.isGod('MED-god'), 'only GOD or god-...');
+});
+
+test('godEntries: GOD\'s latest profile, its open questions and its other open content, newest first', () => {
+  const it = (id, kind, from, title, status = 'open', created = '2026-11-27T10:00', category = kind === 'question' ? null : 'content') =>
+    ({ id, kind, from: { name: from, job: null }, title, status, created, category });
+  const items = [it('C-0025', 'review', 'GOD', 'Agent setup profile: tokens', 'open', '2026-11-27T15:02'),
+    it('C-0040', 'review', 'GOD', 'Draft: shorter CLAUDE.md', 'open', '2026-11-27T15:33'),
+    it('C-0010', 'review', 'GOD', 'Old profile', 'closed', '2026-11-20T09:00'),
+    it('Q-0093', 'question', 'GOD', 'Apply the shorter files?', 'open', '2026-11-27T15:33'),
+    it('Q-0090', 'question', 'GOD', 'Which findings?', 'answered'),
+    it('Q-0094', 'question', 'god-agent-efficiency-profiling', 'From its session name', 'open', '2026-11-27T16:00'),
+    it('R-0001', 'review', 'GOD', 'A PR profile', 'open', '2026-11-27T17:00', 'pr'),
+    it('Q-0001', 'question', 'HIGH-a', 'Not GOD\'s')];
+  const g = H.godEntries(items, 'god-agent-efficiency-profiling');
+  assert.equal(g.profile.id, 'C-0025', 'the newest content titled profile, not a PR review');
+  assert.deepEqual(g.questions.map((x) => x.id), ['Q-0094', 'Q-0093']);
+  assert.deepEqual(g.open.map((x) => x.id), ['C-0040']);
+  assert.equal(H.godEntries([it('C-0002', 'review', 'GOD', 'Notes')]).profile.id, 'C-0002', 'no profile: its newest content');
+  assert.deepEqual(H.godEntries([]), { profile: null, questions: [], open: [] });
+});
+
 test('opts.gap leaves open surface to the right of the food: the right-hand anthills move over, the farm widens', () => {
   const a = H.layout(AGENTS), b = H.layout(AGENTS, { gap: 14 });
   assert.equal(a.gap, null);

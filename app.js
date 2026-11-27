@@ -1710,6 +1710,20 @@
       doing.length ? el('div', { class: 'alinks' }, 'Doing: ', doing.map((t) => `${t.id} ${t.title}`).join('; ')) : null,
       a.why ? el('div', { class: 'awhy' }, a.why) : null);
   }
+  // GOD's badger (anthills.js L.badger): what it is, its latest profile, its open questions and other open entries
+  // (H.godEntries over index.json) and its tasks under way.
+  function badgerInfo(bd) {
+    const a = bd.agent, g = H.godEntries(index.items, a.name), doing = allTasks.filter((t) => t.for === a.name && t.status === 'doing');
+    const link = (it) => el('a', { href: `#/item/${it.id}`, class: 'alink' + (it.blocking_now ? ' blocking' : '') }, el('b', {}, it.id), ` ${(it.title || '').slice(0, 80)}`);
+    return el('div', {},
+      el('div', { class: 'arow' }, el('b', {}, a.name), a.state ? el('span', { class: `badge hmood ${H.moodOf(a)}` }, MOOD_TEXT[H.moodOf(a)]) : null,
+        el('span', { class: 'who' }, ' · GOD, a badger: profiles the agent setup and asks two ideas a day')),
+      el('div', { class: 'alinks badgerprofile' }, 'Latest profile: ', g.profile ? link(g.profile) : 'none posted yet'),
+      el('div', { class: 'alinks badgerqs' }, g.questions.length ? ['Open questions: ', ...g.questions.map(link)] : 'No open questions'),
+      g.open.length ? el('div', { class: 'alinks' }, 'Also open: ', ...g.open.map(link)) : null,
+      doing.length ? el('div', { class: 'alinks' }, 'Doing: ', doing.map((t) => `${t.id} ${t.title}`).join('; ')) : null,
+      a.updated ? el('div', { class: 'who' }, `last active ${age(a.updated)} ago`) : null);
+  }
   // When the beetle has moved to another session since this device last drew it (loop.tree.beetle: {at, x}), it
   // walks along the gallery from there (4 blocks a second, facing its way).
   function walkBeetle(view) {
@@ -1979,7 +1993,7 @@
       const k = t.dataset.k, i = t.dataset.i;
       const tree_ = ['seg', 'branch', 'creature', 'bird'].includes(k);
       const body = k === 'sky' ? skyInfo() : tree_ ? growthInfo(state, k, i, t.dataset.b)
-        : k === 'path' ? pathInfo(L.paths[+i]) : k === 'beetle' ? beetleInfo(L.beetle) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L, !!tapped) : null;
+        : k === 'path' ? pathInfo(L.paths[+i]) : k === 'beetle' ? beetleInfo(L.beetle) : k === 'badger' ? badgerInfo(L.badger) : k === 'food' ? focusInfo(L.hills[+i]) : k === 'hill' ? hillInfo(L.hills[+i], L, !!tapped) : null;
       if (!body) return;
       shown = t; pinned = !!tapped;
       viewer.view.querySelectorAll('.hits .on').forEach((n) => n.classList.remove('on'));
@@ -2011,6 +2025,7 @@
       el('span', {}, el('b', {}, 'Tunnels'), ' messages between them (last 50)'),
       el('span', {}, el('b', {}, '!'), ' idle with work: a task to do, neither working nor blocked (the maintainer is told)'),
       L.beetle ? el('span', {}, el('b', {}, 'Beetle'), ' the maintainer, underground at the session it is working with') : null,
+      L.badger ? el('span', {}, el('b', {}, 'Badger'), ' GOD, at the left: its profile of the agent setup and its questions') : null,
       el('span', {}, el('b', {}, 'Birds'), ' deadlines: nearer and bigger as they come due; a passed one is a crow in the tree'),
       el('span', {}, el('b', {}, 'Sun'), ` weekly usage, rising at 0% on the left and setting at ${SC.SUN_PCT}% on the right`),
       night ? el('span', {}, el('b', {}, 'Night'), sky.held ? ' usage held until the reset: z\'s asleep; an urgent message wakes its agent'
