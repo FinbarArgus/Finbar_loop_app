@@ -494,12 +494,13 @@ def run(loop_bin, graph, shots):
                 T = lambda i, title, who, status, **kw: {'id': i, 'title': title, 'for': who, 'by': 'LOOP', 'source': None, 'status': status,
                                                         'waiting_on': None, 'created': ago(30), 'updated': ago(2), 'note': None, **kw}
                 open_q = next(i['id'] for i in json.loads((repo / 'index.json').read_text())['items'] if i['section'] == 'question')
+                content_id = next(i['id'] for i in json.loads((repo / 'index.json').read_text())['items'] if i['id'].startswith('C-'))
                 (repo / 'state/tasks.json').write_text(json.dumps([
                     T('T-0001', 'Write the methods section', 'MED-y', 'todo'),
                     T('T-0002', 'Fix the parser', 'IMPLEMENT-app', 'doing', source='https://github.com/o/Finbar_loop_app/pull/36'),
                     T('T-0003', 'Run the fit', 'HIGH-paper', 'waiting', waiting_on='Q-0001', source='Q-0001'),
                     T('T-0004', 'Draft the figure', 'HIGH-paper', 'doing'),
-                    T('T-0005', 'Old work', 'HIGH-paper', 'done', updated=ago(24)),
+                    T('T-0005', 'Old work', 'HIGH-paper', 'done', updated=ago(24), content=content_id),
                     T('T-0006', 'Ancient work', 'LOW-x', 'done', updated=ago(24 * 9)),
                     T('T-0007', 'Post the bundle', 'MED-y', 'waiting', waiting_on='T-0001'),
                     T('T-0008', 'Merge main in', 'MED-y', 'waiting', waiting_on='https://github.com/o/CUFLynx/pull/386'),
@@ -548,6 +549,9 @@ def run(loop_bin, graph, shots):
                 done = page.locator('details.tdone')
                 check(page, done.count() == 1 and done.get_attribute('open') is None and 'Done in the last 7 days (1)' in done.inner_text(),
                       'Tasks: done ones collapsed, only the last 7 days', failures)
+                link = page.locator(f'.trow[data-task="T-0005"] .tcontent a[href="#/item/{content_id}"]')
+                check(page, link.count() == 1 and page.locator('.trow[data-task="T-0005"] .tcontent').text_content() == f' · content {content_id}',
+                      f'Tasks: a done task links its content page ({content_id})', failures)
                 page.locator('.switch button', has_text='Waiting on me').click()
                 page.wait_for_selector('.switch button.on >> text=Waiting on me')
                 check(page, [r.get_attribute('data-task') for r in page.locator('.tgroup .trow').all()] == ['T-0012'],
