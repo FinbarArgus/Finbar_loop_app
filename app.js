@@ -152,7 +152,8 @@
     const imgs = [];
     const tick = el('input', { type: 'checkbox', class: 'urgent' });
     const urgentRow = urgent && heldNow ? el('label', { class: 'wstate urgentrow' }, tick, 'Urgent: deliver now, despite the usage hold') : null;
-    const ta = el('textarea', { rows: 2, placeholder });
+    // autocomplete off: the browser must not restore form text into a redrawn page, where it can land in another box.
+    const ta = el('textarea', { rows: 2, placeholder, autocomplete: 'off' });
     ta.value = draftGet(draft);
     ta.addEventListener('input', () => draftSet(draft, ta.value));
     const thumbs = el('div', { class: 'thumbs' });
@@ -185,15 +186,22 @@
       if (!ready) return;
       busy = true;
       status.textContent = 'Sending…';
+      // The box and its draft empty as the send starts, so a redraw during onSend never shows the sent text
+      // again; they come back only if the send fails. onSend throws only when nothing was sent.
+      const typed = ta.value;
+      draftSet(draft, null);
+      ta.value = '';
+      ta.dispatchEvent(new Event('change'));
       try {
         await onSend(text, imgs.slice(), { urgent: !!(urgentRow && tick.checked) });
         tick.checked = false;
-        draftSet(draft, null);
-        ta.value = '';
         imgs.length = 0;
         thumbs.replaceChildren();
         status.textContent = 'Sent. LOOP picks it up within about a minute.';
       } catch (e) {
+        ta.value = typed;
+        draftSet(draft, typed);
+        ta.dispatchEvent(new Event('change'));
         status.textContent = `Not sent: ${e.message}`;
       }
       busy = false;
@@ -214,6 +222,8 @@
   let index = { items: [] };
   let poller = null;
   let refreshItem = null;            // redraws the open item's thread and answers in place
+  // After a send: a failed redraw is left to the next poll, so it never reads as a failed send.
+  const redraw = async () => { try { if (refreshItem) await refreshItem(); } catch (e) { console.warn('redraw', e); } };
   let justSent = null;               // id of the item whose answer was just sent (shows Next)
   const SECTIONS = [['question', 'Questions'], ['content', 'Content'], ['pr', 'Review']];
   const filterOf = (tab) => safeGet(`loop.filter.${tab}`) || 'all';
@@ -647,7 +657,7 @@
         sendLabel: 'Ask',
         onSend: async (text, imgs) => {
           await send('requests', id, { kind: 'detail', quiz: where.quiz ?? null, question: where.question ?? null, text }, imgs);
-          if (refreshItem) await refreshItem();
+          await redraw();
         },
       }));
   }
@@ -735,6 +745,9 @@
     let counted = () => {};
     let reviewChoice = null;
     let extra = null;
+    const quietWarn = el('div', { class: 'status warn quiet-warn', hidden: true },
+      'The text in the comment box will be sent, and the agent messaged. Clear it to send nothing.');
+    let quietCheck = () => {};
     if (it.bundle) {
       const pend = () => Object.entries(st.get('prs') || {}).filter(([, v]) => v && v.verdict);
       counted = () => {
@@ -753,6 +766,7 @@
         const b = el('button', { class: 'choice-btn', onclick: () => {
           reviewChoice = reviewChoice === label ? null : label;
           [...opts.children].forEach((c) => c.classList.toggle('on', c === b && !!reviewChoice));
+          quietCheck();
         } }, el('b', {}, label), details[label] ? el('span', {}, details[label]) : null);
         return b;
       }));
@@ -798,9 +812,15 @@
           document.querySelectorAll('#main .question .choice-btn.on').forEach((b) => b.classList.remove('on'));
         }
         justSent = it.id;
-        if (refreshItem) await refreshItem();
+        await redraw();
       },
     });
+    // "Understood (no send)" with text in the comment box: say that the text will still go to the agent.
+    const commentBox = comp.querySelector('textarea');
+    quietCheck = () => { quietWarn.hidden = !(reviewChoice === 'Understood (no send)' && commentBox.value.trim()); };
+    commentBox.addEventListener('input', quietCheck);
+    commentBox.addEventListener('change', quietCheck);
+    comp.querySelector('.status').before(quietWarn);
     box.replaceChildren(el('h3', {}, it.kind === 'review' ? 'Your review' : qs.length > 1 ? 'Send your answers' : 'Your answer'), ...shown, comp, sent);
     return counted;
   }

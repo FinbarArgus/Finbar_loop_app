@@ -379,7 +379,42 @@ def run(loop_bin, graph, shots):
                 qt = quiet.inner_text()
                 check(page, qt.startswith('Understood (no send)') and 'no message' in qt,
                       f'content: Understood (no send) first, with its detail {qt!r}', failures)
+                # A detail request whose redraw fails: it was sent, so its box and draft are empty and it says Sent.
+                fail = {'n': 0}
+                def flaky(route):
+                    if route.request.method == 'PUT' and '/contents/requests/' in route.request.url:
+                        fail['n'] = 3
+                    elif fail['n'] and route.request.method == 'GET':
+                        fail['n'] -= 1
+                        return route.fulfill(status=500, body='{"message": "server error"}')
+                    route.fallback()
+                page.route('https://api.github.com/**', flaky)
+                det = page.locator('details.detail', has_text='More detail before you review')
+                if det.get_attribute('open') is None:
+                    det.locator('summary').click()
+                det.locator('textarea').fill('Is each figure also in the slides?')
+                det.locator('textarea').press('Enter')
+                page.locator('details.detail .status', has_text=re.compile('Sent|Not sent')).first.wait_for()
+                page.unroute('https://api.github.com/**', flaky)
+                errors[:] = [x for x in errors if '500' not in x]
+                st_ = page.eval_on_selector_all('details.detail .status', 'xs => xs.map(x => x.textContent)')
+                drafts = page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('loop.draft.item.' + %r))" % cid)
+                check(page, (repo / f'requests/{cid}').exists() and st_[0].startswith('Sent')
+                      and page.eval_on_selector_all('textarea', 'xs => xs.every(x => !x.value)') and not drafts,
+                      f'detail request sent though its redraw failed: Sent, box and draft empty {st_} {drafts}', failures)
+                page.reload()
+                page.locator('.answer .choice-btn', has_text='Understood (no send)').wait_for()
+                check(page, page.locator('.answer textarea').input_value() == '', 'the sent detail text is not in the comment box', failures)
+                # "Understood (no send)" with text in the comment box warns that the text will be sent.
                 quiet.click()
+                warn = page.locator('.answer .quiet-warn')
+                check(page, warn.is_hidden(), 'no-send: no warning with an empty comment box', failures)
+                page.locator('.answer textarea').fill('a comment')
+                check(page, warn.is_visible() and 'will be sent' in warn.inner_text(), 'no-send: warning with text in the comment box', failures)
+                if shots:
+                    page.locator('.answer').screenshot(path=f'{shots}/{label}-no-send-warning.png')
+                page.locator('.answer textarea').fill('')
+                check(page, warn.is_hidden(), 'no-send: warning gone once the box is cleared', failures)
                 if shots:
                     page.locator('.answer').screenshot(path=f'{shots}/{label}-content-no-send.png')
                 page.locator('.answer button.primary').click()
