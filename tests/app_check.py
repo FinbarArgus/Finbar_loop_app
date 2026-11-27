@@ -1186,9 +1186,13 @@ def run(loop_bin, graph, shots):
                 card.wait_for()
                 check(page, card.locator('.badge.reopened').inner_text() == 'new version since your answer'
                       and card.locator('.badge.ok').count() == 0, 'Reopened: the card says new version since your answer', failures)
+                if shots:
+                    card.screenshot(path=f'{shots}/{label}-reopened-card.png')
                 page.goto(base + f'#/item/{did}')
                 page.wait_for_selector('.item-head')
                 check(page, page.locator('.item-head .badge.reopened').count() == 1, 'Reopened: the item page says so too', failures)
+                if shots:
+                    page.locator('.item-head').screenshot(path=f'{shots}/{label}-reopened-item.png')
                 page.goto(base + '#/status')
                 page.wait_for_selector('details.amsg')
                 agent = page.locator('.agent', has_text='HIGH-session-a').first
