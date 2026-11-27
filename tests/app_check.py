@@ -1176,6 +1176,23 @@ def run(loop_bin, graph, shots):
                         page.locator('.question details.detail textarea').input_value()]
                 check(page, left == ['', '', 'half a detail request'],
                       f'Drafts: sending the answer clears its drafts, not the unsent detail request {left}', failures)
+                # T-0167: an answered item that `loop update --reopen` opens again says its answer is for an older version.
+                loop(loop_bin, repo, 'pull')
+                (tmp_l / 'v2.json').write_text(json.dumps({'blocks': [{'type': 'text', 'md': 'A finer mesh is now possible.'}]}))
+                loop(loop_bin, repo, 'update', did, '--spec', str(tmp_l / 'v2.json'), '--reopen')
+                page.goto(base + '#/list')
+                page.reload()
+                card = page.locator('.card', has_text='Which mesh for the draft test?')
+                card.wait_for()
+                check(page, card.locator('.badge.reopened').inner_text() == 'new version since your answer'
+                      and card.locator('.badge.ok').count() == 0, 'Reopened: the card says new version since your answer', failures)
+                if shots:
+                    card.screenshot(path=f'{shots}/{label}-reopened-card.png')
+                page.goto(base + f'#/item/{did}')
+                page.wait_for_selector('.item-head')
+                check(page, page.locator('.item-head .badge.reopened').count() == 1, 'Reopened: the item page says so too', failures)
+                if shots:
+                    page.locator('.item-head').screenshot(path=f'{shots}/{label}-reopened-item.png')
                 page.goto(base + '#/status')
                 page.wait_for_selector('details.amsg')
                 agent = page.locator('.agent', has_text='HIGH-session-a').first
