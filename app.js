@@ -240,8 +240,12 @@
     poller = setInterval(() => { if (!document.hidden) fn().catch(() => {}); }, ms);
   }
 
+  // An answered item that `loop update --reopen` opened again: its answers are for an older version.
+  const reopened = (it) => it.status === 'open' && it.reopened
+    ? el('span', { class: 'badge reopened' }, 'new version since your answer') : null;
+
   function card(it) {
-    const sent = filesIn(`answers/${it.id}`).length;
+    const sent = !it.reopened && filesIn(`answers/${it.id}`).length;
     const partial = it.n_questions > 1 && it.n_answered > 0 && it.n_answered < it.n_questions;
     return el('a', { class: `card imp-${it.importance}`, href: `#/item/${it.id}` },
       el('div', { class: 'top' }, el('span', { class: 'id' }, it.id), el('span', { class: 'imp' }, it.importance),
@@ -249,6 +253,7 @@
         it.soon_blocking ? el('span', { class: 'badge soon' }, 'soon blocking') : null,
         it.stage ? el('span', { class: `badge stage ${it.stage}` }, it.stage === 'in-progress' ? 'in progress' : 'ready') : null,
         it.stage === 'in-progress' && it.versions > 1 ? el('span', { class: 'badge' }, `updated ${age(it.updated)} ago`) : null,
+        reopened(it),
         it.n_questions > 1 ? el('span', { class: 'badge' }, `${it.n_questions} questions`) : null,
         partial ? el('span', { class: 'badge wait' }, `${it.n_answered} of ${it.n_questions} answered`) : null,
         isPermission(it) ? el('span', { class: 'badge perm' }, 'permission') : null,
@@ -504,6 +509,7 @@
         qs.length > 1 ? el('span', { class: 'badge' }, `${qs.length} questions`) : null,
         row.stage ? el('span', { class: `badge stage ${row.stage}` }, row.stage === 'in-progress' ? 'in progress' : 'ready') : null,
         (it.versions || 1) > 1 ? el('span', { class: 'badge' }, `version ${it.versions}, updated ${age(it.updated)} ago`) : null,
+        reopened(it),
         el('span', { class: 'badge' }, it.status), el('span', { class: 'grow' }), el('span', { class: 'age' }, age(it.created))),
       el('h2', { html: inline(it.title) }),
       el('div', { class: 'from' }, roleDot(it.from.name), `From ${it.from.name}`, it.source === 'harvested' ? ' (found by the sweep)' : ''),

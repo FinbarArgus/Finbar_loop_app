@@ -315,6 +315,7 @@ li.step, .sbody, details.section, aside.callout, .stepsblock, ol.steps { min-wid
 .scrolls { box-shadow: inset -14px 0 10px -10px rgba(0, 0, 0, .35); border-radius: 6px; }
 
 .badge.soon { background: color-mix(in srgb, var(--ask) 22%, transparent); color: var(--ask); font-weight: 600; }
+.badge.reopened { background: color-mix(in srgb, var(--ask) 22%, transparent); color: var(--ask); font-weight: 600; }
 .agent .alink { border-left: 3px solid var(--ask); }
 .agent.blocked .alink { border-left-color: var(--high); }
 
