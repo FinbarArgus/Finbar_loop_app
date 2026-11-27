@@ -10,6 +10,7 @@
 // colour of its lights is the session's role (HIGH, MED, LOW, IMPLEMENT or other), and the lights are off when the
 // session has stalled or stopped. Working sessions have ants walking from their home up to the surface. The
 // maintainer is a dung beetle underground, under the hill of the session it is working with (status.json usage.maintainer).
+// GOD, the session that profiles the agent setup, is a badger with a notepad on the surface at the farm's left edge.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -83,6 +84,8 @@
     fungusDark: '#b5b9a3', root: '#3c2c1f', crumb: '#e2c46e', leaf: '#7f9a5c', fruit: '#c8553d', fruitDark: '#9a3d2c', fruitGold: '#e39a3b', off: '#6d665e',
     rock: '#8a8c88', rockDark: '#686a66', rockLight: '#b0b2ad', label: '#4a4036', inkUnder: '#f4ecdc',
     beetle: '#2b5a4c', beetleLine: '#0f2a22', beetleSheen: '#a6e0b4', beetleLeg: '#1a1410', dung: '#7a5a34', dungDark: '#5a4024',
+    badger: '#8b8984', badgerBack: '#6c6a66', badgerDark: '#24201c', badgerWhite: '#f4f1ea', paper: '#fbf6e4', paperLine: '#8fb3d9',
+    pencil: '#e8b13a',
   };
 
   // An anthome's design, fixed by its name.
@@ -121,6 +124,9 @@
   const TIER = 18;          // from the shallow homes to the deep ones (a home and its name)
   const GALLERY = 6;        // the band below the homes the tunnels run through
   const LABEL = 3.4;        // from a home's floor to its name's baseline
+  const BADGER_ROOM = 11;   // blocks of surface (before the badger's scale) added at the farm's left edge for GOD's badger
+  // GOD: the session that profiles the agent setup (Finbar, 2026-11-27), named GOD or god-...
+  const isGod = (name) => /^god\b/i.test(String(name || ''));
 
   // agents (status.json agents[]) -> {width, height, surface, food, hills, paths}. hills[0] is LOOP (the food;
   // kind: 'food') when it is in the status; each other hill (kind: 'home') has its agent, role, size, mood, design,
@@ -139,13 +145,17 @@
   // its tunnels are not drawn; L.beetle is its dung beetle in the gallery under the hill of session `at` (LOOP's
   // pile when `at` is LOOP or not in the farm): {x, y, k (its scale), hill (an index in hills, or -1), agent (its
   // status row, or {name}), at, why, since, source}.
+  // GOD (isGod) is no anthill either, and its tunnels are not drawn: the farm gains BADGER_ROOM * k blocks at its left
+  // edge and L.badger is its badger there, on the surface: {x, y, k, agent (its status row)}.
   function layout(agents, opts = {}) {
     const mt = opts.maintainer && opts.maintainer.name ? opts.maintainer : null;
-    const all = (agents || []).filter((a) => a && a.name && !(mt && a.name === mt.name));
+    const god = (agents || []).find((a) => a && isGod(a.name)) || null;
+    const apart = (n) => (mt && n === mt.name) || isGod(n);         // drawn on their own, not as anthills
+    const all = (agents || []).filter((a) => a && a.name && !apart(a.name));
     const woken = new Set((opts.night && opts.night.woken) || []);
     const known = new Set(all.map((a) => a.name));
-    if (mt && opts.messages) {
-      opts = { ...opts, messages: { ...opts.messages, pairs: (opts.messages.pairs || []).filter((pr) => pr.a !== mt.name && pr.b !== mt.name) } };
+    if (opts.messages && (mt || (opts.messages.pairs || []).some((pr) => isGod(pr.a) || isGod(pr.b)))) {
+      opts = { ...opts, messages: { ...opts.messages, pairs: (opts.messages.pairs || []).filter((pr) => !apart(pr.a) && !apart(pr.b)) } };
     }
     for (const pr of (opts.messages || {}).pairs || []) {
       for (const n of [pr.a, pr.b]) {
@@ -165,8 +175,10 @@
     // stands); the farm widens by it and the food stays in the middle of the rest.
     const gap = Math.max(0, Math.round(opts.gap || 0));
     const base = Math.max(48, FOOD + 2 * Math.max(right, left, 1) * COL + 2 * MARGIN);
-    const width = base + gap;
-    const fx = base / 2, surface = SKY;
+    const bk = Math.max(1, (base + gap) / 100);                // the badger's scale, as the beetle's
+    const pad = god ? Math.ceil(BADGER_ROOM * bk) : 0;        // the badger's strip at the left edge
+    const width = base + gap + pad;
+    const fx = pad + base / 2, surface = SKY;
     const top0 = surface + HOME_TOP;
     const gallery = top0 + TIER + HOME_H + LABEL + 3;
     const tok = (hl) => Number(((hl.agent || {}).week_tokens || {}).total);
@@ -208,7 +220,7 @@
         food: { x0: fx0, y0: Math.round(y0 + h) - 3, w: fw, h: 2 },
         trail: [{ x: x - w * 0.3, y: floor }, { x, y: floor }, ...shaft.slice().reverse()] });
     });
-    const L = { width, height, surface, gallery, food, hills: list,
+    const L = { width, height, surface, gallery, food, hills: list, pad,
       gap: gap ? { x0: fx + FOOD / 2, x1: fx + FOOD / 2 + gap, cx: fx + FOOD / 2 + gap / 2 } : null };
     L.paths = pathsOf(L, opts.messages);
     if (mt) {
@@ -218,6 +230,7 @@
         agent: (agents || []).find((a) => a && a.name === mt.name) || { name: mt.name },
         at: mt.at || null, why: mt.why || null, since: mt.since || null, source: mt.source || null };
     }
+    if (god) L.badger = { x: pad * 0.6, y: surface, k: bk, agent: god };
     return L;
   }
 
@@ -457,6 +470,25 @@
     + `<ellipse cx="-0.45" cy="-0.38" rx="0.55" ry="0.16" fill="${C.beetleSheen}" opacity="0.75"/>`
     + `<ellipse cx="1.05" cy="0" rx="0.42" ry="0.55" fill="${C.beetle}"/>`
     + `<path d="M1.35 -0.35 L1.6 -0.15 L1.4 0 L1.6 0.15 L1.35 0.35 Z" fill="${C.beetleLeg}"/>`;
+  // GOD's badger, facing right on the surface (y = 0), writing on the notepad propped in front of it with a pencil
+  // in its raised front paw (about 8.4 x 3.2 blocks before its scale; x from -3.4 to 5).
+  const BADGER = `<g fill="${C.badgerDark}"><rect x="-2.3" y="-0.8" width="0.55" height="0.8" rx="0.2"/>`
+    + '<rect x="-1.4" y="-0.8" width="0.55" height="0.8" rx="0.2"/><rect x="0.2" y="-0.8" width="0.55" height="0.8" rx="0.2"/></g>'
+    + `<ellipse cx="-3" cy="-1.55" rx="0.45" ry="0.25" fill="${C.badgerBack}"/>`
+    + `<ellipse cx="-0.7" cy="-1.45" rx="2.4" ry="1.05" fill="${C.badger}"/>`
+    + `<path d="M-2.9 -1.7 Q-0.8 -2.75 1.3 -1.9 Q-0.8 -2.15 -2.9 -1.7 Z" fill="${C.badgerBack}"/>`
+    + `<path d="M1 -1.1 Q2 -0.7 3 -1" stroke="${C.badgerDark}" stroke-width="0.45" stroke-linecap="round" fill="none"/>`
+    + `<path d="M0.85 -2.45 Q2.5 -2.55 3.65 -1.6 Q2.5 -0.95 0.85 -1 Z" fill="${C.badgerDark}"/>`
+    + `<path d="M0.85 -2.45 Q2.5 -2.55 3.65 -1.62 Q2.4 -2.05 0.9 -2.02 Z" fill="${C.badgerWhite}" stroke="${C.badgerBack}" stroke-width="0.07"/>`
+    + `<path d="M0.95 -1.38 Q2.3 -1.42 3.45 -1.52 Q2.5 -0.98 0.95 -1.02 Z" fill="${C.badgerWhite}"/>`
+    + `<circle cx="1.05" cy="-2.42" r="0.3" fill="${C.badgerWhite}" stroke="${C.badgerBack}" stroke-width="0.07"/><circle cx="1.05" cy="-2.42" r="0.18" fill="${C.badgerDark}"/>`
+    + `<circle cx="2.35" cy="-1.74" r="0.13" fill="${C.badgerWhite}"/><circle cx="2.39" cy="-1.74" r="0.07" fill="${C.badgerDark}"/>`
+    + `<circle cx="3.62" cy="-1.6" r="0.17" fill="${C.badgerDark}"/>`
+    + `<g transform="rotate(-8 4.1 0)"><rect x="3.4" y="-3.2" width="1.6" height="3.2" rx="0.12" fill="${C.paper}" stroke="${C.badgerBack}" stroke-width="0.08"/>`
+    + `<rect x="3.4" y="-3.2" width="1.6" height="0.35" fill="${C.badgerBack}"/>`
+    + `<path d="M3.65 -2.5 H4.75 M3.65 -2 H4.75 M3.65 -1.5 H4.5 M3.65 -1 H4.75 M3.65 -0.5 H4.3" stroke="${C.paperLine}" stroke-width="0.09"/></g>`
+    + `<path d="M3.05 -1 L3.8 -0.5" stroke="${C.pencil}" stroke-width="0.2" stroke-linecap="round"/>`
+    + `<circle cx="3" cy="-1" r="0.24" fill="${C.badgerDark}"/>`;
   const SCALE = 0.75;
   // Ant transform: moved to p, turned to its heading, never upside down (mirrored when heading left).
   function antPose(p) {
@@ -561,13 +593,20 @@
       beetle = `<g class="beetle" data-at="${esc(bt.at || '')}" data-x="${f(bx)}" data-y="${f(bt.y)}" data-s="${f(k)}" transform="translate(${f(bx)} ${f(bt.y)}) scale(${f(k)})"><g transform="translate(-1 0)">${BEETLE}</g></g>`;
       if (!opts.mini) hits += `<rect data-k="beetle" x="${f(bx - 2.8 * k)}" y="${f(bt.y - 1.4 * k)}" width="${f(5.6 * k)}" height="${f(2.8 * k)}"/>`;
     }
+    // GOD's badger (L.badger): <g class="badger"> on the surface; its tap target is data-k="badger".
+    let badger = '';
+    const bd = L.badger;
+    if (bd) {
+      badger = `<g class="badger" transform="translate(${f(bd.x)} ${f(bd.y)}) scale(${f(bd.k)})">${BADGER}</g>`;
+      if (!opts.mini) hits += `<rect data-k="badger" x="${f(bd.x - 3.5 * bd.k)}" y="${f(bd.y - 3.6 * bd.k)}" width="${f(8.6 * bd.k)}" height="${f(4 * bd.k)}"/>`;
+    }
     const sw = f(sx1 - sx0), sx = sx0 ? `x="${f(sx0)}" ` : '';
     const body = (opts.scene ? '' : `<rect width="${L.width}" height="${L.surface}" fill="${C.sky}"/>`)
       + `<rect ${sx}y="${L.surface}" width="${sw}" height="${f(L.height - L.surface)}" fill="${C.soil[0]}"/>`
       + `<rect ${sx}y="${L.surface + 10}" width="${sw}" height="${f(L.height - L.surface - 10)}" fill="${C.soil[1]}"/>`
       + `<rect ${sx}y="${f(L.gallery - 2)}" width="${sw}" height="${f(L.height - L.gallery + 2)}" fill="${C.soil[2]}"/>`
       + `<g shape-rendering="crispEdges">${rects(px)}</g>`
-      + `<g class="glows" opacity="0.38">${glow}</g>${labels}<g class="ants">${ants}</g>${beetle}`
+      + `<g class="glows" opacity="0.38">${glow}</g>${labels}<g class="ants">${ants}</g>${beetle}${badger}`
       + (opts.mini ? '' : `<g class="hits" fill="#000" fill-opacity="0">${hits}${foods}</g>`);
     return { body, L, zz, alerts };
   }
@@ -583,6 +622,19 @@
         + ` style="animation-delay:${f(delay - 0.8 * j)}s">z</text>`).join('') + '</g>';
   }
 
+  // GOD's entries in index.json (items posted from GOD or from its session `name`): its latest profile (the newest
+  // content entry titled "...profile...", else its newest content entry), its open questions, and its other open
+  // content entries, newest first.
+  function godEntries(items, name) {
+    const from = (it) => { const n = (it.from && it.from.name) || it.from; return isGod(n) || (name && n === name); };
+    const mine = (items || []).filter(from).sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));
+    const content = mine.filter((it) => it.kind === 'review' && it.category !== 'pr');
+    const profile = content.find((it) => /profile/i.test(it.title || '')) || content[0] || null;
+    return { profile,
+      questions: mine.filter((it) => it.kind === 'question' && it.status === 'open'),
+      open: content.filter((it) => it !== profile && it.status === 'open') };
+  }
+
   function svg(agents, opts = {}) {
     const { body, L, zz, alerts } = parts(agents, opts);
     const counts = MOOD_ORDER.map((m) => `${L.hills.filter((h) => h.mood === m).length} ${m}`).join(', ');
@@ -590,6 +642,6 @@
       + ` aria-label="${L.hills.length} agents: ${counts}">${body}${zz}${alerts}</svg>`;
   }
 
-  return { foodSize, FOOD_FULL, pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, parts, svg, label,
+  return { foodSize, FOOD_FULL, pathWidth, antPose, hash, rng, sizeOf, roleOf, roleRank, moodOf, design, inside, layout, antAt, parts, svg, label, isGod, godEntries,
     SIZES, ANTS, SHAPES, CONTENTS, SOILS, LIGHTS, ROLE_ORDER, ROLE_TEXT, SPEED, SCALE, COL };
 }));

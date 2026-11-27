@@ -1314,6 +1314,28 @@ def run(loop_bin, graph, shots):
                 sky_at(pct=26, held=False, override=False)
                 walk = page.evaluate("() => document.querySelector('.gview .beetle').style.transition")
                 check(page, walk == '', f'Beetle: no walk while it stays put {walk!r}', failures)
+                # GOD (named GOD or god-...) is a badger with a notepad at the farm's left edge, not an anthill; tapped, its
+                # latest profile and its open questions (items from GOD in index.json).
+                pq = loop(loop_bin, repo, 'post', 'question', 'Trial a cheaper model for specified work?', '--from', 'GOD')
+                pc = loop(loop_bin, repo, 'post', 'review', 'Agent setup profile: where the tokens go', '--from', 'GOD', '--importance', 'med',
+                          '--link', 'https://example.org/profile')
+                pq, pc = (re.search(r'[QCR]-\d{4}', x).group(0) for x in (pq, pc))
+                stf = json.loads((repo / 'state/status.json').read_text())
+                stf['agents'].append(mk('god-agent-efficiency-profiling', 'stalled'))
+                (repo / 'state/status.json').write_text(json.dumps(stf))
+                sky_at(pct=26, held=False, override=False)
+                page.locator(f'{F} .hits [data-k="badger"]').dispatch_event('click')
+                gi = page.locator('.hinfo').inner_text()
+                hills = page.evaluate("() => [...document.querySelectorAll('.gview .farm text')].map((t) => t.textContent)")
+                check(page, page.locator('.gview .badger').count() == 1 and not any('god-agent' in h for h in hills)
+                      and re.search(rf'Latest profile:\s*{pc}', gi) and re.search(rf'Open questions:\s*{pq}', gi)
+                      and page.locator(f'.hinfo a[href="#/item/{pc}"]').count() == 1,
+                      f'Badger: GOD at the left edge, no anthill; tapped, its profile and open questions {gi!r}', failures)
+                if shots:
+                    page.screenshot(path=f'{shots}/{label}-badger.png', full_page=True)
+                page.keyboard.press('Escape')
+                stf['agents'] = [a for a in stf['agents'] if a['name'] != 'god-agent-efficiency-profiling']
+                (repo / 'state/status.json').write_text(json.dumps(stf))
                 food_is(5, {'HIGH-paper': 3, 'IMPLEMENT-app': 2})
                 sky_at(pct=26, held=False, override=False)
                 # Day: a sun with the weekly percentage above it; tapped (a phone) or hovered (a computer), every usage figure.
