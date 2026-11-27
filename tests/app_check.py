@@ -87,7 +87,7 @@ def make_fixture(loop_bin, tmp, graph):
                {'type': 'checklist', 'items': ['merge #1 first', 'CI green']}]
     (tmp / 'r.json').write_text(json.dumps({'title': 'PR 12 review guide', 'page': 'result', 'blocks': blocks}))
     loop(loop_bin, repo, 'post', 'review', '--from', 'HIGH-session-b', '--importance', 'med', '--spec', str(tmp / 'r.json'),
-         '--link', 'https://github.com/org/repo/pull/12')
+         '--link', 'https://github.com/org/repo/pull/12', '--category', 'pr')    # a result page filed as a PR review
     loop(loop_bin, repo, 'post', 'question', 'A low one', '--from', 'LOW-x')
     loop(loop_bin, repo, 'post', 'review', 'Run under way', '--from', 'LOW-x', '--importance', 'low',
          '--stage', 'in-progress', '--link', 'https://example.org/run')
@@ -369,6 +369,23 @@ def run(loop_bin, graph, shots):
                 check(page, narrow(), 'review: no sideways scroll', failures)
                 if shots:
                     page.screenshot(path=f'{shots}/{label}-review.png', full_page=True)
+
+                # Content offers "Understood (no send)" first, with its detail; the answer records that choice.
+                cid = re.findall(r'C-\d{4}', loop(loop_bin, repo, 'post', 'review', 'Routine run done', '--from', 'LOW-x',
+                                                  '--importance', 'low', '--link', 'https://example.org/run2'))[-1]
+                page.goto(base + f'#/item/{cid}')
+                page.locator('.answer .choice-btn', has_text='Understood (no send)').wait_for()
+                quiet = page.locator('.answer .choice-btn').first
+                qt = quiet.inner_text()
+                check(page, qt.startswith('Understood (no send)') and 'no message' in qt,
+                      f'content: Understood (no send) first, with its detail {qt!r}', failures)
+                quiet.click()
+                if shots:
+                    page.locator('.answer').screenshot(path=f'{shots}/{label}-content-no-send.png')
+                page.locator('.answer button.primary').click()
+                page.wait_for_selector('.given .choice')
+                qa = [json.loads(f.read_text()) for f in (repo / f'answers/{cid}').glob('*.json')]
+                check(page, [a.get('choice') for a in qa] == ['Understood (no send)'], 'content: no-send choice saved', failures)
 
                 # The review's diagram: three boxes with change marks, the removed one struck.
                 page.goto(base + '#/item/R-0001')

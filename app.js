@@ -744,13 +744,16 @@
       counted();
       extra = { el: done, value: () => pend().length > 0, ready: () => true };
     } else if (it.kind === 'review') {
-      const labels = it.category === 'content' ? ['Understood', 'Have questions (in the comments)', 'Not now']
+      // "Understood (no send)" is recorded but loop-cron sends the agent nothing, unless a comment is typed too.
+      const labels = it.category === 'content'
+        ? ['Understood (no send)', 'Understood', 'Have questions (in the comments)', 'Not now']
         : ['Reviewed: fine', 'Needs changes', 'Not now'];
+      const details = { 'Understood (no send)': 'Recorded only: the agent gets no message (a comment is still sent).' };
       const opts = el('div', { class: 'choices' }, labels.map((label) => {
         const b = el('button', { class: 'choice-btn', onclick: () => {
           reviewChoice = reviewChoice === label ? null : label;
           [...opts.children].forEach((c) => c.classList.toggle('on', c === b && !!reviewChoice));
-        } }, el('b', {}, label));
+        } }, el('b', {}, label), details[label] ? el('span', {}, details[label]) : null);
         return b;
       }));
       extra = { el: opts, value: () => reviewChoice, ready: () => true };
