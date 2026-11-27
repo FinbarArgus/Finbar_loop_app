@@ -1747,7 +1747,8 @@
       row('Guard', u.override ? 'overridden (usage-guard off): sessions run past the limit' : 'on'),
       row('Woken by Urgent messages', (u.woken || []).length ? u.woken.join(', ') : 'none'),
       el('div', { class: 'who' }, sk.night ? (sk.lamp ? 'Night, with a lamp lit: the guard is overridden or an Urgent message went out.' : 'Night: usage is held until the weekly reset.')
-        : `The sun rises at 0% on the left and sets at ${SC.SUN_PCT}% on the right; night after that.`));
+        : `The sun rises at 0% on the left and sets at ${SC.SUN_PCT}% on the right; night after that. The cloud is the 5-hour usage: `
+          + 'beside the sun at 0%, covering it at 100%, the sky darker as it fills.'));
   }
   function hillInfo(hl, L, tapped) {
     const a = hl.agent;
@@ -1953,7 +1954,9 @@
     }
     // LOOP's food pile is the tasks queued for the agents (the ledger's task list, published by `loop status`).
     food = (st && st.usage && st.usage.food) || null;
-    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: skyUsage, food,
+    // The 5-hour usage (status.json usage.limits "Session") is a cloud over the sun; the sky turns overcast as it fills.
+    const session = ((st && st.usage && st.usage.limits) || []).find((l) => /session|5.?h/i.test(l.name || '')) || null;
+    const sc = SC.scene(state, agents, { messages: msgs, branchNames: names, t: performance.now() / 1000, usage: skyUsage, food, session,
       maintainer: (st && st.usage && st.usage.maintainer) || null });
     const L = sc.L;
     // Hover or tap: the info line. Every segment of the same paper lights up. A tap pins it, so the mouse can cross
