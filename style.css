@@ -75,6 +75,8 @@ th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vert
 .figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
 .figure img { display: block; max-width: 100%; height: auto; margin: 0 auto; cursor: zoom-in; background: #fff; border-radius: 4px; }
 .figure figcaption { font-size: 14px; color: var(--muted); margin-top: 6px; }
+.figure.interactive .ftitle { font-weight: 600; margin: 0 0 6px; }
+.iframe-fig { display: block; width: 100%; border: 0; border-radius: 4px; background: transparent; }
 
 .file { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
 .file .ref { font: 600 13px ui-monospace, monospace; padding: 6px 10px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }

@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- The frame for an interactive block (render.js). The app loads it in an iframe with sandbox="allow-scripts", so it
+     runs in an opaque origin: no access to the app, its storage or token. This policy lets the figure's inline scripts
+     and styles run and blocks every load from outside the file; it stays in force after the figure is written in. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<script>
+  // The app sends {html, theme} once the frame says it is ready; later messages may change the theme only.
+  (function () {
+    let written = false;
+    const theme = (t) => { if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t); };
+    addEventListener('message', (e) => {
+      if (e.source !== parent || !e.data || typeof e.data !== 'object') return;
+      if (typeof e.data.html === 'string' && !written) {
+        written = true;
+        document.open();
+        document.write(e.data.html);
+        document.close();
+        // Tell the app the content's height, so nothing is cut off. A file that fills its frame (height: 100%)
+        // measures as the frame's own height, so its size stays as the block's aspect set it.
+        const html = document.documentElement;
+        const post = () => parent.postMessage(Math.ceil(html.getBoundingClientRect().height), '*');
+        new ResizeObserver(post).observe(html);
+        addEventListener('load', post);
+      }
+      theme(e.data.theme);
+    });
+    parent.postMessage('loop-frame-ready', '*');
+  })();
+</script>
+</body>
+</html>
