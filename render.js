@@ -153,6 +153,36 @@
     return box;
   }
 
+  // An interactive figure: a self-contained HTML file run in frame.html, sandboxed (scripts only, opaque origin).
+  // Height is width x aspect until the frame reports the content's height (a number of pixels, clamped).
+  const darkNow = () => (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  function interactive(b, ctx) {
+    const frame = el('iframe', { class: 'iframe-fig', sandbox: 'allow-scripts', src: 'frame.html', title: b.title || b.caption || 'interactive figure' });
+    const aspect = typeof b.aspect === 'number' && b.aspect >= 0.1 && b.aspect <= 5 ? b.aspect : 0.75;
+    frame.style.aspectRatio = `1 / ${aspect}`;
+    const html = ctx.fileUrl(b.src).then((u) => fetch(u)).then((r) => r.text());
+    frame.onFrameMessage = (data) => {
+      if (data === 'loop-frame-ready') html.then((h) => frame.contentWindow.postMessage({ html: h, theme: darkNow() }, '*'));
+      else if (typeof data === 'number' && Number.isFinite(data)) {
+        frame.style.aspectRatio = 'auto';
+        frame.style.height = `${Math.round(Math.min(4000, Math.max(80, data)))}px`;
+      }
+    };
+    const box = el('figure', { class: 'figure interactive' },
+      b.title ? el('div', { class: 'ftitle', html: inline(b.title) }) : null, frame,
+      b.caption ? el('figcaption', { html: inline(b.caption) }) : null);
+    html.catch(() => box.append(el('p', { class: 'warn' }, `Could not load ${b.src}`)));
+    return box;
+  }
+  // One listener for every interactive frame: a message counts only from a frame's own window.
+  addEventListener('message', (e) => {
+    const f = [...document.querySelectorAll('iframe.iframe-fig')].find((x) => x.contentWindow === e.source);
+    if (f && f.onFrameMessage) f.onFrameMessage(e.data);
+  });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    document.querySelectorAll('iframe.iframe-fig').forEach((f) => f.contentWindow && f.contentWindow.postMessage({ theme: darkNow() }, '*'));
+  });
+
   function fileBlock(b) {
     const start = +(b.start || (String(b.ref).match(/:(\d+)/) || [])[1] || 1);
     const lines = String(b.code).replace(/\n$/, '').split('\n');
@@ -360,6 +390,7 @@
       switch (b.type) {
         case 'text': return el('div', { class: 'md', html: md(b.md) });
         case 'figure': case 'image': return figure(b, ctx);
+        case 'interactive': return interactive(b, ctx);
         case 'file': return fileBlock(b);
         case 'provenance': return provenance(b, ctx);
         case 'diagram': return diagram(b);

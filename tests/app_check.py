@@ -154,6 +154,16 @@ def check(page, cond, what, failures):
     if not ok:
         failures.append(what)
 
+# An interactive block's file: reports what it could do. The network call is spelt so loop check-spec's static scan
+# misses it: the frame's own policy must block it at run time.
+INTERACTIVE_HTML = """<!doctype html><html><body><p id="out">waiting</p><div style="height: 1000px"></div><script>
+const r = ['ran'];
+try { parent.document.title; r.push('parent open'); } catch (e) { r.push('parent blocked'); }
+try { localStorage.length; r.push('storage open'); } catch (e) { r.push('storage blocked'); }
+window['fe' + 'tch']('frame.html').then(() => 'network open', () => 'network blocked').then((f) => {
+  r.push(f); const o = document.getElementById('out'); o.textContent = r.join('; '); o.dataset.done = '1'; });
+</script></body></html>"""
+
 PDF = b'%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n'
 
 # Records window.open and navigator.share instead of opening anything; `act` sets navigator.userActivation.isActive.
@@ -264,7 +274,8 @@ def run(loop_bin, graph, shots):
                 repo = make_fixture(loop_bin, tmp / label, graph)
                 tmp_l = tmp / label
                 ctx = browser.new_context(viewport=vp, has_touch=label == 'phone')
-                ctx.add_init_script("localStorage.setItem('loop.token','test-token');localStorage.setItem('loop.repo','me/loop');")
+                # try: init scripts also run in sandboxed frames (interactive blocks), which have no storage.
+                ctx.add_init_script("try { localStorage.setItem('loop.token','test-token');localStorage.setItem('loop.repo','me/loop'); } catch (e) {}")
                 ctx.route('https://api.github.com/**', fake_github(repo))
                 page = ctx.new_page()
                 errors = []
@@ -421,6 +432,36 @@ def run(loop_bin, graph, shots):
                 page.wait_for_selector('.given .choice')
                 qa = [json.loads(f.read_text()) for f in (repo / f'answers/{cid}').glob('*.json')]
                 check(page, [a.get('choice') for a in qa] == ['Understood (no send)'], 'content: no-send choice saved', failures)
+
+                # An interactive block: the file's scripts run in a sandboxed frame that cannot reach the app, its
+                # storage or the network; the frame takes the app's theme and grows to the content.
+                (tmp_l / 'live.html').write_text(INTERACTIVE_HTML)
+                (tmp_l / 'live.json').write_text(json.dumps({'title': 'Live figure', 'page': 'content', 'blocks': [
+                    {'type': 'interactive', 'src': 'live.html', 'aspect': 0.5, 'title': 'Drag it', 'caption': 'A live one'}]}))
+                iid = re.findall(r'C-\d{4}', loop(loop_bin, repo, 'post', 'review', '--from', 'LOW-x', '--importance', 'low',
+                                                  '--spec', str(tmp_l / 'live.json')))[-1]
+                page.goto(base + f'#/item/{iid}')
+                fr = page.locator('iframe.iframe-fig')
+                fr.wait_for()
+                inner = page.frame_locator('iframe.iframe-fig')
+                inner.locator('#out[data-done]').wait_for()
+                got = inner.locator('#out').inner_text()
+                check(page, fr.get_attribute('sandbox') == 'allow-scripts', 'interactive: frame sandboxed to scripts only', failures)
+                check(page, got == 'ran; parent blocked; storage blocked; network blocked',
+                      f'interactive: its script runs, cannot reach the app, storage or network {got!r}', failures)
+                theme = inner.locator('html').get_attribute('data-theme')
+                check(page, theme in ('light', 'dark'), f'interactive: theme set on the frame {theme!r}', failures)
+                page.wait_for_function("document.querySelector('iframe.iframe-fig').getBoundingClientRect().height > 900")
+                check(page, 'Drag it' in page.locator('.figure.interactive').inner_text()
+                      and 'A live one' in page.locator('.figure.interactive figcaption').inner_text(), 'interactive: title and caption', failures)
+                check(page, narrow(), 'interactive: no sideways scroll', failures)
+                if shots:
+                    page.locator('.figure.interactive').screenshot(path=f'{shots}/{label}-interactive.png')
+                # Answered, so the later list checks see the content they expect; the blocked call's console errors are wanted.
+                page.locator('.answer .choice-btn', has_text='Understood (no send)').click()
+                page.locator('.answer button.primary').click()
+                page.wait_for_selector('.given .choice')
+                errors[:] = [x for x in errors if 'Content Security Policy' not in x]
 
                 # The review's diagram: three boxes with change marks, the removed one struck.
                 page.goto(base + '#/item/R-0001')
